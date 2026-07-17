@@ -43,7 +43,8 @@ The wiring (connection, auth, reconnection, dispatch) is in
 │  └─ config.js                      # config defaults + normalization
 ├─ gladys-assistant-integration.json # manifest (name, config schema, image…)
 ├─ Dockerfile                        # Node 24 Alpine, read-only rootfs ready
-├─ .github/workflows/build.yml       # multi-arch build on git tag
+├─ .github/workflows/release.yml     # UI-driven release: bump + tag + build
+├─ .github/workflows/build.yml       # multi-arch build (git tag or called by release)
 └─ cover.png                         # catalog cover, 800×534 px, ≤150 KB
 ```
 
@@ -101,10 +102,21 @@ there and it is picked up automatically.
 2. **Edit** the files in `src/devices/` and `gladys-assistant-integration.json` for your
    devices, and replace `docker_image` / `cover_image` with your own.
 3. **Add the GitHub topic** `gladys-assistant-integration` to your repo.
-4. **Tag a release** (`git tag v1.0.0 && git push --tags`) — the workflow
-   builds and pushes the `linux/amd64` + `linux/arm64` image to `ghcr.io`.
-5. **Bump `version`** in the manifest for each update; the decentralized
-   indexer picks it up and Gladys offers a one-click install / update.
+4. **Release from the GitHub UI**: open **Actions → Release → Run workflow**,
+   pick `patch`, `minor` or `major`. The workflow bumps the version everywhere
+   (`package.json` + manifest `version`/`docker_image`), pushes the `vX.Y.Z`
+   tag, and builds the `linux/amd64` + `linux/arm64` image to `ghcr.io`
+   (`:X.Y.Z` and `:latest`). No local tag, no manual version edit.
+5. The decentralized indexer picks up the new manifest `version` and Gladys
+   offers a one-click install / update.
+
+> Prefer the terminal? `git tag v1.0.0 && git push --tags` still works — the
+> hand-pushed tag triggers the same multi-arch build. This path only publishes
+> the Docker tags, though: it does **not** touch `package.json`,
+> `package-lock.json` or the manifest. Bump `version` (and `docker_image`) in
+> `gladys-assistant-integration.json` and commit it **before** tagging, or the
+> indexer will keep serving the old version. The Release workflow above does
+> all of this for you.
 
 Full documentation: <https://gladysassistant.com> (integrations developer guide).
 

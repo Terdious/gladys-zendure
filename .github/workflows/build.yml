@@ -1,13 +1,16 @@
 # -----------------------------------------------------------------------------
 # Build & publish the multi-architecture image.
 #
-# Trigger: a Git version tag (e.g. `v1.2.0`), or a manual run
-# (workflow_dispatch) on any branch to test the build.
+# Triggers:
+#   - a Git version tag (e.g. `v1.2.0`) pushed by hand -> release build;
+#   - a manual run (workflow_dispatch) on any branch -> test build;
+#   - called by the Release workflow (workflow_call) -> release build for the
+#     version it just bumped and tagged.
 # Result: an image pushed to the GitHub Container Registry (ghcr.io), for
 # linux/amd64 AND linux/arm64 (Raspberry Pi, etc.).
 #
 # Manual runs tag the image with the branch name (or the `image-tag` input)
-# and never touch `latest`.
+# and never touch `latest`. Release builds tag `:<version>` AND `:latest`.
 #
 # That is ALL it takes to "publish": tag, push, and the decentralized indexer
 # does the rest (no review, no account to create).
@@ -24,6 +27,15 @@ on:
         description: 'Image tag to publish (defaults to the branch name)'
         required: false
         default: ''
+  # Called by release.yml after it bumps the version and pushes the tag.
+  # A tag pushed with the default GITHUB_TOKEN does NOT re-trigger the
+  # `push: tags` build above, so the Release workflow calls this one directly.
+  workflow_call:
+    inputs:
+      version:
+        description: 'Released version, e.g. 1.2.0 (publishes :<version> + :latest)'
+        required: true
+        type: string
 
 jobs:
   build:
@@ -34,6 +46,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Release build (called by release.yml): check out the tag it just
+          # created, otherwise the default checkout would be the pre-bump
+          # commit and the image would bundle a stale manifest. Hand-pushed
+          # tags and manual runs keep the default checkout.
+          ref: ${{ inputs.version != '' && format('v{0}', inputs.version) || '' }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -52,9 +70,19 @@ jobs:
         id: meta
         env:
           INPUT_IMAGE_TAG: ${{ inputs.image-tag }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+          # Detect a release build by the `version` input, NOT the event name:
+          # inside a called (workflow_call) workflow, GITHUB_EVENT_NAME is the
+          # caller's event ("workflow_dispatch"), so it cannot tell the two
+          # apart. The input is only set when release.yml calls us.
+          if [ -n "$INPUT_VERSION" ]; then
+            # Release build driven by release.yml: it already bumped and tagged
+            # this exact version. Publish `:<version>` AND move `latest`.
+            version="${INPUT_VERSION}"
+            tags="${image}:${version},${image}:latest"
+          elif [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
             # Manual test build: use the input tag, or the branch name
             # (slashes replaced by dashes). Never move `latest`.
             version="${INPUT_IMAGE_TAG:-${GITHUB_REF_NAME//\//-}}"
@@ -64,7 +92,7 @@ jobs:
             fi
             tags="${image}:${version}"
           else
-            # v1.2.0 -> 1.2.0
+            # Hand-pushed tag `v1.2.0` -> 1.2.0
             version="${GITHUB_REF_NAME#v}"
             tags="${image}:${version},${image}:latest"
           fi
