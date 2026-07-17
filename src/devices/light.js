@@ -70,7 +70,7 @@ export const light = {
 
     if (feature.external_id === ids.feature(FEATURE.ON_OFF)) {
       const on = value === 1;
-      logger.info(`Power: ${on ? 'ON' : 'OFF'}`);
+      logger.info(`Power: ${isOn ? 'ON' : 'OFF'} -> ${on ? 'ON' : 'OFF'}`);
       // -------------------------------------------------------------- //
       // DO THE WORK: turn the bulb on/off.
       // e.g. await zigbee.set(ieeeAddr, { state: on ? 'ON' : 'OFF' });
@@ -82,7 +82,7 @@ export const light = {
 
     if (feature.external_id === ids.feature(FEATURE.BRIGHTNESS)) {
       const level = Math.max(0, Math.min(100, value));
-      logger.info(`Brightness: ${level}%`);
+      logger.info(`Brightness: ${brightness}% -> ${level}%`);
       // -------------------------------------------------------------- //
       // DO THE WORK: set the brightness (often needs converting to the
       // hardware scale, e.g. 0-254 for Zigbee).

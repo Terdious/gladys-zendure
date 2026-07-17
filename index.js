@@ -79,8 +79,8 @@ gladys.on('connected', async () => {
 
     // 3) Start the real-time subscriptions ("push" sensors).
     stopPushSubscriptions();
-    pushCleanups = DEVICE_BLUEPRINTS.filter((bp) => typeof bp.startPush === 'function').map(
-      (bp) => bp.startPush(gladys, config),
+    pushCleanups = DEVICE_BLUEPRINTS.filter((bp) => typeof bp.startPush === 'function').map((bp) =>
+      bp.startPush(gladys, config),
     );
   } catch (err) {
     logger.error('Post-connection initialization failed', err);

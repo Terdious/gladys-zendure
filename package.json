@@ -7,13 +7,23 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "check": "node --check index.js && node --check src/config.js && node --check src/weather.js && node --check src/devices/index.js && node --check src/devices/weatherStation.js && node --check src/devices/switchDevice.js && node --check src/devices/light.js && node --check src/devices/plug.js && node --check src/devices/motionSensor.js"
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
     "@gladysassistant/integration-sdk": "^0.2.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.7.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.7.0",
+    "prettier": "^3.9.5"
   },
   "license": "Apache-2.0"
 }

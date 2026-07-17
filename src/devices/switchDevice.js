@@ -52,7 +52,7 @@ export const switchDevice = {
 
   async onSetValue(gladys, { feature, value }) {
     const on = value === 1;
-    logger.info(`Command received: ${on ? 'ON' : 'OFF'}`);
+    logger.info(`Command received: ${isOn ? 'ON' : 'OFF'} -> ${on ? 'ON' : 'OFF'}`);
 
     // ------------------------------------------------------------------ //
     // DO THE WORK: send the order to the real relay / plug.

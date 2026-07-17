@@ -15,13 +15,13 @@ the [`src/devices/`](./src/devices) folder (one file per device type), and every
 place where you would talk to your real hardware / cloud API is marked with a
 `DO THE WORK` comment and a `logger` call.
 
-| Device | Type illustrated | SDK hooks used |
-|--------|------------------|----------------|
-| Weather station | Read-only sensors (temperature + humidity), **real data** via Open-Meteo | `onPoll`, `publishStates` |
-| Living room switch | Binary actuator (ON/OFF) | `onSetValue`, `publishState` |
-| Living room light | Dimmable light (on/off **+** brightness) | `onSetValue` per feature |
-| Office plug | Mixed: actuator **+** power metering | `onSetValue`, `onPoll` |
-| Entrance motion sensor | Push / event-driven sensor | `startPush`, `publishState` |
+| Device                 | Type illustrated                                                         | SDK hooks used               |
+| ---------------------- | ------------------------------------------------------------------------ | ---------------------------- |
+| Weather station        | Read-only sensors (temperature + humidity), **real data** via Open-Meteo | `onPoll`, `publishStates`    |
+| Living room switch     | Binary actuator (ON/OFF)                                                 | `onSetValue`, `publishState` |
+| Living room light      | Dimmable light (on/off **+** brightness)                                 | `onSetValue` per feature     |
+| Office plug            | Mixed: actuator **+** power metering                                     | `onSetValue`, `onPoll`       |
+| Entrance motion sensor | Push / event-driven sensor                                               | `startPush`, `publishState`  |
 
 The wiring (connection, auth, reconnection, dispatch) is in
 [`index.js`](./index.js) — you rarely need to touch it.
@@ -78,9 +78,26 @@ The three `GLADYS_*` variables are injected by the Gladys supervisor when the
 integration runs inside its sandboxed container. The SDK reads them
 automatically.
 
+## Quality checks
+
+The template ships with the tooling every integration should keep. The same
+three checks run automatically on every push and pull request (see
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml)):
+
+```bash
+npm run format:check   # Prettier: is everything formatted?
+npm run format         # Prettier: format everything in place
+npm run lint           # ESLint: catch real mistakes (unused vars, dead code…)
+npm test               # Unit tests, via the built-in `node --test` runner
+```
+
+Tests live in [`test/`](test/) and use Node's native test runner — no extra
+test framework to install. Add a `*.test.js` file next to the ones already
+there and it is picked up automatically.
+
 ## Publish in 5 steps
 
-1. **Fork** this template (or use *Use this template* on GitHub).
+1. **Fork** this template (or use _Use this template_ on GitHub).
 2. **Edit** the files in `src/devices/` and `gladys-assistant-integration.json` for your
    devices, and replace `docker_image` / `cover_image` with your own.
 3. **Add the GitHub topic** `gladys-assistant-integration` to your repo.
