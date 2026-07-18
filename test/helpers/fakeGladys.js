@@ -14,6 +14,10 @@ export function createFakeGladys() {
   return {
     published,
 
+    externalId(suffix) {
+      return suffix;
+    },
+
     externalIds(type, platformId) {
       const device = `${type}:${platformId}`;
       return {

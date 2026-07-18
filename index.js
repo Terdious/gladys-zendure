@@ -34,7 +34,7 @@ let pushCleanups = [];
 // --- Discovery: Gladys asks for the list of devices --------------------------
 gladys.onScanRequest(async () => {
   logger.info('onScanRequest -> publishing discovered devices');
-  await gladys.publishDiscoveredDevices(buildDiscoveredDevices(gladys, config));
+  await gladys.publishDiscoveredDevices(await buildDiscoveredDevices(gladys, config));
 });
 
 // --- Command: the user acts on a controllable feature ------------------------
@@ -55,16 +55,16 @@ gladys.onPoll(async (device) => {
     logger.debug(`onPoll ignored (no polling) for ${device.external_id}`);
     return;
   }
-  await blueprint.onPoll(gladys, config);
+  await blueprint.onPoll(gladys, config, device);
 });
 
 // --- Configuration updated by the user ---------------------------------------
 gladys.onConfigUpdated(async (newConfig) => {
   logger.info('onConfigUpdated -> new configuration received');
   config = normalizeConfig(newConfig);
-  // Re-publish the devices: some properties (unit, frequency) depend on it.
+  // Re-publish the devices: some properties (key, frequency) depend on it.
   // publishDiscoveredDevices is idempotent (upsert by external_id).
-  await gladys.publishDiscoveredDevices(buildDiscoveredDevices(gladys, config));
+  await gladys.publishDiscoveredDevices(await buildDiscoveredDevices(gladys, config));
 });
 
 // --- Connection lifecycle ----------------------------------------------------
@@ -75,7 +75,7 @@ gladys.on('connected', async () => {
     config = normalizeConfig(await gladys.getConfig());
 
     // 2) (Re)publish all devices as soon as we are connected.
-    await gladys.publishDiscoveredDevices(buildDiscoveredDevices(gladys, config));
+    await gladys.publishDiscoveredDevices(await buildDiscoveredDevices(gladys, config));
 
     // 3) Start the real-time subscriptions ("push" sensors).
     stopPushSubscriptions();
