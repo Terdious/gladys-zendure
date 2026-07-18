@@ -1,8 +1,8 @@
 {
-  "name": "gladys-integration-template-js",
+  "name": "gladys-zendure",
   "version": "1.0.0",
   "private": true,
-  "description": "Official starter template to build an external integration for Gladys Assistant with the JavaScript SDK.",
+  "description": "Zendure external integration for Gladys Assistant (SolarFlow solar batteries, cloud telemetry).",
   "type": "module",
   "main": "index.js",
   "scripts": {

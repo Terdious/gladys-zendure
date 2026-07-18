@@ -1,64 +1,41 @@
 {
   "manifest_version": 1,
   "type": "device",
-  "name": "Demo Devices Template",
+  "name": "Zendure",
   "description": {
-    "en": "Starter template showing sensors, a switch, a dimmable light and a smart plug.",
-    "fr": "Template de démarrage : capteurs, interrupteur, lampe variable et prise connectée."
+    "en": "Connect your Zendure solar batteries (SolarFlow) to Gladys Assistant through the Zendure cloud.",
+    "fr": "Connectez vos batteries solaires Zendure (SolarFlow) à Gladys Assistant via le cloud Zendure."
   },
   "version": "1.0.0",
-  "docker_image": "ghcr.io/gladysassistant/integration-template-js:1.0.0",
+  "docker_image": "ghcr.io/terdious/gladys-zendure:1.0.0",
   "gladys_version": ">=4.62.0",
-  "cover_image": "https://raw.githubusercontent.com/GladysAssistant/integration-template-js/master/cover.png",
+  "cover_image": "https://raw.githubusercontent.com/Terdious/gladys-zendure/main/cover.png",
   "config_schema": [
     {
-      "key": "latitude",
-      "type": "number",
-      "label": { "en": "Latitude", "fr": "Latitude" },
-      "description": {
-        "en": "Latitude used for the demo weather sensor.",
-        "fr": "Latitude utilisée par le capteur météo de démonstration."
+      "key": "cloud_key",
+      "type": "string",
+      "secret": true,
+      "label": {
+        "en": "Zendure cloud authorization key",
+        "fr": "Clé cloud d'autorisation Zendure"
       },
-      "required": true,
-      "default": 48.8566,
-      "min": -90,
-      "max": 90
-    },
-    {
-      "key": "longitude",
-      "type": "number",
-      "label": { "en": "Longitude", "fr": "Longitude" },
       "description": {
-        "en": "Longitude used for the demo weather sensor.",
-        "fr": "Longitude utilisée par le capteur météo de démonstration."
+        "en": "The authorization key generated from the Zendure mobile app (base64 token used to reach the Zendure cloud API).",
+        "fr": "La clé d'autorisation générée depuis l'application mobile Zendure (jeton base64 utilisé pour joindre l'API cloud Zendure)."
       },
-      "required": true,
-      "default": 2.3522,
-      "min": -180,
-      "max": 180
-    },
-    {
-      "key": "unit",
-      "type": "select",
-      "label": { "en": "Temperature unit", "fr": "Unité de température" },
-      "required": false,
-      "default": "celsius",
-      "options": [
-        { "value": "celsius", "label": { "en": "Celsius", "fr": "Celsius" } },
-        { "value": "fahrenheit", "label": { "en": "Fahrenheit", "fr": "Fahrenheit" } }
-      ]
+      "required": true
     },
     {
       "key": "poll_frequency",
       "type": "number",
       "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
       "description": {
-        "en": "How often sensors are polled, in seconds.",
-        "fr": "Fréquence d'interrogation des capteurs, en secondes."
+        "en": "How often device telemetry is polled, in seconds.",
+        "fr": "Fréquence d'interrogation de la télémétrie des appareils, en secondes."
       },
       "required": false,
-      "default": 300,
-      "min": 30,
+      "default": 30,
+      "min": 10,
       "max": 3600
     }
   ]
