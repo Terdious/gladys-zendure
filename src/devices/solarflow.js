@@ -59,6 +59,37 @@ function deviceKeyOf(rawCloudDevice) {
   return rawCloudDevice.deviceKey || rawCloudDevice.id;
 }
 
+// Gladys selectors must be globally unique across the WHOLE installation, not
+// just within the integration, and are lowercase/hyphenated. When a device is
+// created, Gladys derives a selector from the name if none is provided, so two
+// SolarFlow devices would both yield the feature selector "battery-level" and
+// the second creation fails with a 409 (selector must be unique). We therefore
+// build explicit selectors from the Zendure device key (globally unique) and
+// compose every feature selector with the device one.
+
+/** Lowercase/hyphenate a value into a selector-safe slug (no camelCase split). */
+function slugify(value) {
+  return String(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+/** Unique device selector, e.g. `zendure-solarflow-9epd0sc2` (key kept opaque). */
+function deviceSelectorOf(rawCloudDevice) {
+  return `zendure-${DEVICE_TYPE}-${slugify(deviceKeyOf(rawCloudDevice))}`;
+}
+
+/**
+ * Feature selector composed with the device one, guaranteeing uniqueness.
+ * The camelCase feature key is turned into a readable kebab-case suffix, e.g.
+ * `batteryLevel` -> `...-battery-level`.
+ */
+function featureSelectorOf(rawCloudDevice, featureKey) {
+  const kebabKey = slugify(String(featureKey).replace(/([a-z0-9])([A-Z])/g, '$1-$2'));
+  return `${deviceSelectorOf(rawCloudDevice)}-${kebabKey}`;
+}
+
 function modelOf(rawCloudDevice) {
   return rawCloudDevice.productModel || rawCloudDevice.productName || '';
 }
@@ -148,6 +179,9 @@ export const solarflow = {
       return {
         name: rawCloudDevice.deviceName || rawCloudDevice.name || modelOf(rawCloudDevice),
         external_id: ids.device,
+        // Globally unique selector (Gladys would otherwise derive a clashing
+        // one from the name).
+        selector: deviceSelectorOf(rawCloudDevice),
         // Gladys will call onPoll at this interval. The core only polls
         // devices flagged should_poll, and only accepts its fixed
         // DEVICE_POLL_FREQUENCIES values (milliseconds), so the user setting
@@ -157,6 +191,9 @@ export const solarflow = {
         features: getFeaturesForModel(modelOf(rawCloudDevice)).map((featureMapping) => ({
           name: featureMapping.name,
           external_id: ids.feature(featureMapping.key),
+          // Composed with the device selector so two devices never share a
+          // feature selector (the core enforces global uniqueness).
+          selector: featureSelectorOf(rawCloudDevice, featureMapping.key),
           category: featureMapping.category,
           type: featureMapping.type,
           unit: featureMapping.unit,

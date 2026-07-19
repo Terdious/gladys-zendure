@@ -21,6 +21,19 @@ export const FAKE_SOLARFLOW_DEVICE = {
   solarInputPower: 470,
 };
 
+// A second supported device, to check selector uniqueness across devices.
+export const FAKE_SECOND_SOLARFLOW_DEVICE = {
+  deviceKey: 'XyZ789',
+  productKey: 'prodX',
+  productModel: 'SolarFlow 800 Pro',
+  deviceName: 'Balcony battery',
+  electricLevel: 62,
+  packInputPower: 0,
+  outputPackPower: 210,
+  outputHomePower: 180,
+  solarInputPower: 90,
+};
+
 export const FAKE_UNSUPPORTED_DEVICE = {
   deviceKey: 'ZzZ999',
   productKey: 'prodY',

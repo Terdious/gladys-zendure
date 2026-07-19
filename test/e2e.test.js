@@ -102,9 +102,11 @@ test('discovery publishes the SolarFlow device to the core', async () => {
   assert.equal(discoveredDevice.should_poll, true);
   assert.equal(discoveredDevice.poll_frequency, 30000);
   assert.equal(discoveredDevice.features.length, 5);
+  assert.equal(discoveredDevice.selector, 'zendure-solarflow-abc123');
   for (const feature of discoveredDevice.features) {
     assert.equal(feature.read_only, true);
     assert.ok(feature.external_id.startsWith(discoveredDevice.external_id));
+    assert.ok(feature.selector.startsWith(discoveredDevice.selector));
   }
 });
 

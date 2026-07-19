@@ -18,6 +18,7 @@ import {
   createFakeMqttLibrary,
   FAKE_CLOUD_KEY,
   FAKE_SOLARFLOW_DEVICE,
+  FAKE_SECOND_SOLARFLOW_DEVICE,
 } from './helpers/fakeZendure.js';
 
 const gladys = createFakeGladys();
@@ -58,16 +59,47 @@ test('buildDiscoveredDevices returns one payload per supported Zendure device', 
   assert.equal(device.should_poll, true);
   assert.equal(device.poll_frequency, 30000);
   assert.equal(device.features.length, 5);
+  // The device carries an explicit, globally-unique selector, and every
+  // feature selector is composed with it.
+  assert.equal(device.selector, 'zendure-solarflow-abc123');
   for (const feature of device.features) {
     assert.equal(feature.read_only, true);
     assert.ok(feature.external_id.startsWith(device.external_id));
+    assert.ok(feature.selector.startsWith(device.selector), 'feature selector is device-scoped');
   }
+  assert.equal(device.features[0].selector, 'zendure-solarflow-abc123-battery-level');
 });
 
 test('device external_ids are unique across the catalog', async () => {
   const devices = await buildDiscoveredDevices(gladys, config);
   const ids = devices.map((d) => d.external_id);
   assert.equal(new Set(ids).size, ids.length, 'no two devices may share an external_id');
+});
+
+test('selectors are globally unique across several discovered devices', async () => {
+  const localGladys = createFakeGladys();
+  setSolarflowDependencies({
+    fetchImpl: createFakeZendureFetch({
+      deviceList: [FAKE_SOLARFLOW_DEVICE, FAKE_SECOND_SOLARFLOW_DEVICE],
+    }),
+    mqttLibrary: createFakeMqttLibrary(),
+  });
+
+  const devices = await buildDiscoveredDevices(localGladys, config);
+  assert.equal(devices.length, 2);
+
+  // Collect every selector (devices + features): Gladys enforces global
+  // uniqueness, so a clash here is exactly the 409 seen in the UI.
+  const selectors = [];
+  for (const device of devices) {
+    selectors.push(device.selector);
+    for (const feature of device.features) {
+      selectors.push(feature.selector);
+    }
+  }
+  assert.equal(new Set(selectors).size, selectors.length, 'all selectors must be unique');
+  // The same feature on two devices yields distinct selectors.
+  assert.notEqual(devices[0].features[0].selector, devices[1].features[0].selector);
 });
 
 test('findBlueprintByDevice routes a solarflow device back to its blueprint', async () => {
