@@ -9,7 +9,7 @@
   "version": "1.0.0",
   "docker_image": "ghcr.io/terdious/gladys-zendure:1.0.0",
   "gladys_version": ">=4.62.0",
-  "cover_image": "https://raw.githubusercontent.com/Terdious/gladys-zendure/main/cover.jpg",
+  "cover_image": "https://raw.githubusercontent.com/Terdious/gladys-zendure/master/cover.png",
   "config_schema": [
     {
       "key": "cloud_key",
