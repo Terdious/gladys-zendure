@@ -1,49 +1,152 @@
-import { test } from 'node:test';
+import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+
 import {
   DEVICE_BLUEPRINTS,
   buildDiscoveredDevices,
   findBlueprintByDevice,
 } from '../src/devices/index.js';
+import {
+  solarflow,
+  setSolarflowDependencies,
+  resetSolarflowRuntime,
+} from '../src/devices/solarflow.js';
 import { normalizeConfig } from '../src/config.js';
 import { createFakeGladys } from './helpers/fakeGladys.js';
+import {
+  createFakeZendureFetch,
+  createFakeMqttLibrary,
+  FAKE_CLOUD_KEY,
+  FAKE_SOLARFLOW_DEVICE,
+  FAKE_SECOND_SOLARFLOW_DEVICE,
+} from './helpers/fakeZendure.js';
 
 const gladys = createFakeGladys();
-const config = normalizeConfig();
+const config = normalizeConfig({ cloud_key: FAKE_CLOUD_KEY, poll_frequency: 30 });
+
+beforeEach(() => {
+  resetSolarflowRuntime();
+  setSolarflowDependencies({
+    fetchImpl: createFakeZendureFetch(),
+    mqttLibrary: createFakeMqttLibrary(),
+  });
+});
 
 test('every blueprint exposes the required shape', () => {
   for (const bp of DEVICE_BLUEPRINTS) {
     assert.equal(typeof bp.key, 'string', 'key must be a string');
-    assert.equal(typeof bp.deviceExternalId, 'function', 'deviceExternalId must be a function');
-    assert.equal(typeof bp.buildDevice, 'function', 'buildDevice must be a function');
+    assert.ok(
+      typeof bp.buildDevice === 'function' || typeof bp.buildDevices === 'function',
+      'buildDevice or buildDevices must be a function',
+    );
+    assert.ok(
+      typeof bp.deviceExternalId === 'function' || typeof bp.ownsDevice === 'function',
+      'deviceExternalId or ownsDevice must be a function',
+    );
   }
 });
 
-test('buildDiscoveredDevices returns one payload per blueprint', () => {
-  const devices = buildDiscoveredDevices(gladys, config);
-  assert.equal(devices.length, DEVICE_BLUEPRINTS.length);
-  for (const device of devices) {
-    assert.equal(typeof device.name, 'string');
-    assert.ok(device.external_id, 'each device has an external_id');
-    assert.ok(Array.isArray(device.features) && device.features.length > 0);
+test('buildDiscoveredDevices returns one payload per supported Zendure device', async () => {
+  const devices = await buildDiscoveredDevices(gladys, config);
+
+  // The fake account has one SolarFlow 800 Pro and one unsupported model.
+  assert.equal(devices.length, 1);
+  const [device] = devices;
+  assert.equal(device.name, 'Garage battery');
+  assert.equal(device.external_id, `solarflow:${FAKE_SOLARFLOW_DEVICE.deviceKey}`);
+  // The core only polls devices flagged should_poll, at one of its fixed
+  // frequencies: 30 s from the config, snapped to milliseconds.
+  assert.equal(device.should_poll, true);
+  assert.equal(device.poll_frequency, 30000);
+  assert.equal(device.features.length, 5);
+  // The device carries an explicit, globally-unique selector, and every
+  // feature selector is composed with it.
+  assert.equal(device.selector, 'zendure-solarflow-abc123');
+  for (const feature of device.features) {
+    assert.equal(feature.read_only, true);
+    assert.ok(feature.external_id.startsWith(device.external_id));
+    assert.ok(feature.selector.startsWith(device.selector), 'feature selector is device-scoped');
   }
+  assert.equal(device.features[0].selector, 'zendure-solarflow-abc123-battery-level');
 });
 
-test('device external_ids are unique across the catalog', () => {
-  const devices = buildDiscoveredDevices(gladys, config);
+test('device external_ids are unique across the catalog', async () => {
+  const devices = await buildDiscoveredDevices(gladys, config);
   const ids = devices.map((d) => d.external_id);
   assert.equal(new Set(ids).size, ids.length, 'no two devices may share an external_id');
 });
 
-test('findBlueprintByDevice routes an external_id back to its owner blueprint', () => {
-  for (const bp of DEVICE_BLUEPRINTS) {
-    const external_id = bp.deviceExternalId(gladys);
-    const found = findBlueprintByDevice(gladys, { external_id });
-    assert.equal(found, bp);
+test('selectors are globally unique across several discovered devices', async () => {
+  const localGladys = createFakeGladys();
+  setSolarflowDependencies({
+    fetchImpl: createFakeZendureFetch({
+      deviceList: [FAKE_SOLARFLOW_DEVICE, FAKE_SECOND_SOLARFLOW_DEVICE],
+    }),
+    mqttLibrary: createFakeMqttLibrary(),
+  });
+
+  const devices = await buildDiscoveredDevices(localGladys, config);
+  assert.equal(devices.length, 2);
+
+  // Collect every selector (devices + features): Gladys enforces global
+  // uniqueness, so a clash here is exactly the 409 seen in the UI.
+  const selectors = [];
+  for (const device of devices) {
+    selectors.push(device.selector);
+    for (const feature of device.features) {
+      selectors.push(feature.selector);
+    }
   }
+  assert.equal(new Set(selectors).size, selectors.length, 'all selectors must be unique');
+  // The same feature on two devices yields distinct selectors.
+  assert.notEqual(devices[0].features[0].selector, devices[1].features[0].selector);
+});
+
+test('findBlueprintByDevice routes a solarflow device back to its blueprint', async () => {
+  const [device] = await buildDiscoveredDevices(gladys, config);
+  assert.equal(findBlueprintByDevice(gladys, device), solarflow);
 });
 
 test('findBlueprintByDevice returns undefined for an unknown device', () => {
   const found = findBlueprintByDevice(gladys, { external_id: 'does-not-exist' });
   assert.equal(found, undefined);
+});
+
+test('onPoll publishes telemetry from the cloud entry before any MQTT report', async () => {
+  const localGladys = createFakeGladys();
+  const [device] = await buildDiscoveredDevices(localGladys, config);
+
+  await solarflow.onPoll(localGladys, config, device);
+
+  const byId = Object.fromEntries(localGladys.published.map((s) => [s.featureExternalId, s.state]));
+  assert.equal(byId[`${device.external_id}:batteryLevel`], 47);
+  assert.equal(byId[`${device.external_id}:batteryInputPower`], 150);
+  assert.equal(byId[`${device.external_id}:batteryOutputPower`], 0);
+  assert.equal(byId[`${device.external_id}:homeOutputPower`], 320);
+  assert.equal(byId[`${device.external_id}:solarInputPower`], 470);
+});
+
+test('onPoll prefers the cached MQTT payload over the cloud entry', async () => {
+  const localGladys = createFakeGladys();
+  const mqttLibrary = createFakeMqttLibrary();
+  setSolarflowDependencies({ mqttLibrary });
+
+  const [device] = await buildDiscoveredDevices(localGladys, config);
+
+  // First poll connects MQTT and subscribes the device.
+  await solarflow.onPoll(localGladys, config, device);
+  const client = mqttLibrary.clients[0];
+
+  // A fresher report arrives on MQTT...
+  client.emit(
+    'message',
+    `iot/${FAKE_SOLARFLOW_DEVICE.productKey}/${FAKE_SOLARFLOW_DEVICE.deviceKey}/properties/report`,
+    Buffer.from(JSON.stringify({ properties: { electricLevel: 81 } })),
+  );
+
+  localGladys.published.length = 0;
+  await solarflow.onPoll(localGladys, config, device);
+
+  const byId = Object.fromEntries(localGladys.published.map((s) => [s.featureExternalId, s.state]));
+  assert.equal(byId[`${device.external_id}:batteryLevel`], 81);
 });
