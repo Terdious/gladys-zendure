@@ -13,8 +13,7 @@
   "config_schema": [
     {
       "key": "cloud_key",
-      "type": "string",
-      "secret": true,
+      "type": "secret",
       "label": {
         "en": "Zendure cloud authorization key",
         "fr": "Clé cloud d'autorisation Zendure"
