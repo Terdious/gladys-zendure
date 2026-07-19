@@ -13,10 +13,8 @@
 // Defaults: they MUST stay consistent with the `default` values declared in the
 // `config_schema` of the manifest.
 export const DEFAULT_CONFIG = {
-  latitude: 48.8566, // Paris
-  longitude: 2.3522,
-  unit: 'celsius', // 'celsius' | 'fahrenheit'
-  poll_frequency: 300, // seconds, how often sensors are refreshed
+  cloud_key: '', // Zendure cloud authorization key (base64 token), secret
+  poll_frequency: 30, // seconds, how often device telemetry is refreshed
 };
 
 /**
@@ -28,8 +26,7 @@ export function normalizeConfig(raw = {}) {
     ...DEFAULT_CONFIG,
     ...raw,
     // Force the types: config may arrive as strings from a form.
-    latitude: Number(raw.latitude ?? DEFAULT_CONFIG.latitude),
-    longitude: Number(raw.longitude ?? DEFAULT_CONFIG.longitude),
+    cloud_key: String(raw.cloud_key ?? DEFAULT_CONFIG.cloud_key).trim(),
     poll_frequency: Number(raw.poll_frequency ?? DEFAULT_CONFIG.poll_frequency),
   };
 }

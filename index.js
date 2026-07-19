@@ -112,7 +112,7 @@ gladys.handleShutdown((signal) => {
 });
 
 // --- Startup -----------------------------------------------------------------
-logger.info('Starting the template integration...');
+logger.info('Starting the Zendure integration...');
 gladys.connect().catch((err) => {
   logger.error('Initial connection failed', err);
   process.exit(1);

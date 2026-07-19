@@ -11,13 +11,7 @@
 //   - startPush(gladys, config)   (optional): subscribe to a real-time stream
 // -----------------------------------------------------------------------------
 
-import { weatherStation } from './weatherStation.js';
-import { switchDevice } from './switchDevice.js';
-import { light } from './light.js';
-import { plug } from './plug.js';
-import { motionSensor } from './motionSensor.js';
-
-export const DEVICE_BLUEPRINTS = [weatherStation, switchDevice, light, plug, motionSensor];
+export const DEVICE_BLUEPRINTS = [];
 
 /**
  * Build the discovery payload for Gladys (all devices).
