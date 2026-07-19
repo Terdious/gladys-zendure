@@ -65,6 +65,9 @@ gladys.onConfigUpdated(async (newConfig) => {
   // Re-publish the devices: some properties (key, frequency) depend on it.
   // publishDiscoveredDevices is idempotent (upsert by external_id).
   await gladys.publishDiscoveredDevices(await buildDiscoveredDevices(gladys, config));
+  // Restart the push subscriptions: the first start may have failed with an
+  // empty/old key, and new credentials can point to another account/broker.
+  startPushSubscriptions();
 });
 
 // --- Connection lifecycle ----------------------------------------------------
@@ -78,10 +81,7 @@ gladys.on('connected', async () => {
     await gladys.publishDiscoveredDevices(await buildDiscoveredDevices(gladys, config));
 
     // 3) Start the real-time subscriptions ("push" sensors).
-    stopPushSubscriptions();
-    pushCleanups = DEVICE_BLUEPRINTS.filter((bp) => typeof bp.startPush === 'function').map((bp) =>
-      bp.startPush(gladys, config),
-    );
+    startPushSubscriptions();
   } catch (err) {
     logger.error('Post-connection initialization failed', err);
   }
@@ -101,6 +101,13 @@ function stopPushSubscriptions() {
     }
   }
   pushCleanups = [];
+}
+
+function startPushSubscriptions() {
+  stopPushSubscriptions();
+  pushCleanups = DEVICE_BLUEPRINTS.filter((bp) => typeof bp.startPush === 'function').map((bp) =>
+    bp.startPush(gladys, config),
+  );
 }
 
 // --- Graceful shutdown -------------------------------------------------------

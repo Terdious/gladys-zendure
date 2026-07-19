@@ -148,9 +148,11 @@ export const solarflow = {
       return {
         name: rawCloudDevice.deviceName || rawCloudDevice.name || modelOf(rawCloudDevice),
         external_id: ids.device,
-        // Gladys will call onPoll at this interval. The core only accepts its
-        // fixed DEVICE_POLL_FREQUENCIES values (milliseconds), so the user
-        // setting (seconds) is snapped to the closest allowed one.
+        // Gladys will call onPoll at this interval. The core only polls
+        // devices flagged should_poll, and only accepts its fixed
+        // DEVICE_POLL_FREQUENCIES values (milliseconds), so the user setting
+        // (seconds) is snapped to the closest allowed one.
+        should_poll: true,
         poll_frequency: toGladysPollFrequency(config.poll_frequency),
         features: getFeaturesForModel(modelOf(rawCloudDevice)).map((featureMapping) => ({
           name: featureMapping.name,
