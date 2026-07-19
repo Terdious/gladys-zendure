@@ -126,13 +126,23 @@ export function createZendureMqtt({ mqttLibrary = mqtt, clientId, connectTimeout
       if (subscribedTopics.has(topic)) {
         return;
       }
-      client.subscribe(topic, (error) => {
+      client.subscribe(topic, (error, granted) => {
         if (error) {
-          logger.warn(`Zendure MQTT subscribe failed for topic "${topic}": ${error.message}`);
+          logger.warn(
+            `Zendure MQTT subscribe failed for topic "${topic}": ${error.message}` +
+              `${error.code !== undefined ? ` (code=${error.code})` : ''}`,
+          );
+          return;
+        }
+        // A SUBACK can also refuse silently: reason codes >= 128 land in
+        // granted[].qos without an error object.
+        const refused = Array.isArray(granted) && granted.find((g) => g && g.qos > 2);
+        if (refused) {
+          logger.warn(`Zendure MQTT subscription refused for "${topic}" (qos=${refused.qos}).`);
           return;
         }
         subscribedTopics.add(topic);
-        logger.debug(`Zendure MQTT subscribed to ${topic}.`);
+        logger.info(`Zendure MQTT subscribed to ${topic}.`);
       });
     });
   }
@@ -227,9 +237,16 @@ export function createZendureMqtt({ mqttLibrary = mqtt, clientId, connectTimeout
 
       teardownClient();
 
-      logger.debug(`Zendure MQTT connecting to ${mqttUrl}...`);
+      // Some brokers enforce ACLs tied to the client id: prefer the one the
+      // cloud provides in its MQTT metadata, when present.
+      const effectiveClientId = mqttConfiguration.clientId || mqttClientId;
+      logger.info(
+        `Zendure MQTT connecting to ${mqttUrl} ` +
+          `(metadata fields: ${Object.keys(mqttConfiguration).join(', ')}; ` +
+          `clientId source: ${mqttConfiguration.clientId ? 'cloud' : 'generated'})`,
+      );
       client = mqttLibrary.connect(mqttUrl, {
-        clientId: mqttClientId,
+        clientId: effectiveClientId,
         username: mqttConfiguration.username,
         password: mqttConfiguration.password,
         reconnectPeriod: 5000,
@@ -240,7 +257,7 @@ export function createZendureMqtt({ mqttLibrary = mqtt, clientId, connectTimeout
 
       client.on('connect', () => {
         connected = true;
-        logger.debug('Zendure MQTT connected.');
+        logger.info('Zendure MQTT connected.');
         refreshSubscriptions();
       });
       client.on('offline', () => {
