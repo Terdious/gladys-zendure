@@ -30,3 +30,21 @@ export function normalizeConfig(raw = {}) {
     poll_frequency: Number(raw.poll_frequency ?? DEFAULT_CONFIG.poll_frequency),
   };
 }
+
+// Gladys only accepts a fixed set of device poll frequencies, expressed in
+// MILLISECONDS (DEVICE_POLL_FREQUENCIES in the core); any other value is
+// rejected by POST /discovered_device.
+const GLADYS_POLL_FREQUENCIES_IN_MS = [1000, 2000, 10000, 15000, 30000, 60000];
+
+/**
+ * Snap the user's poll_frequency (in seconds) to the closest poll frequency
+ * accepted by Gladys, in milliseconds.
+ * @param {number} seconds requested refresh interval
+ * @returns {number} allowed poll frequency in milliseconds
+ */
+export function toGladysPollFrequency(seconds) {
+  const requestedMs = Number(seconds) * 1000;
+  return GLADYS_POLL_FREQUENCIES_IN_MS.reduce((best, candidate) =>
+    Math.abs(candidate - requestedMs) < Math.abs(best - requestedMs) ? candidate : best,
+  );
+}

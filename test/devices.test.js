@@ -53,7 +53,8 @@ test('buildDiscoveredDevices returns one payload per supported Zendure device', 
   const [device] = devices;
   assert.equal(device.name, 'Garage battery');
   assert.equal(device.external_id, `solarflow:${FAKE_SOLARFLOW_DEVICE.deviceKey}`);
-  assert.equal(device.poll_frequency, 30);
+  // 30 s from the config, snapped to the Gladys poll frequency in milliseconds.
+  assert.equal(device.poll_frequency, 30000);
   assert.equal(device.features.length, 5);
   for (const feature of device.features) {
     assert.equal(feature.read_only, true);

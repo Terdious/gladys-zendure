@@ -97,7 +97,8 @@ test('discovery publishes the SolarFlow device to the core', async () => {
     `ext:${SELECTOR}:solarflow:${FAKE_SOLARFLOW_DEVICE.deviceKey}`,
   );
   assert.equal(discoveredDevice.name, 'Garage battery');
-  assert.equal(discoveredDevice.poll_frequency, 30);
+  // 30 s from the config, snapped to the Gladys poll frequency in milliseconds.
+  assert.equal(discoveredDevice.poll_frequency, 30000);
   assert.equal(discoveredDevice.features.length, 5);
   for (const feature of discoveredDevice.features) {
     assert.equal(feature.read_only, true);
