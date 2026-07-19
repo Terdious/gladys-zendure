@@ -6,8 +6,8 @@
     "en": "Connect your Zendure solar batteries (SolarFlow) to Gladys Assistant through the Zendure cloud.",
     "fr": "Connectez vos batteries solaires Zendure (SolarFlow) à Gladys Assistant via le cloud Zendure."
   },
-  "version": "1.0.0",
-  "docker_image": "ghcr.io/terdious/gladys-zendure:1.0.0",
+  "version": "1.0.1",
+  "docker_image": "ghcr.io/terdious/gladys-zendure:1.0.1",
   "gladys_version": ">=4.62.0",
   "cover_image": "https://raw.githubusercontent.com/Terdious/gladys-zendure/master/cover.png",
   "config_schema": [
@@ -27,7 +27,10 @@
     {
       "key": "poll_frequency",
       "type": "number",
-      "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
+      "label": {
+        "en": "Refresh interval (s)",
+        "fr": "Intervalle de rafraîchissement (s)"
+      },
       "description": {
         "en": "How often device telemetry is polled, in seconds.",
         "fr": "Fréquence d'interrogation de la télémétrie des appareils, en secondes."
