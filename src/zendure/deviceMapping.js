@@ -12,6 +12,11 @@
 // instead: `battery` (integer, percent) for the state of charge and
 // `energy-sensor` (power, watt) for the power metrics. Switch back to
 // `solar-battery` once the SDK constants ship it.
+//
+// Attribution: the model list and the per-model power ratings are derived from
+// the official Home Assistant integration Zendure/Zendure-HA (MIT License,
+// (c) 2024 peteS-UK). Only factual protocol constants (model identifiers and
+// rated power bounds, re-expressed in our own code style) are reused.
 // -----------------------------------------------------------------------------
 
 import {
@@ -22,11 +27,45 @@ import {
 
 import { SUPPORTED_PRODUCT_MODELS } from './constants.js';
 
-// Feature mappings per product model. `metricPaths` are the candidate dot
-// paths inside the MQTT `properties/report` payloads (and, as a fallback,
-// inside the raw cloud deviceList entry).
-export const MODEL_FEATURES = {
-  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_800_PRO]: [
+// Every supported model exposes the same five baseline features with identical
+// `metricPaths`; the reference project does not rename these core properties per
+// model. The only per-model difference we apply is the display `max` of the
+// power features, sized from each model's rated power (see MODEL_MAX_POWER).
+//
+// The reference also exposes two extra off-grid sensors (gridOffPower /
+// aggrGridOffPower) on the Pro/1600/2400 models. We intentionally keep the
+// 5-feature baseline for consistency: the off-grid property names are not
+// confirmed on the cloud payload and the SDK solar mapping is not settled yet.
+//
+// `metricPaths` are the candidate dot paths inside the MQTT `properties/report`
+// payloads (and, as a fallback, inside the raw cloud deviceList entry).
+
+// Rated power ceiling (watts) used as the display `max` of every power feature.
+// These are metadata only: Gladys does not clip sensor values to them (see
+// normalizeMetricValue), so each is sized generously above the model's rated
+// input/output/solar power. Derived from Zendure/Zendure-HA setLimits()/maxSolar.
+const MODEL_MAX_POWER = {
+  // Backward-compatible generic cap kept for the original 800 Pro entry.
+  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_800_PRO]: 12000,
+  // 800 W class (out 800 / in 1000 / solar 1200).
+  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_800]: 1500,
+  // 1600 W class (out/in/solar 1600).
+  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_1600]: 2000,
+  // 2400 W class (out 2400 / in up to 3200 / solar up to 3000).
+  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_2400]: 4000,
+  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_2400_AC]: 4000,
+  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_2400_PRO]: 4000,
+  // Hyper 2000 (out/in 1200 / solar 1600) — EXPERIMENTAL, untested hardware.
+  [SUPPORTED_PRODUCT_MODELS.HYPER_2000]: 2000,
+};
+
+/**
+ * Build the five baseline SolarFlow/Hyper features shared by every model.
+ * @param {number} maxPower display ceiling (watts) for the power features
+ * @returns {Array<object>} feature mappings
+ */
+function buildBaselineFeatures(maxPower) {
+  return [
     {
       key: 'batteryLevel',
       name: 'Battery level',
@@ -44,7 +83,7 @@ export const MODEL_FEATURES = {
       type: DEVICE_FEATURE_TYPES.ENERGY_SENSOR.POWER,
       unit: DEVICE_FEATURE_UNITS.WATT,
       min: 0,
-      max: 12000,
+      max: maxPower,
       metricPaths: ['packInputPower', 'properties.packInputPower'],
     },
     {
@@ -54,7 +93,7 @@ export const MODEL_FEATURES = {
       type: DEVICE_FEATURE_TYPES.ENERGY_SENSOR.POWER,
       unit: DEVICE_FEATURE_UNITS.WATT,
       min: 0,
-      max: 12000,
+      max: maxPower,
       metricPaths: ['outputPackPower', 'properties.outputPackPower'],
     },
     {
@@ -64,7 +103,7 @@ export const MODEL_FEATURES = {
       type: DEVICE_FEATURE_TYPES.ENERGY_SENSOR.POWER,
       unit: DEVICE_FEATURE_UNITS.WATT,
       min: 0,
-      max: 12000,
+      max: maxPower,
       metricPaths: ['outputHomePower', 'properties.outputHomePower'],
     },
     {
@@ -74,11 +113,20 @@ export const MODEL_FEATURES = {
       type: DEVICE_FEATURE_TYPES.ENERGY_SENSOR.POWER,
       unit: DEVICE_FEATURE_UNITS.WATT,
       min: 0,
-      max: 12000,
+      max: maxPower,
       metricPaths: ['solarInputPower', 'properties.solarInputPower'],
     },
-  ],
-};
+  ];
+}
+
+// Feature mappings per product model. Keyed by the lowercase/trimmed cloud
+// `productModel` string (see SUPPORTED_PRODUCT_MODELS).
+export const MODEL_FEATURES = Object.fromEntries(
+  Object.entries(MODEL_MAX_POWER).map(([productModel, maxPower]) => [
+    productModel,
+    buildBaselineFeatures(maxPower),
+  ]),
+);
 
 /**
  * Feature mappings for one product model (case-insensitive match).

@@ -46,6 +46,20 @@ export const FAKE_OFFLINE_SOLARFLOW_DEVICE = {
   electricLevel: 12,
 };
 
+// A newly-supported model (SolarFlow 2400 AC), to check discovery of the
+// extended catalog. Its productModel lowercases/trims to 'solarflow 2400 ac'.
+export const FAKE_SOLARFLOW_2400_DEVICE = {
+  deviceKey: 'Sf2400A',
+  productKey: 'prodZ',
+  productModel: 'SolarFlow 2400 AC',
+  deviceName: 'Attic battery',
+  electricLevel: 55,
+  packInputPower: 1200,
+  outputPackPower: 0,
+  outputHomePower: 900,
+  solarInputPower: 1400,
+};
+
 export const FAKE_UNSUPPORTED_DEVICE = {
   deviceKey: 'ZzZ999',
   productKey: 'prodY',
