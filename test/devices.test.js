@@ -101,6 +101,7 @@ test('discovers a newly-supported model (SolarFlow 2400) with the baseline featu
 
   // Its cloud telemetry is published on poll like any other model.
   await solarflow.onPoll(localGladys, config, sf2400);
+  await flushStatesNow(localGladys);
   const byId = Object.fromEntries(localGladys.published.map((s) => [s.featureExternalId, s.state]));
   assert.equal(byId[`${sf2400.external_id}:batteryLevel`], 55);
   assert.equal(byId[`${sf2400.external_id}:solarInputPower`], 1400);
