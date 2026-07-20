@@ -14,6 +14,8 @@ export async function startFakeGladysCore({ config = {}, devices = [] } = {}) {
   const state = {
     discovered: [], // one entry per POST /discovered_device (the devices array)
     states: [], // flattened states of every POST /state
+    connectionStatuses: [], // one entry per POST /connection_status ({connected, message?})
+    transports: [], // one entry per POST /device/transport (the transports array)
     commandResults: [], // command-result acks received on the WS
   };
 
@@ -41,6 +43,13 @@ export async function startFakeGladysCore({ config = {}, devices = [] } = {}) {
         const parsed = JSON.parse(body);
         state.states.push(...parsed.states);
         respond({ success: true });
+      } else if (req.method === 'POST' && req.url === '/api/integration/v1/connection_status') {
+        state.connectionStatuses.push(JSON.parse(body));
+        respond({ success: true });
+      } else if (req.method === 'POST' && req.url === '/api/integration/v1/device/transport') {
+        const parsed = JSON.parse(body);
+        state.transports.push(parsed.transports);
+        respond({ success: true, count: parsed.transports.length });
       } else {
         respond({ code: 'NOT_FOUND', message: `no route for ${req.method} ${req.url}` }, 404);
       }

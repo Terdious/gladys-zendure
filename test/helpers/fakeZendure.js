@@ -14,6 +14,7 @@ export const FAKE_SOLARFLOW_DEVICE = {
   productKey: 'prodX',
   productModel: 'SolarFlow 800 Pro',
   deviceName: 'Garage battery',
+  online: true,
   electricLevel: 47,
   packInputPower: 150,
   outputPackPower: 0,
@@ -32,6 +33,17 @@ export const FAKE_SECOND_SOLARFLOW_DEVICE = {
   outputPackPower: 210,
   outputHomePower: 180,
   solarInputPower: 90,
+};
+
+// A supported device the cloud reports offline (online: false), to check the
+// 'unreachable' transport badge.
+export const FAKE_OFFLINE_SOLARFLOW_DEVICE = {
+  deviceKey: 'OfF456',
+  productKey: 'prodX',
+  productModel: 'SolarFlow 800 Pro',
+  deviceName: 'Cellar battery',
+  online: false,
+  electricLevel: 12,
 };
 
 export const FAKE_UNSUPPORTED_DEVICE = {

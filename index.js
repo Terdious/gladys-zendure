@@ -19,7 +19,7 @@ import { GladysIntegration, logger } from '@gladysassistant/integration-sdk';
 import { normalizeConfig } from './src/config.js';
 import {
   DEVICE_BLUEPRINTS,
-  buildDiscoveredDevices,
+  syncDiscoveredDevices,
   findBlueprintByDevice,
 } from './src/devices/index.js';
 
@@ -34,7 +34,7 @@ let pushCleanups = [];
 // --- Discovery: Gladys asks for the list of devices --------------------------
 gladys.onScanRequest(async () => {
   logger.info('onScanRequest -> publishing discovered devices');
-  await gladys.publishDiscoveredDevices(await buildDiscoveredDevices(gladys, config));
+  await syncDiscoveredDevices(gladys, config);
 });
 
 // --- Command: the user acts on a controllable feature ------------------------
@@ -63,11 +63,13 @@ gladys.onConfigUpdated(async (newConfig) => {
   logger.info('onConfigUpdated -> new configuration received');
   config = normalizeConfig(newConfig);
   // Re-publish the devices: some properties (key, frequency) depend on it.
-  // publishDiscoveredDevices is idempotent (upsert by external_id).
-  await gladys.publishDiscoveredDevices(await buildDiscoveredDevices(gladys, config));
-  // Restart the push subscriptions: the first start may have failed with an
-  // empty/old key, and new credentials can point to another account/broker.
-  startPushSubscriptions();
+  // publishDiscoveredDevices is idempotent (upsert by external_id). The sync
+  // also reports the connection status and the per-device transport badges.
+  if (await syncDiscoveredDevices(gladys, config)) {
+    // Restart the push subscriptions: the first start may have failed with an
+    // empty/old key, and new credentials can point to another account/broker.
+    startPushSubscriptions();
+  }
 });
 
 // --- Connection lifecycle ----------------------------------------------------
@@ -77,11 +79,14 @@ gladys.on('connected', async () => {
     // 1) Fetch the config filled in by the user.
     config = normalizeConfig(await gladys.getConfig());
 
-    // 2) (Re)publish all devices as soon as we are connected.
-    await gladys.publishDiscoveredDevices(await buildDiscoveredDevices(gladys, config));
-
-    // 3) Start the real-time subscriptions ("push" sensors).
-    startPushSubscriptions();
+    // 2) (Re)publish all devices as soon as we are connected, and report the
+    //    connection status + transport badges. A missing cloud key is an
+    //    expected state (fresh install): the sync reports it on the
+    //    Configuration screen and returns false, without throwing.
+    if (await syncDiscoveredDevices(gladys, config)) {
+      // 3) Start the real-time subscriptions ("push" sensors).
+      startPushSubscriptions();
+    }
   } catch (err) {
     logger.error('Post-connection initialization failed', err);
   }

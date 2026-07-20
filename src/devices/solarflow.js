@@ -10,7 +10,7 @@
 // `buildDevices` (plural) and `ownsDevice` for the registry dispatch.
 // -----------------------------------------------------------------------------
 
-import { createLogger } from '@gladysassistant/integration-sdk';
+import { createLogger, DEVICE_TRANSPORTS } from '@gladysassistant/integration-sdk';
 
 import { toGladysPollFrequency } from '../config.js';
 import { fetchCloudData } from '../zendure/client.js';
@@ -205,6 +205,21 @@ export const solarflow = {
         })),
       };
     });
+  },
+
+  /**
+   * Per-device transport badges: this blueprint is cloud-only, so every
+   * discovered device uses the 'cloud' transport, except the devices the
+   * Zendure account reports offline (`online === false` in the deviceList),
+   * flagged 'unreachable'. Reads the cloudData cached by the last discovery.
+   */
+  async buildTransports(gladys, config) {
+    const data = await ensureCloudData(config);
+    return supportedDevices(data).map((rawCloudDevice) => ({
+      external_id: gladys.externalIds(DEVICE_TYPE, deviceKeyOf(rawCloudDevice)).device,
+      transport:
+        rawCloudDevice.online === false ? DEVICE_TRANSPORTS.UNREACHABLE : DEVICE_TRANSPORTS.CLOUD,
+    }));
   },
 
   /**
