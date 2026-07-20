@@ -12,6 +12,7 @@ import {
   setSolarflowDependencies,
   resetSolarflowRuntime,
   flushStatesNow,
+  markPublishedStatesStale,
 } from '../src/devices/solarflow.js';
 import { normalizeConfig } from '../src/config.js';
 import { createFakeGladys } from './helpers/fakeGladys.js';
@@ -453,4 +454,70 @@ test('onPoll prefers the cached MQTT payload over the cloud entry', async () => 
 
   const byId = Object.fromEntries(localGladys.published.map((s) => [s.featureExternalId, s.state]));
   assert.equal(byId[`${device.external_id}:batteryLevel`], 81);
+});
+
+test('onPoll merges a partial local payload over the cloud snapshot', async () => {
+  const localGladys = createFakeGladys();
+  const mqttLibrary = createFakeMqttLibrary();
+  setSolarflowDependencies({
+    fetchImpl: createFakeZendureFetch({ deviceList: [FAKE_LOCAL_SOLARFLOW_DEVICE] }),
+    mqttLibrary,
+  });
+
+  const localMqttConfig = normalizeConfig({
+    cloud_key: FAKE_CLOUD_KEY,
+    poll_frequency: 30,
+    enable_local_mqtt: true,
+  });
+  const [device] = await buildDiscoveredDevices(localGladys, localMqttConfig);
+  await solarflow.onPoll(localGladys, localMqttConfig, device);
+  const localClient = mqttLibrary.clients.find((c) => c.url.includes('192.168.1.50'));
+
+  // Only ONE metric arrives on the local broker: the local cache is partial.
+  localClient.emit(
+    'message',
+    `Zendure/sensor/${FAKE_LOCAL_SOLARFLOW_DEVICE.snNumber}/packInputPower`,
+    Buffer.from('123'),
+  );
+
+  localGladys.published.length = 0;
+  await solarflow.onPoll(localGladys, localMqttConfig, device);
+  await flushStatesNow(localGladys);
+
+  const byId = Object.fromEntries(localGladys.published.map((s) => [s.featureExternalId, s.state]));
+  // The fresh local metric wins...
+  assert.equal(byId[`${device.external_id}:batteryInputPower`], 123);
+  // ...and the metrics missing from the local cache fall back to the cloud
+  // snapshot instead of disappearing ("no recent value" in the UI).
+  assert.equal(
+    byId[`${device.external_id}:batteryLevel`],
+    FAKE_LOCAL_SOLARFLOW_DEVICE.electricLevel,
+  );
+  assert.equal(
+    byId[`${device.external_id}:solarInputPower`],
+    FAKE_LOCAL_SOLARFLOW_DEVICE.solarInputPower,
+  );
+});
+
+test('unchanged values are re-published once the keep-alive interval elapses', async () => {
+  const localGladys = createFakeGladys();
+  const [device] = await buildDiscoveredDevices(localGladys, config);
+
+  // First poll publishes everything.
+  await solarflow.onPoll(localGladys, config, device);
+  await flushStatesNow(localGladys);
+  const firstCount = localGladys.published.length;
+  assert.ok(firstCount > 0);
+
+  // Second poll with identical values: deduplicated, nothing re-sent.
+  await solarflow.onPoll(localGladys, config, device);
+  await flushStatesNow(localGladys);
+  assert.equal(localGladys.published.length, firstCount);
+
+  // Once the keep-alive interval has elapsed, identical values are re-sent so
+  // the core never flags a live feature as stale.
+  markPublishedStatesStale();
+  await solarflow.onPoll(localGladys, config, device);
+  await flushStatesNow(localGladys);
+  assert.equal(localGladys.published.length, firstCount * 2);
 });
