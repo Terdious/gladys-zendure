@@ -4,15 +4,23 @@
 // It reproduces the only surface the device modules rely on:
 //   - externalIds(type, platformId) -> { device, feature(key) }
 //   - publishState / publishStates   -> record calls so tests can assert them
+//   - publishDiscoveredDevices / setConnectionStatus / publishTransports
+//     -> recorded the same way (discovered / connectionStatuses / transports)
 // This lets us test the pure "wiring" logic (discovery payloads, dispatch)
 // without a running Gladys server or a real WebSocket.
 // -----------------------------------------------------------------------------
 
 export function createFakeGladys() {
   const published = [];
+  const discovered = [];
+  const connectionStatuses = [];
+  const transports = [];
 
   return {
     published,
+    discovered,
+    connectionStatuses,
+    transports,
 
     externalId(suffix) {
       return suffix;
@@ -34,6 +42,18 @@ export function createFakeGladys() {
       for (const s of states) {
         published.push({ featureExternalId: s.device_feature_external_id, state: s.state });
       }
+    },
+
+    async publishDiscoveredDevices(devices) {
+      discovered.push(devices);
+    },
+
+    async setConnectionStatus(connected, message) {
+      connectionStatuses.push({ connected, message });
+    },
+
+    async publishTransports(entries) {
+      transports.push(entries);
     },
   };
 }

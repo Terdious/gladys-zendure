@@ -15,7 +15,7 @@ import { GladysIntegration } from '@gladysassistant/integration-sdk';
 
 import { normalizeConfig } from '../src/config.js';
 import {
-  buildDiscoveredDevices,
+  syncDiscoveredDevices,
   findBlueprintByDevice,
   DEVICE_BLUEPRINTS,
 } from '../src/devices/index.js';
@@ -54,7 +54,7 @@ before(async () => {
 
   // Same wiring as index.js.
   gladys.onScanRequest(async () => {
-    await gladys.publishDiscoveredDevices(await buildDiscoveredDevices(gladys, config));
+    await syncDiscoveredDevices(gladys, config);
   });
   gladys.onPoll(async (device) => {
     const blueprint = findBlueprintByDevice(gladys, device);
@@ -62,10 +62,11 @@ before(async () => {
   });
   gladys.on('connected', async () => {
     config = normalizeConfig(await gladys.getConfig());
-    await gladys.publishDiscoveredDevices(await buildDiscoveredDevices(gladys, config));
-    pushCleanups = DEVICE_BLUEPRINTS.filter((bp) => typeof bp.startPush === 'function').map((bp) =>
-      bp.startPush(gladys, config),
-    );
+    if (await syncDiscoveredDevices(gladys, config)) {
+      pushCleanups = DEVICE_BLUEPRINTS.filter((bp) => typeof bp.startPush === 'function').map(
+        (bp) => bp.startPush(gladys, config),
+      );
+    }
   });
 
   await gladys.connect();
@@ -108,6 +109,25 @@ test('discovery publishes the SolarFlow device to the core', async () => {
     assert.ok(feature.external_id.startsWith(discoveredDevice.external_id));
     assert.ok(feature.selector.startsWith(discoveredDevice.selector));
   }
+});
+
+test('discovery reports the connection status and the transport badges to the core', async () => {
+  // The connected handler and the scan both go through syncDiscoveredDevices,
+  // which POSTs /connection_status and /device/transport after the devices.
+  await waitFor(() => core.state.connectionStatuses.length >= 1);
+  await waitFor(() => core.state.transports.length >= 1);
+
+  const status = core.state.connectionStatuses.at(-1);
+  assert.equal(status.connected, true);
+
+  // On the wire the SDK renames external_id to device_external_id.
+  const transports = core.state.transports.at(-1);
+  assert.deepEqual(transports, [
+    {
+      device_external_id: `ext:${SELECTOR}:solarflow:${FAKE_SOLARFLOW_DEVICE.deviceKey}`,
+      transport: 'cloud',
+    },
+  ]);
 });
 
 test('polling publishes telemetry states to the core', async () => {
