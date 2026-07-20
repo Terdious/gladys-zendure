@@ -64,6 +64,10 @@ let pendingStates = new Map(); // feature external_id -> state object
 let publishTimer = null;
 let publishBackoffInMs = 0;
 const lastPublishedByFeature = new Map(); // feature external_id -> last published value
+// Unchanged values are still re-published once in a while, so the core never
+// flags a live feature as "no recent value" just because it is stable.
+const STALE_REPUBLISH_INTERVAL_IN_MS = 30 * 60 * 1000;
+const lastPublishedAtByFeature = new Map(); // feature external_id -> last publish time (ms)
 
 /** Queue states for publication through the single paced channel. */
 function queueStates(gladys, states) {
@@ -95,10 +99,14 @@ async function flushPendingStates(gladys) {
   if (pendingStates.size === 0) {
     return;
   }
-  // Keep only the values that actually changed since the last publish.
+  // Keep the values that changed since the last publish, plus the unchanged
+  // ones that have not been re-published for a while (freshness keep-alive).
+  const now = Date.now();
   const changed = [];
   for (const [featureId, state] of pendingStates) {
-    if (lastPublishedByFeature.get(featureId) !== state.state) {
+    const isChanged = lastPublishedByFeature.get(featureId) !== state.state;
+    const lastPublishedAt = lastPublishedAtByFeature.get(featureId) || 0;
+    if (isChanged || now - lastPublishedAt > STALE_REPUBLISH_INTERVAL_IN_MS) {
       changed.push(state);
     }
   }
@@ -113,6 +121,7 @@ async function flushPendingStates(gladys) {
     await gladys.publishStates(batch);
     for (const state of batch) {
       lastPublishedByFeature.set(state.device_feature_external_id, state.state);
+      lastPublishedAtByFeature.set(state.device_feature_external_id, Date.now());
     }
     publishBackoffInMs = 0;
     logger.debug(`publish: sent ${batch.length} changed state(s)`);
@@ -140,6 +149,16 @@ async function flushPendingStates(gladys) {
   }
   if (pendingStates.size > 0) {
     schedulePublish(gladys);
+  }
+}
+
+/**
+ * Test hook: rewind the per-feature publish timestamps so the next flush
+ * re-publishes even unchanged values (freshness keep-alive path).
+ */
+export function markPublishedStatesStale() {
+  for (const featureId of lastPublishedAtByFeature.keys()) {
+    lastPublishedAtByFeature.set(featureId, 0);
   }
 }
 
@@ -181,6 +200,7 @@ export function resetSolarflowRuntime() {
   pendingStates = new Map();
   publishBackoffInMs = 0;
   lastPublishedByFeature.clear();
+  lastPublishedAtByFeature.clear();
   cloudData = null;
 }
 
@@ -483,7 +503,17 @@ export const solarflow = {
       runtime.requestDeviceProperties(rawCloudDevice);
     }
 
-    const payload = runtime.getLatestPayload(telemetryKey) || rawCloudDevice;
+    // LOCAL payloads are built incrementally (one metric per topic): a metric
+    // the device has not re-published yet (state of charge, solar power at
+    // night...) would otherwise never get a value. Merge the local cache OVER
+    // the cloud deviceList snapshot so missing metrics fall back to the last
+    // cloud value. The cloud payload stays as-is (its `properties` report is
+    // complete, and the raw entry would shadow fresher nested values).
+    const latestPayload = runtime.getLatestPayload(telemetryKey);
+    const payload =
+      source === 'local' && latestPayload
+        ? { ...rawCloudDevice, ...latestPayload }
+        : latestPayload || rawCloudDevice;
     const states = buildStates(gladys, rawCloudDevice, payload);
     if (states.length === 0) {
       logger.debug(`onPoll: no telemetry available yet for ${deviceKey}`);
