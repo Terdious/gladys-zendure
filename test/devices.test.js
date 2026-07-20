@@ -11,6 +11,7 @@ import {
   solarflow,
   setSolarflowDependencies,
   resetSolarflowRuntime,
+  flushStatesNow,
 } from '../src/devices/solarflow.js';
 import { normalizeConfig } from '../src/config.js';
 import { createFakeGladys } from './helpers/fakeGladys.js';
@@ -21,7 +22,11 @@ import {
   FAKE_SOLARFLOW_DEVICE,
   FAKE_SECOND_SOLARFLOW_DEVICE,
   FAKE_OFFLINE_SOLARFLOW_DEVICE,
+  FAKE_LOCAL_SOLARFLOW_DEVICE,
 } from './helpers/fakeZendure.js';
+
+const CLOUD_BROKER_URL = 'mqtt://broker.zendure.example:1883';
+const LOCAL_BROKER_URL = 'mqtt://192.168.1.50:1883';
 
 const gladys = createFakeGladys();
 const config = normalizeConfig({ cloud_key: FAKE_CLOUD_KEY, poll_frequency: 30 });
@@ -145,6 +150,30 @@ test('syncDiscoveredDevices flags a device with online === false as unreachable'
   ]);
 });
 
+test('syncDiscoveredDevices reports the local transport for a locally-served device', async () => {
+  const localGladys = createFakeGladys();
+  setSolarflowDependencies({
+    fetchImpl: createFakeZendureFetch({
+      deviceList: [FAKE_SOLARFLOW_DEVICE, FAKE_LOCAL_SOLARFLOW_DEVICE],
+    }),
+    mqttLibrary: createFakeMqttLibrary(),
+  });
+
+  const localMqttConfig = normalizeConfig({
+    cloud_key: FAKE_CLOUD_KEY,
+    poll_frequency: 30,
+    enable_local_mqtt: true,
+  });
+  await syncDiscoveredDevices(localGladys, localMqttConfig);
+
+  assert.deepEqual(localGladys.transports.at(-1), [
+    // No local broker advertised -> stays on the cloud transport.
+    { external_id: `solarflow:${FAKE_SOLARFLOW_DEVICE.deviceKey}`, transport: 'cloud' },
+    // Local broker advertised + option enabled -> local transport badge.
+    { external_id: `solarflow:${FAKE_LOCAL_SOLARFLOW_DEVICE.deviceKey}`, transport: 'local' },
+  ]);
+});
+
 test('syncDiscoveredDevices reports a false status when the cloud key is missing', async () => {
   const localGladys = createFakeGladys();
 
@@ -213,6 +242,7 @@ test('onPoll publishes telemetry from the cloud entry before any MQTT report', a
   const [device] = await buildDiscoveredDevices(localGladys, config);
 
   await solarflow.onPoll(localGladys, config, device);
+  await flushStatesNow(localGladys);
 
   const byId = Object.fromEntries(localGladys.published.map((s) => [s.featureExternalId, s.state]));
   assert.equal(byId[`${device.external_id}:batteryLevel`], 47);
@@ -220,6 +250,182 @@ test('onPoll publishes telemetry from the cloud entry before any MQTT report', a
   assert.equal(byId[`${device.external_id}:batteryOutputPower`], 0);
   assert.equal(byId[`${device.external_id}:homeOutputPower`], 320);
   assert.equal(byId[`${device.external_id}:solarInputPower`], 470);
+});
+
+// --- Local MQTT source selection (issue #6) ----------------------------------
+
+const localConfig = normalizeConfig({
+  cloud_key: FAKE_CLOUD_KEY,
+  poll_frequency: 30,
+  enable_local_mqtt: true,
+});
+
+const LOCAL_SENSOR_TOPIC = (serial, metric) => `Zendure/sensor/${serial}/${metric}`;
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitFor(condition, timeout = 2000) {
+  const start = Date.now();
+  for (;;) {
+    const value = condition();
+    if (value) {
+      return value;
+    }
+    if (Date.now() - start > timeout) {
+      throw new Error('waitFor timed out');
+    }
+    await delay(5);
+  }
+}
+
+test('onPoll uses the local broker when local MQTT is enabled and reachable', async () => {
+  const localGladys = createFakeGladys();
+  const mqttLibrary = createFakeMqttLibrary();
+  setSolarflowDependencies({
+    fetchImpl: createFakeZendureFetch({ deviceList: [FAKE_LOCAL_SOLARFLOW_DEVICE] }),
+    mqttLibrary,
+  });
+
+  // The fake device carries `enable: false`; reachability no longer depends on
+  // that flag, only on the option + a `server` broker host.
+  const [device] = await buildDiscoveredDevices(localGladys, localConfig);
+  await solarflow.onPoll(localGladys, localConfig, device);
+  await flushStatesNow(localGladys);
+
+  // Exactly one broker connection was opened: the device's LOCAL broker.
+  assert.equal(mqttLibrary.clients.length, 1);
+  assert.equal(mqttLibrary.clients[0].url, LOCAL_BROKER_URL);
+  assert.equal(mqttLibrary.clients[0].options.username, 'local-user');
+  assert.equal(mqttLibrary.clients[0].options.password, 'local-pass');
+
+  // Telemetry is still published (from the cloud entry until the first report).
+  const byId = Object.fromEntries(localGladys.published.map((s) => [s.featureExternalId, s.state]));
+  assert.equal(byId[`${device.external_id}:batteryLevel`], 55);
+});
+
+test('the local broker URL is built from `server`, never from `ip`', async () => {
+  const localGladys = createFakeGladys();
+  const mqttLibrary = createFakeMqttLibrary();
+  // `ip` is a different, decoy address: it must never be used as a broker host.
+  setSolarflowDependencies({
+    fetchImpl: createFakeZendureFetch({
+      deviceList: [{ ...FAKE_LOCAL_SOLARFLOW_DEVICE, ip: '10.9.9.9', server: '10.5.0.50' }],
+    }),
+    mqttLibrary,
+  });
+
+  const [device] = await buildDiscoveredDevices(localGladys, localConfig);
+  await solarflow.onPoll(localGladys, localConfig, device);
+  await flushStatesNow(localGladys);
+
+  assert.equal(mqttLibrary.clients.length, 1);
+  assert.equal(mqttLibrary.clients[0].url, 'mqtt://10.5.0.50:1883');
+});
+
+test('onPoll prefers a fresher local MQTT report (keyed by serial) over the cloud entry', async () => {
+  const localGladys = createFakeGladys();
+  const mqttLibrary = createFakeMqttLibrary();
+  setSolarflowDependencies({
+    fetchImpl: createFakeZendureFetch({ deviceList: [FAKE_LOCAL_SOLARFLOW_DEVICE] }),
+    mqttLibrary,
+  });
+
+  const [device] = await buildDiscoveredDevices(localGladys, localConfig);
+  await solarflow.onPoll(localGladys, localConfig, device);
+  await flushStatesNow(localGladys);
+
+  // Native local format: one plain scalar per topic, keyed by serial number.
+  const localClient = mqttLibrary.clients[0];
+  localClient.emit(
+    'message',
+    LOCAL_SENSOR_TOPIC(FAKE_LOCAL_SOLARFLOW_DEVICE.snNumber, 'electricLevel'),
+    Buffer.from('73'),
+  );
+
+  localGladys.published.length = 0;
+  await solarflow.onPoll(localGladys, localConfig, device);
+  await flushStatesNow(localGladys);
+
+  const byId = Object.fromEntries(localGladys.published.map((s) => [s.featureExternalId, s.state]));
+  assert.equal(byId[`${device.external_id}:batteryLevel`], 73);
+});
+
+test('a fresh local MQTT report is pushed in real time (keyed by serial)', async () => {
+  const localGladys = createFakeGladys();
+  const mqttLibrary = createFakeMqttLibrary();
+  setSolarflowDependencies({
+    fetchImpl: createFakeZendureFetch({ deviceList: [FAKE_LOCAL_SOLARFLOW_DEVICE] }),
+    mqttLibrary,
+  });
+
+  // Populate the cloud data, then start the real-time push listeners.
+  const [device] = await buildDiscoveredDevices(localGladys, localConfig);
+  const stopPush = solarflow.startPush(localGladys, localConfig);
+
+  // startPush connects and attaches its listener asynchronously.
+  const localClient = await waitFor(() => mqttLibrary.clients[0]);
+  assert.equal(localClient.url, LOCAL_BROKER_URL);
+  await delay(20);
+
+  localClient.emit(
+    'message',
+    LOCAL_SENSOR_TOPIC(FAKE_LOCAL_SOLARFLOW_DEVICE.snNumber, 'electricLevel'),
+    Buffer.from('66'),
+  );
+
+  const byId = await waitFor(() => {
+    const map = Object.fromEntries(
+      localGladys.published.map((s) => [s.featureExternalId, s.state]),
+    );
+    return map[`${device.external_id}:batteryLevel`] !== undefined ? map : null;
+  });
+  assert.equal(byId[`${device.external_id}:batteryLevel`], 66);
+
+  stopPush();
+});
+
+test('onPoll falls back to the cloud broker when local MQTT is disabled', async () => {
+  const localGladys = createFakeGladys();
+  const mqttLibrary = createFakeMqttLibrary();
+  setSolarflowDependencies({
+    fetchImpl: createFakeZendureFetch({ deviceList: [FAKE_LOCAL_SOLARFLOW_DEVICE] }),
+    mqttLibrary,
+  });
+
+  // Default config: enable_local_mqtt is false.
+  const [device] = await buildDiscoveredDevices(localGladys, config);
+  await solarflow.onPoll(localGladys, config, device);
+  await flushStatesNow(localGladys);
+
+  assert.equal(mqttLibrary.clients.length, 1);
+  assert.equal(mqttLibrary.clients[0].url, CLOUD_BROKER_URL);
+});
+
+test('onPoll falls back to the cloud broker when the device exposes no local params', async () => {
+  const localGladys = createFakeGladys();
+  const mqttLibrary = createFakeMqttLibrary();
+  // A device with the local flag on but no broker host/params.
+  const deviceWithoutLocalParams = {
+    deviceKey: 'NoLoc1',
+    productKey: 'prodX',
+    productModel: 'SolarFlow 800 Pro',
+    deviceName: 'No-local battery',
+    electricLevel: 40,
+    enable: true,
+  };
+  setSolarflowDependencies({
+    fetchImpl: createFakeZendureFetch({ deviceList: [deviceWithoutLocalParams] }),
+    mqttLibrary,
+  });
+
+  const [device] = await buildDiscoveredDevices(localGladys, localConfig);
+  await solarflow.onPoll(localGladys, localConfig, device);
+  await flushStatesNow(localGladys);
+
+  assert.equal(mqttLibrary.clients.length, 1);
+  assert.equal(mqttLibrary.clients[0].url, CLOUD_BROKER_URL);
 });
 
 test('onPoll prefers the cached MQTT payload over the cloud entry', async () => {
@@ -231,6 +437,7 @@ test('onPoll prefers the cached MQTT payload over the cloud entry', async () => 
 
   // First poll connects MQTT and subscribes the device.
   await solarflow.onPoll(localGladys, config, device);
+  await flushStatesNow(localGladys);
   const client = mqttLibrary.clients[0];
 
   // A fresher report arrives on MQTT...
@@ -242,6 +449,7 @@ test('onPoll prefers the cached MQTT payload over the cloud entry', async () => 
 
   localGladys.published.length = 0;
   await solarflow.onPoll(localGladys, config, device);
+  await flushStatesNow(localGladys);
 
   const byId = Object.fromEntries(localGladys.published.map((s) => [s.featureExternalId, s.state]));
   assert.equal(byId[`${device.external_id}:batteryLevel`], 81);

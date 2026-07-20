@@ -14,7 +14,11 @@ import { createLogger, DEVICE_TRANSPORTS } from '@gladysassistant/integration-sd
 
 import { toGladysPollFrequency } from '../config.js';
 import { fetchCloudData } from '../zendure/client.js';
-import { createZendureMqtt } from '../zendure/mqtt.js';
+import {
+  createZendureMqtt,
+  createZendureLocalMqtt,
+  buildLocalBrokerConfig,
+} from '../zendure/mqtt.js';
 import {
   getFeaturesForModel,
   extractMetricValue,
@@ -36,7 +40,121 @@ const MQTT_STALE_TIMEOUT_IN_MS = 90 * 1000;
 
 let dependencies = {};
 let cloudData = null;
-let mqttRuntime = null;
+// The cloud broker is shared by every device; a locally-reachable device is
+// served by a runtime connected to the local broker it publishes to.
+let cloudMqttRuntime = null;
+const localMqttRuntimes = new Map();
+
+// --- State publishing: single coalesced + deduplicated + paced channel -------
+// Every Gladys state update is an HTTP `POST /state` to the core, which enforces
+// a request-rate limit (429 "Too Many Requests"). Our telemetry is high volume:
+// 15+ devices x several metrics, arriving on every MQTT report AND on every
+// poll (the core calls onPoll once PER device, so a naive onPoll would fire one
+// request per device per cycle). To stay well under the limit we funnel ALL
+// publishing (poll + push) through a SINGLE channel that:
+//   - coalesces pending states (latest value per feature wins),
+//   - drops states whose value has not changed since the last successful
+//     publish (huge reduction once the initial sync is done),
+//   - sends everything pending in ONE request per tick (up to the SDK's 100),
+//   - paces ticks and backs off when the core rate-limits us.
+const PUBLISH_INTERVAL_IN_MS = 2000;
+const PUBLISH_MAX_BACKOFF_IN_MS = 30000;
+const MAX_STATES_PER_REQUEST = 100; // SDK hard limit (publishStates)
+let pendingStates = new Map(); // feature external_id -> state object
+let publishTimer = null;
+let publishBackoffInMs = 0;
+const lastPublishedByFeature = new Map(); // feature external_id -> last published value
+
+/** Queue states for publication through the single paced channel. */
+function queueStates(gladys, states) {
+  for (const state of states) {
+    pendingStates.set(state.device_feature_external_id, state);
+  }
+  schedulePublish(gladys);
+}
+
+function schedulePublish(gladys) {
+  if (publishTimer) {
+    return;
+  }
+  publishTimer = setTimeout(() => {
+    publishTimer = null;
+    flushPendingStates(gladys);
+  }, PUBLISH_INTERVAL_IN_MS + publishBackoffInMs);
+  // Do not keep the process alive just for a pending flush.
+  if (typeof publishTimer.unref === 'function') {
+    publishTimer.unref();
+  }
+}
+
+/**
+ * Flush the pending states in a single request: only values that changed since
+ * the last successful publish are sent. Exposed for tests via `flushStatesNow`.
+ */
+async function flushPendingStates(gladys) {
+  if (pendingStates.size === 0) {
+    return;
+  }
+  // Keep only the values that actually changed since the last publish.
+  const changed = [];
+  for (const [featureId, state] of pendingStates) {
+    if (lastPublishedByFeature.get(featureId) !== state.state) {
+      changed.push(state);
+    }
+  }
+  pendingStates = new Map();
+  if (changed.length === 0) {
+    return;
+  }
+
+  const batch = changed.slice(0, MAX_STATES_PER_REQUEST);
+  const overflow = changed.slice(MAX_STATES_PER_REQUEST);
+  try {
+    await gladys.publishStates(batch);
+    for (const state of batch) {
+      lastPublishedByFeature.set(state.device_feature_external_id, state.state);
+    }
+    publishBackoffInMs = 0;
+    logger.debug(`publish: sent ${batch.length} changed state(s)`);
+  } catch (e) {
+    // Not published: re-queue it (unless a fresher value arrived meanwhile).
+    for (const state of batch) {
+      if (!pendingStates.has(state.device_feature_external_id)) {
+        pendingStates.set(state.device_feature_external_id, state);
+      }
+    }
+    publishBackoffInMs = Math.min(
+      PUBLISH_MAX_BACKOFF_IN_MS,
+      (publishBackoffInMs || PUBLISH_INTERVAL_IN_MS) * 2,
+    );
+    logger.warn(
+      `publish: states rejected (${e.message}); retrying ${batch.length} state(s) in ` +
+        `${PUBLISH_INTERVAL_IN_MS + publishBackoffInMs} ms`,
+    );
+  }
+  // Re-queue overflow and schedule the next tick if anything remains.
+  for (const state of overflow) {
+    if (!pendingStates.has(state.device_feature_external_id)) {
+      pendingStates.set(state.device_feature_external_id, state);
+    }
+  }
+  if (pendingStates.size > 0) {
+    schedulePublish(gladys);
+  }
+}
+
+/**
+ * Flush the pending states immediately (used by tests to avoid waiting for the
+ * paced timer). Returns the flush promise.
+ * @param {object} gladys Gladys SDK instance
+ */
+export function flushStatesNow(gladys) {
+  if (publishTimer) {
+    clearTimeout(publishTimer);
+    publishTimer = null;
+  }
+  return flushPendingStates(gladys);
+}
 
 /**
  * Inject test doubles: `{ fetchImpl, mqttLibrary }`.
@@ -48,10 +166,21 @@ export function setSolarflowDependencies(overrides) {
 
 /** Reset the module runtime (tests + reconfiguration). */
 export function resetSolarflowRuntime() {
-  if (mqttRuntime) {
-    mqttRuntime.disconnect();
+  if (cloudMqttRuntime) {
+    cloudMqttRuntime.disconnect();
   }
-  mqttRuntime = null;
+  cloudMqttRuntime = null;
+  for (const runtime of localMqttRuntimes.values()) {
+    runtime.disconnect();
+  }
+  localMqttRuntimes.clear();
+  if (publishTimer) {
+    clearTimeout(publishTimer);
+    publishTimer = null;
+  }
+  pendingStates = new Map();
+  publishBackoffInMs = 0;
+  lastPublishedByFeature.clear();
   cloudData = null;
 }
 
@@ -107,14 +236,84 @@ async function ensureCloudData(config, { refresh = false } = {}) {
   return cloudData;
 }
 
-async function ensureMqttRuntime(config) {
+async function ensureCloudRuntime(config) {
   const data = await ensureCloudData(config);
-  if (!mqttRuntime) {
-    mqttRuntime = createZendureMqtt({ mqttLibrary: dependencies.mqttLibrary });
+  if (!cloudMqttRuntime) {
+    cloudMqttRuntime = createZendureMqtt({ mqttLibrary: dependencies.mqttLibrary });
   }
-  await mqttRuntime.connect(data.mqtt);
-  supportedDevices(data).forEach((rawCloudDevice) => mqttRuntime.subscribeDevice(rawCloudDevice));
-  return mqttRuntime;
+  await cloudMqttRuntime.connect(data.mqtt);
+  supportedDevices(data).forEach((rawCloudDevice) =>
+    cloudMqttRuntime.subscribeDevice(rawCloudDevice),
+  );
+  return cloudMqttRuntime;
+}
+
+/**
+ * Whether a raw cloud device can be reached over its LOCAL MQTT broker: the
+ * integration option must be enabled and the device must expose usable local
+ * broker parameters (a `server` host). The cloud `enable` flag is NOT consulted:
+ * it is unreliable (it can read false while local MQTT is actually active), so
+ * gating on it would hide reachable devices.
+ * @param {object} config normalized configuration
+ * @param {object} rawCloudDevice device from the cloud deviceList
+ * @returns {boolean}
+ */
+function isDeviceLocallyReachable(config, rawCloudDevice) {
+  return config.enable_local_mqtt === true && buildLocalBrokerConfig(rawCloudDevice) !== null;
+}
+
+/**
+ * Ensure the LOCAL MQTT runtime for a device's broker is connected and every
+ * locally-reachable device that shares that broker is subscribed to it.
+ *
+ * Local brokers are shared by many devices (they all publish to the same
+ * `server`), so runtimes are keyed by broker URL: one connection serves every
+ * device on the same broker instead of one connection per device.
+ * @param {object} config normalized configuration
+ * @param {object} rawCloudDevice device from the cloud deviceList
+ * @returns {Promise<object|null>} the runtime, or null when no local broker
+ */
+async function ensureLocalRuntime(config, rawCloudDevice) {
+  const brokerConfig = buildLocalBrokerConfig(rawCloudDevice);
+  if (!brokerConfig) {
+    return null;
+  }
+  const key = brokerConfig.url;
+  let runtime = localMqttRuntimes.get(key);
+  if (!runtime) {
+    runtime = createZendureLocalMqtt({ mqttLibrary: dependencies.mqttLibrary });
+    localMqttRuntimes.set(key, runtime);
+  }
+  await runtime.connect(brokerConfig);
+  // Subscribe every locally-reachable device that publishes to this broker.
+  for (const otherDevice of supportedDevices(cloudData)) {
+    if (!isDeviceLocallyReachable(config, otherDevice)) {
+      continue;
+    }
+    const otherBroker = buildLocalBrokerConfig(otherDevice);
+    if (otherBroker && otherBroker.url === key) {
+      runtime.subscribeDevice(otherDevice);
+    }
+  }
+  return runtime;
+}
+
+/**
+ * Select the active telemetry source for one device: prefer the LOCAL broker
+ * when enabled and reachable, otherwise fall back to the cloud broker.
+ * @param {object} config normalized configuration
+ * @param {object} rawCloudDevice device from the cloud deviceList
+ * @returns {Promise<{ runtime: object, source: 'local'|'cloud' }>}
+ */
+async function selectSourceRuntime(config, rawCloudDevice) {
+  if (isDeviceLocallyReachable(config, rawCloudDevice)) {
+    const runtime = await ensureLocalRuntime(config, rawCloudDevice);
+    if (runtime) {
+      return { runtime, source: 'local' };
+    }
+  }
+  const runtime = await ensureCloudRuntime(config);
+  return { runtime, source: 'cloud' };
 }
 
 function findSupportedDevice(data, deviceKey) {
@@ -124,6 +323,30 @@ function findSupportedDevice(data, deviceKey) {
       (rawCloudDevice) => String(deviceKeyOf(rawCloudDevice)).toLowerCase() === normalized,
     ) || null
   );
+}
+
+/** Find a supported device by its serial number (local telemetry key). */
+function findSupportedDeviceBySerial(data, serial) {
+  const normalized = String(serial || '');
+  if (normalized === '') {
+    return null;
+  }
+  return (
+    supportedDevices(data).find(
+      (rawCloudDevice) => String(rawCloudDevice.snNumber || '') === normalized,
+    ) || null
+  );
+}
+
+/**
+ * The key under which a device's telemetry is cached in the selected runtime:
+ * the serial number for the LOCAL runtime, the device key for the CLOUD one.
+ * @param {'local'|'cloud'} source selected telemetry source
+ * @param {object} rawCloudDevice device from the cloud deviceList
+ * @returns {string}
+ */
+function telemetryKeyOf(source, rawCloudDevice) {
+  return source === 'local' ? rawCloudDevice.snNumber : deviceKeyOf(rawCloudDevice);
 }
 
 /**
@@ -208,18 +431,25 @@ export const solarflow = {
   },
 
   /**
-   * Per-device transport badges: this blueprint is cloud-only, so every
-   * discovered device uses the 'cloud' transport, except the devices the
-   * Zendure account reports offline (`online === false` in the deviceList),
-   * flagged 'unreachable'. Reads the cloudData cached by the last discovery.
+   * Per-device transport badges: devices the Zendure account reports offline
+   * (`online === false` in the deviceList) are 'unreachable'; devices served
+   * by their LOCAL MQTT broker are 'local'; everything else is 'cloud'.
+   * Reads the cloudData cached by the last discovery.
    */
   async buildTransports(gladys, config) {
     const data = await ensureCloudData(config);
-    return supportedDevices(data).map((rawCloudDevice) => ({
-      external_id: gladys.externalIds(DEVICE_TYPE, deviceKeyOf(rawCloudDevice)).device,
-      transport:
-        rawCloudDevice.online === false ? DEVICE_TRANSPORTS.UNREACHABLE : DEVICE_TRANSPORTS.CLOUD,
-    }));
+    return supportedDevices(data).map((rawCloudDevice) => {
+      let transport = DEVICE_TRANSPORTS.CLOUD;
+      if (rawCloudDevice.online === false) {
+        transport = DEVICE_TRANSPORTS.UNREACHABLE;
+      } else if (isDeviceLocallyReachable(config, rawCloudDevice)) {
+        transport = DEVICE_TRANSPORTS.LOCAL;
+      }
+      return {
+        external_id: gladys.externalIds(DEVICE_TYPE, deviceKeyOf(rawCloudDevice)).device,
+        transport,
+      };
+    });
   },
 
   /**
@@ -244,21 +474,27 @@ export const solarflow = {
       return;
     }
 
-    const runtime = await ensureMqttRuntime(config);
-    const lastPayloadAt = runtime.getLastPayloadAt(deviceKey);
+    const { runtime, source } = await selectSourceRuntime(config, rawCloudDevice);
+    logger.debug(`onPoll: using ${source} MQTT source for ${deviceKey}`);
+    // Local telemetry is keyed by serial number, cloud telemetry by device key.
+    const telemetryKey = telemetryKeyOf(source, rawCloudDevice);
+    const lastPayloadAt = runtime.getLastPayloadAt(telemetryKey);
     if (!lastPayloadAt || Date.now() - lastPayloadAt > MQTT_STALE_TIMEOUT_IN_MS) {
       runtime.requestDeviceProperties(rawCloudDevice);
     }
 
-    const payload = runtime.getLatestPayload(deviceKey) || rawCloudDevice;
+    const payload = runtime.getLatestPayload(telemetryKey) || rawCloudDevice;
     const states = buildStates(gladys, rawCloudDevice, payload);
     if (states.length === 0) {
       logger.debug(`onPoll: no telemetry available yet for ${deviceKey}`);
       return;
     }
 
-    await gladys.publishStates(states);
-    logger.debug(`onPoll: published ${states.length} state(s) for ${deviceKey}`);
+    // Funnel through the shared paced channel (deduplicated) instead of a
+    // direct request: the core calls onPoll once per device, so a direct
+    // publish here would fire one request per device per cycle and trip 429.
+    queueStates(gladys, states);
+    logger.debug(`onPoll: queued ${states.length} state(s) for ${deviceKey}`);
   },
 
   /**
@@ -267,30 +503,105 @@ export const solarflow = {
    */
   startPush(gladys, config) {
     let stopped = false;
-    let unsubscribe = null;
+    const unsubscribes = [];
+
+    // Publish a payload only when THIS runtime is the selected source for the
+    // device: a device could otherwise be reported by both its local broker
+    // and the shared cloud broker, causing duplicate states.
+    function makeListener(source) {
+      return (key, payload) => {
+        // The local runtime emits the serial number as key; the cloud one emits
+        // the device key.
+        const rawCloudDevice =
+          source === 'local'
+            ? findSupportedDeviceBySerial(cloudData, key)
+            : findSupportedDevice(cloudData, key);
+        if (!rawCloudDevice) {
+          return;
+        }
+        const selectedSource = isDeviceLocallyReachable(config, rawCloudDevice) ? 'local' : 'cloud';
+        if (selectedSource !== source) {
+          return;
+        }
+        const states = buildStates(gladys, rawCloudDevice, payload);
+        if (states.length === 0) {
+          return;
+        }
+        // Coalesce instead of publishing immediately: bursts of reports (many
+        // devices at once) would otherwise flood the core with 429 errors.
+        queueStates(gladys, states);
+      };
+    }
 
     (async () => {
       try {
-        const runtime = await ensureMqttRuntime(config);
+        const data = await ensureCloudData(config);
+        const devices = supportedDevices(data);
+
+        // Explicit source breakdown in the logs: which device is served by the
+        // LOCAL broker (and which one) versus the Zendure CLOUD broker.
+        const localByBroker = new Map(); // broker url -> [device labels]
+        const cloudDeviceLabels = [];
+        const labelOf = (d) => d.deviceName || deviceKeyOf(d);
+        for (const rawCloudDevice of devices) {
+          if (isDeviceLocallyReachable(config, rawCloudDevice)) {
+            const url = buildLocalBrokerConfig(rawCloudDevice).url;
+            if (!localByBroker.has(url)) {
+              localByBroker.set(url, []);
+            }
+            localByBroker.get(url).push(labelOf(rawCloudDevice));
+          } else {
+            cloudDeviceLabels.push(labelOf(rawCloudDevice));
+          }
+        }
+        const localCount = [...localByBroker.values()].reduce((n, list) => n + list.length, 0);
+        logger.info(
+          `push: telemetry source -> ${localCount} local / ${cloudDeviceLabels.length} cloud ` +
+            `(of ${devices.length} device(s))`,
+        );
+        for (const [url, labels] of localByBroker) {
+          logger.info(
+            `push: LOCAL broker ${url} -> ${labels.length} device(s): ${labels.join(', ')}`,
+          );
+        }
+        if (cloudDeviceLabels.length > 0) {
+          logger.info(
+            `push: CLOUD broker -> ${cloudDeviceLabels.length} device(s): ${cloudDeviceLabels.join(', ')}`,
+          );
+        }
+
+        // Attach a listener to every runtime that owns at least one device.
+        const runtimesBySource = new Map(); // runtime -> source
+        for (const rawCloudDevice of devices) {
+          const { runtime, source } = await selectSourceRuntime(config, rawCloudDevice);
+          if (!runtimesBySource.has(runtime)) {
+            runtimesBySource.set(runtime, source);
+          }
+        }
         if (stopped) {
           return;
         }
-        unsubscribe = runtime.onPayload(async (deviceKey, payload) => {
-          const rawCloudDevice = findSupportedDevice(cloudData, deviceKey);
-          if (!rawCloudDevice) {
-            return;
+
+        // Tear down runtimes no longer used by any device: when the user enables
+        // local MQTT for every device, the cloud runtime must be disconnected so
+        // it stops reconnecting (and stops fighting a second cloud consumer over
+        // the shared cloud client id).
+        if (cloudMqttRuntime && !runtimesBySource.has(cloudMqttRuntime)) {
+          cloudMqttRuntime.disconnect();
+          cloudMqttRuntime = null;
+          logger.info('push: cloud broker no longer needed -> disconnected');
+        }
+        for (const [url, runtime] of localMqttRuntimes) {
+          if (!runtimesBySource.has(runtime)) {
+            runtime.disconnect();
+            localMqttRuntimes.delete(url);
+            logger.info(`push: local broker ${url} no longer needed -> disconnected`);
           }
-          const states = buildStates(gladys, rawCloudDevice, payload);
-          if (states.length === 0) {
-            return;
-          }
-          try {
-            await gladys.publishStates(states);
-            logger.debug(`push: published ${states.length} state(s) for ${deviceKey}`);
-          } catch (e) {
-            logger.warn(`push: publishing states failed: ${e.message}`);
-          }
-        });
+        }
+
+        for (const [runtime, source] of runtimesBySource) {
+          unsubscribes.push(runtime.onPayload(makeListener(source)));
+        }
       } catch (e) {
         logger.error('push: Zendure MQTT setup failed', e);
       }
@@ -298,7 +609,7 @@ export const solarflow = {
 
     return () => {
       stopped = true;
-      if (unsubscribe) {
+      for (const unsubscribe of unsubscribes) {
         unsubscribe();
       }
     };

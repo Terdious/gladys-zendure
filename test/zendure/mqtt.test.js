@@ -4,10 +4,15 @@ import { EventEmitter } from 'node:events';
 
 import {
   createZendureMqtt,
+  createZendureLocalMqtt,
   normalizeMqttUrl,
   extractDeviceKeyFromTopic,
+  parseLocalSensorTopic,
+  parseLocalScalar,
   mergeMqttPayload,
+  buildLocalBrokerConfig,
 } from '../../src/zendure/mqtt.js';
+import { extractMetricValue } from '../../src/zendure/deviceMapping.js';
 
 // --- Fake mqtt.js library ----------------------------------------------------
 
@@ -85,6 +90,47 @@ test('mergeMqttPayload merges top-level fields and nested properties', () => {
     { properties: { electricLevel: 60 }, timestamp: 2 },
   );
   assert.deepEqual(merged, { properties: { electricLevel: 60, packNum: 1 }, timestamp: 2 });
+});
+
+// --- Local broker config -----------------------------------------------------
+
+test('buildLocalBrokerConfig builds a broker URL from a raw cloud device', () => {
+  const config = buildLocalBrokerConfig({
+    server: '192.168.1.50',
+    ip: '192.168.1.50',
+    port: 1883,
+    protocol: 'mqtt',
+    username: 'local-user',
+    password: 'local-pass',
+    enable: 1,
+  });
+  assert.deepEqual(config, {
+    url: 'mqtt://192.168.1.50:1883',
+    username: 'local-user',
+    password: 'local-pass',
+  });
+});
+
+test('buildLocalBrokerConfig defaults the scheme/port from the broker host', () => {
+  const config = buildLocalBrokerConfig({ server: 'broker.local', protocol: 'weird' });
+  assert.equal(config.url, 'mqtt://broker.local');
+});
+
+test('buildLocalBrokerConfig ignores the device ip (never a broker host)', () => {
+  // `ip` is the device address (local HTTP/zenSDK), not an MQTT broker: a
+  // device that advertises only `ip` has no usable local broker.
+  assert.equal(buildLocalBrokerConfig({ ip: '10.0.0.5', protocol: 'mqtt' }), null);
+});
+
+test('buildLocalBrokerConfig honours a secure protocol and port', () => {
+  const config = buildLocalBrokerConfig({ server: 'device.local', port: 8883, protocol: 'mqtts' });
+  assert.equal(config.url, 'mqtts://device.local:8883');
+});
+
+test('buildLocalBrokerConfig returns null without a usable host', () => {
+  assert.equal(buildLocalBrokerConfig({ port: 1883 }), null);
+  assert.equal(buildLocalBrokerConfig({}), null);
+  assert.equal(buildLocalBrokerConfig(undefined), null);
 });
 
 // --- Runtime: connection -----------------------------------------------------
@@ -271,4 +317,106 @@ test('disconnect ends the client and clears the cache', async () => {
   assert.equal(client.ended, true);
   assert.equal(runtime.connected, false);
   assert.equal(runtime.getLatestPayload('DevKey1'), null);
+});
+
+// --- Local runtime: native flat topic scheme ---------------------------------
+
+const LOCAL_DEVICE = { snNumber: 'SN-LOCAL-1', productModel: 'SolarFlow 800 Pro' };
+
+async function createConnectedLocalRuntime() {
+  const library = createFakeMqttLibrary();
+  const runtime = createZendureLocalMqtt({ mqttLibrary: library, clientId: 'local-test-client' });
+  const connectPromise = runtime.connect({
+    url: 'mqtt://192.168.1.50:1883',
+    username: 'local-user',
+    password: 'local-pass',
+  });
+  const client = library.clients[0];
+  client.emit('connect');
+  await connectPromise;
+  return { library, runtime, client };
+}
+
+test('parseLocalSensorTopic reads the serial and metric, ignores non-sensor topics', () => {
+  assert.deepEqual(parseLocalSensorTopic('Zendure/sensor/SN-1/electricLevel'), {
+    serial: 'SN-1',
+    metric: 'electricLevel',
+  });
+  assert.equal(parseLocalSensorTopic('Zendure/number/SN-1/socSet'), null);
+  assert.equal(parseLocalSensorTopic('Zendure/sensor/SN-1'), null);
+  assert.equal(parseLocalSensorTopic(undefined), null);
+});
+
+test('parseLocalScalar keeps finite numbers as numbers and everything else as strings', () => {
+  assert.equal(parseLocalScalar(Buffer.from('78')), 78);
+  assert.equal(parseLocalScalar(Buffer.from('159')), 159);
+  assert.equal(parseLocalScalar(Buffer.from('discharging')), 'discharging');
+  assert.equal(parseLocalScalar(Buffer.from('  42 ')), 42);
+  assert.equal(parseLocalScalar(Buffer.from('')), '');
+});
+
+test('local subscribeDevice subscribes the flat sensor wildcard by serial', async () => {
+  const { runtime, client } = await createConnectedLocalRuntime();
+
+  runtime.subscribeDevice(LOCAL_DEVICE);
+  runtime.subscribeDevice(LOCAL_DEVICE);
+  // A device without a serial number is skipped.
+  runtime.subscribeDevice({ productModel: 'SolarFlow 800 Pro' });
+
+  assert.deepEqual(client.subscriptions, ['Zendure/sensor/SN-LOCAL-1/#']);
+});
+
+test('local runtime accumulates a flat payload per serial from plain scalars', async () => {
+  const { runtime, client } = await createConnectedLocalRuntime();
+  runtime.subscribeDevice(LOCAL_DEVICE);
+
+  client.emit('message', 'Zendure/sensor/SN-LOCAL-1/electricLevel', Buffer.from('73'));
+  client.emit('message', 'Zendure/sensor/SN-LOCAL-1/packInputPower', Buffer.from('159'));
+  // A string metric is stored but is non-numeric, so buildStates ignores it.
+  client.emit('message', 'Zendure/sensor/SN-LOCAL-1/packState', Buffer.from('discharging'));
+
+  const payload = runtime.getLatestPayload('SN-LOCAL-1');
+  assert.deepEqual(payload, {
+    electricLevel: 73,
+    packInputPower: 159,
+    packState: 'discharging',
+  });
+  assert.equal(typeof runtime.getLastPayloadAt('SN-LOCAL-1'), 'number');
+
+  // The flat payload is directly consumable by the metric extractor: numeric
+  // metrics resolve, the string metric is skipped.
+  assert.equal(extractMetricValue(payload, ['electricLevel']), 73);
+  assert.equal(extractMetricValue(payload, ['packState']), null);
+});
+
+test('local runtime notifies listeners with the serial as key', async () => {
+  const { runtime, client } = await createConnectedLocalRuntime();
+  const seen = [];
+  runtime.onPayload((key, payload, topic) => seen.push({ key, payload, topic }));
+
+  client.emit('message', 'Zendure/sensor/SN-LOCAL-1/electricLevel', Buffer.from('55'));
+
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].key, 'SN-LOCAL-1');
+  assert.equal(seen[0].payload.electricLevel, 55);
+  assert.equal(seen[0].topic, 'Zendure/sensor/SN-LOCAL-1/electricLevel');
+});
+
+test('local requestDeviceProperties is a no-op returning false', async () => {
+  const { runtime, client } = await createConnectedLocalRuntime();
+  assert.equal(runtime.requestDeviceProperties(LOCAL_DEVICE), false);
+  assert.equal(client.published.length, 0);
+});
+
+test('local runtime generates a unique client id (never reuses a cloud id)', async () => {
+  const { client } = await createConnectedLocalRuntime();
+  assert.equal(client.options.clientId, 'local-test-client');
+
+  // With no explicit clientId, a generated unique id is used.
+  const library = createFakeMqttLibrary();
+  const runtime = createZendureLocalMqtt({ mqttLibrary: library });
+  const connectPromise = runtime.connect({ url: 'mqtt://192.168.1.50:1883' });
+  library.clients[0].emit('connect');
+  await connectPromise;
+  assert.match(library.clients[0].options.clientId, /^gladys-zendure-[a-z0-9]+$/);
 });
