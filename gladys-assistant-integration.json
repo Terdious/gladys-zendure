@@ -39,6 +39,20 @@
       "default": 30,
       "min": 10,
       "max": 3600
+    },
+    {
+      "key": "enable_local_mqtt",
+      "type": "boolean",
+      "label": {
+        "en": "Enable local MQTT (zenSDK)",
+        "fr": "Activer le MQTT local (zenSDK)"
+      },
+      "description": {
+        "en": "Read telemetry from the device's local MQTT broker when available, instead of the Zendure cloud.",
+        "fr": "Lire la télémétrie via le broker MQTT local de l'appareil quand il est disponible."
+      },
+      "required": false,
+      "default": false
     }
   ]
 }
