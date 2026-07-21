@@ -44,6 +44,39 @@ let cloudData = null;
 // served by a runtime connected to the local broker it publishes to.
 let cloudMqttRuntime = null;
 const localMqttRuntimes = new Map();
+// When each runtime was created (ms): drives the startup grace window of the
+// per-device freshness checks (a runtime that just connected has obviously
+// not received anything yet, which must not count as silence).
+let cloudRuntimeStartedAt = 0;
+const localRuntimeStartedAt = new Map(); // broker url -> creation time (ms)
+
+// --- Per-device effective telemetry source (local mode) -----------------------
+// In local mode a device can silently stop publishing on its LOCAL broker
+// while staying reachable through the Zendure cloud (seen in the field on a
+// SolarFlow 800 Pro). Instead of trusting the static preference forever, the
+// integration tracks per device the source that ACTUALLY delivers telemetry
+// ('local', 'cloud' or 'unreachable'), falls back to the cloud automatically
+// and returns to local as soon as local messages resume. Only meaningful when
+// `enable_local_mqtt` is true: cloud-only mode keeps the static behavior.
+
+// A device is considered silent on a source when no payload arrived within
+// this window, measured against max(lastPayloadAt, runtimeStartedAt) so a
+// freshly-created runtime gets a startup grace window.
+export const LOCAL_SILENCE_TIMEOUT_IN_MS = 90 * 1000;
+// Silent on BOTH sources beyond this (past grace) -> the device is unreachable.
+export const UNREACHABLE_TIMEOUT_IN_MS = 5 * 60 * 1000;
+// The evaluator re-assesses every device at this interval.
+export const SOURCE_EVALUATOR_INTERVAL_IN_MS = 30 * 1000;
+
+// deviceKey -> { source: 'local'|'cloud'|'unreachable', since: ms timestamp }
+const effectiveSourceByDeviceKey = new Map();
+let sourceEvaluatorTimer = null;
+// Consecutive evaluations where EVERY local-mode device was 'local' (drives
+// the lazy cloud-broker disconnect).
+let allLocalEvaluationStreak = 0;
+// Unsubscribes for push listeners attached OUTSIDE startPush (the evaluator's
+// lazy cloud connect), drained by the push cleanup and the runtime reset.
+let dynamicUnsubscribes = [];
 
 // --- State publishing: single coalesced + deduplicated + paced channel -------
 // Every Gladys state update is an HTTP `POST /state` to the core, which enforces
@@ -212,6 +245,13 @@ function stopTelemetryWatchdog() {
   }
 }
 
+function stopSourceEvaluator() {
+  if (sourceEvaluatorTimer) {
+    clearInterval(sourceEvaluatorTimer);
+    sourceEvaluatorTimer = null;
+  }
+}
+
 /**
  * Test hook: rewind the per-feature publish timestamps so the next flush
  * re-publishes even unchanged values (freshness keep-alive path).
@@ -249,10 +289,12 @@ export function resetSolarflowRuntime() {
     cloudMqttRuntime.disconnect();
   }
   cloudMqttRuntime = null;
+  cloudRuntimeStartedAt = 0;
   for (const runtime of localMqttRuntimes.values()) {
     runtime.disconnect();
   }
   localMqttRuntimes.clear();
+  localRuntimeStartedAt.clear();
   if (publishTimer) {
     clearTimeout(publishTimer);
     publishTimer = null;
@@ -261,6 +303,13 @@ export function resetSolarflowRuntime() {
   publishBackoffInMs = 0;
   resetPublishDedup();
   stopTelemetryWatchdog();
+  stopSourceEvaluator();
+  effectiveSourceByDeviceKey.clear();
+  allLocalEvaluationStreak = 0;
+  for (const unsubscribe of dynamicUnsubscribes) {
+    unsubscribe();
+  }
+  dynamicUnsubscribes = [];
   cloudData = null;
 }
 
@@ -316,10 +365,14 @@ async function ensureCloudData(config, { refresh = false } = {}) {
   return cloudData;
 }
 
-async function ensureCloudRuntime(config) {
+async function ensureCloudRuntime(config, now = Date.now()) {
   const data = await ensureCloudData(config);
   if (!cloudMqttRuntime) {
     cloudMqttRuntime = createZendureMqtt({ mqttLibrary: dependencies.mqttLibrary });
+    // Creation time drives the startup grace window of the freshness checks.
+    // The evaluator passes its own `now` so the grace window is measured on
+    // the same clock as its freshness decisions.
+    cloudRuntimeStartedAt = now;
   }
   await cloudMqttRuntime.connect(data.mqtt);
   supportedDevices(data).forEach((rawCloudDevice) =>
@@ -363,6 +416,8 @@ async function ensureLocalRuntime(config, rawCloudDevice) {
   if (!runtime) {
     runtime = createZendureLocalMqtt({ mqttLibrary: dependencies.mqttLibrary });
     localMqttRuntimes.set(key, runtime);
+    // Creation time drives the startup grace window of the freshness checks.
+    localRuntimeStartedAt.set(key, Date.now());
   }
   await runtime.connect(brokerConfig);
   // Subscribe every locally-reachable device that publishes to this broker.
@@ -394,6 +449,305 @@ async function selectSourceRuntime(config, rawCloudDevice) {
   }
   const runtime = await ensureCloudRuntime(config);
   return { runtime, source: 'cloud' };
+}
+
+/**
+ * Runtime used by onPoll for one device: the device's EFFECTIVE source when
+ * the evaluator tracked a cloud fallback (local mode), the static preference
+ * otherwise (including when no effective state exists yet).
+ * @param {object} config normalized configuration
+ * @param {object} rawCloudDevice device from the cloud deviceList
+ * @returns {Promise<{ runtime: object, source: 'local'|'cloud' }>}
+ */
+async function selectPollRuntime(config, rawCloudDevice) {
+  if (config.enable_local_mqtt === true && isDeviceLocallyReachable(config, rawCloudDevice)) {
+    const effective = effectiveSourceByDeviceKey.get(deviceKeyOf(rawCloudDevice));
+    if (effective && effective.source === 'cloud') {
+      // Fallback in progress: poll the cloud runtime, with the cloud payload
+      // logic (its `properties` reports are complete, no local merge needed).
+      const runtime = await ensureCloudRuntime(config);
+      return { runtime, source: 'cloud' };
+    }
+  }
+  return selectSourceRuntime(config, rawCloudDevice);
+}
+
+/**
+ * Human-readable duration for the transition logs: seconds under 2 minutes,
+ * minutes otherwise.
+ * @param {number} ms duration in milliseconds
+ * @returns {string} e.g. `95 s` or `12 min`
+ */
+function formatDuration(ms) {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 120) {
+    return `${seconds} s`;
+  }
+  return `${Math.round(seconds / 60)} min`;
+}
+
+/** Log label of a device, e.g. `SolarFlow 800 Pro L1 (dCLTD95V)`. */
+function deviceLabelOf(rawCloudDevice) {
+  return `${rawCloudDevice.deviceName || modelOf(rawCloudDevice)} (${deviceKeyOf(rawCloudDevice)})`;
+}
+
+/** Map an effective source to the Gladys transport badge value. */
+function transportOfSource(source) {
+  if (source === 'local') {
+    return DEVICE_TRANSPORTS.LOCAL;
+  }
+  if (source === 'cloud') {
+    return DEVICE_TRANSPORTS.CLOUD;
+  }
+  return DEVICE_TRANSPORTS.UNREACHABLE;
+}
+
+/**
+ * Latest activity timestamp of one source for a device: the last payload, or
+ * the runtime creation time when nothing arrived yet (startup grace window).
+ * A missing runtime yields 0 (silent since forever).
+ * @param {object|null} runtime MQTT runtime of the source (may be null)
+ * @param {string} telemetryKey serial (local) or deviceKey (cloud)
+ * @param {number|undefined} startedAt runtime creation time (ms)
+ * @returns {number} activity timestamp (ms), 0 when unknown
+ */
+function lastSourceActivityAt(runtime, telemetryKey, startedAt) {
+  const lastPayloadAt = runtime ? runtime.getLastPayloadAt(telemetryKey) : null;
+  return Math.max(lastPayloadAt || 0, startedAt || 0);
+}
+
+/**
+ * Record a device's effective source and, on a real TRANSITION, log it (with
+ * the elapsed time of the previous state) and return the transport badge
+ * entry to publish. Returns null when nothing changed, and seeds silently
+ * when the device had no effective state yet (initial observation, not a
+ * transition).
+ * @param {object} gladys Gladys SDK instance
+ * @param {object} rawCloudDevice device from the cloud deviceList
+ * @param {'local'|'cloud'|'unreachable'} nextSource new effective source
+ * @param {number} now current time (ms)
+ * @returns {{ external_id: string, transport: string }|null}
+ */
+function applySourceTransition(gladys, rawCloudDevice, nextSource, now) {
+  const deviceKey = deviceKeyOf(rawCloudDevice);
+  const previous = effectiveSourceByDeviceKey.get(deviceKey);
+  if (previous && previous.source === nextSource) {
+    return null;
+  }
+  effectiveSourceByDeviceKey.set(deviceKey, { source: nextSource, since: now });
+  if (!previous) {
+    logger.debug(`telemetry: ${deviceLabelOf(rawCloudDevice)}: initial source is ${nextSource}`);
+    return null;
+  }
+
+  const elapsed = formatDuration(now - previous.since);
+  let detail;
+  if (nextSource === 'unreachable') {
+    detail = `unreachable (no local or cloud message for ${formatDuration(UNREACHABLE_TIMEOUT_IN_MS)})`;
+  } else if (nextSource === 'local') {
+    const recovery =
+      previous.source === 'cloud' ? `after ${elapsed} on cloud` : `after ${elapsed} unreachable`;
+    detail = `${previous.source} -> local (recovered ${recovery})`;
+  } else if (previous.source === 'local') {
+    detail = `local -> cloud fallback (local silent for ${elapsed})`;
+  } else {
+    detail = `unreachable -> cloud (cloud telemetry resumed after ${elapsed})`;
+  }
+  logger.info(`telemetry: ${deviceLabelOf(rawCloudDevice)}: ${detail}`);
+
+  // A device the account reports offline stays 'unreachable' on the badge.
+  const transport =
+    rawCloudDevice.online === false ? DEVICE_TRANSPORTS.UNREACHABLE : transportOfSource(nextSource);
+  return {
+    external_id: gladys.externalIds(DEVICE_TYPE, deviceKey).device,
+    transport,
+  };
+}
+
+/**
+ * Publish transport badge entries, tolerating an older Gladys core without
+ * the endpoint (same defensive pattern as the discovery sync).
+ * @param {object} gladys Gladys SDK instance
+ * @param {Array<{ external_id: string, transport: string }>} entries
+ */
+async function publishTransportEntries(gladys, entries) {
+  if (entries.length === 0) {
+    return;
+  }
+  try {
+    await gladys.publishTransports(entries);
+  } catch (e) {
+    logger.debug(`publishTransports skipped (older Gladys core?): ${e.message}`);
+  }
+}
+
+/**
+ * Build the push listener of one source. The LOCAL listener always publishes:
+ * a local message IS proof of local health, so it also transitions the device
+ * back to 'local' when it had fallen back. The CLOUD listener publishes only
+ * when the device's effective source is NOT 'local', avoiding duplicates
+ * while the local feed is healthy (the paced publish channel deduplicates by
+ * value anyway).
+ * @param {object} gladys Gladys SDK instance
+ * @param {object} config normalized configuration
+ * @param {'local'|'cloud'} source source of the runtime this listener serves
+ * @returns {Function} `(key, payload) => void` payload listener
+ */
+function createPushListener(gladys, config, source) {
+  return (key, payload) => {
+    // The local runtime emits the serial number as key; the cloud one emits
+    // the device key.
+    const rawCloudDevice =
+      source === 'local'
+        ? findSupportedDeviceBySerial(cloudData, key)
+        : findSupportedDevice(cloudData, key);
+    if (!rawCloudDevice) {
+      return;
+    }
+    if (source === 'local') {
+      if (config.enable_local_mqtt === true) {
+        const entry = applySourceTransition(gladys, rawCloudDevice, 'local', Date.now());
+        if (entry) {
+          publishTransportEntries(gladys, [entry]);
+        }
+      }
+    } else {
+      // Default to the static preference when the evaluator has no state yet.
+      const effective = effectiveSourceByDeviceKey.get(deviceKeyOf(rawCloudDevice));
+      const effectiveSource = effective
+        ? effective.source
+        : isDeviceLocallyReachable(config, rawCloudDevice)
+          ? 'local'
+          : 'cloud';
+      if (effectiveSource === 'local') {
+        return;
+      }
+    }
+    const states = buildStates(gladys, rawCloudDevice, payload);
+    if (states.length === 0) {
+      return;
+    }
+    // Coalesce instead of publishing immediately: bursts of reports (many
+    // devices at once) would otherwise flood the core with 429 errors.
+    queueStates(gladys, states);
+  };
+}
+
+/**
+ * Attach the push listener of one runtime; shared by startPush and the
+ * evaluator's lazy cloud connect so a late cloud runtime publishes too.
+ * @param {object} gladys Gladys SDK instance
+ * @param {object} config normalized configuration
+ * @param {object} runtime MQTT runtime
+ * @param {'local'|'cloud'} source source of the runtime
+ * @returns {Function} unsubscribe
+ */
+function attachSourceListener(gladys, config, runtime, source) {
+  return runtime.onPayload(createPushListener(gladys, config, source));
+}
+
+/**
+ * Re-assess the effective telemetry source of every local-mode device:
+ *   - local fresh (within LOCAL_SILENCE_TIMEOUT_IN_MS, grace included) -> 'local';
+ *   - else cloud fresh (same grace logic) -> 'cloud';
+ *   - else silent on BOTH sources beyond UNREACHABLE_TIMEOUT_IN_MS -> 'unreachable';
+ *   - else keep the previous source (pending, no flapping).
+ * Transitions are logged and their badges published in one call. Also owns
+ * the LAZY cloud connection: the Zendure cloud broker enforces one consumer
+ * per account, so it stays disconnected while every device is healthy locally
+ * and is only brought up when at least one device went locally silent (then
+ * released again after two consecutive all-local evaluations).
+ * Scheduled every SOURCE_EVALUATOR_INTERVAL_IN_MS by startPush in local mode;
+ * `now` is injectable for tests.
+ * @param {object} gladys Gladys SDK instance
+ * @param {object} config normalized configuration
+ * @param {number} [now] current time (ms)
+ */
+export async function evaluateTelemetrySources(gladys, config, now = Date.now()) {
+  if (config.enable_local_mqtt !== true || !cloudData) {
+    return;
+  }
+  const allDevices = supportedDevices(cloudData);
+  const localModeDevices = allDevices.filter((rawCloudDevice) =>
+    isDeviceLocallyReachable(config, rawCloudDevice),
+  );
+  if (localModeDevices.length === 0) {
+    return;
+  }
+
+  const changedEntries = [];
+  const locallySilent = [];
+  for (const rawCloudDevice of localModeDevices) {
+    const brokerUrl = buildLocalBrokerConfig(rawCloudDevice).url;
+    const localRuntime = localMqttRuntimes.get(brokerUrl) || null;
+    const localActivityAt = lastSourceActivityAt(
+      localRuntime,
+      rawCloudDevice.snNumber,
+      localRuntimeStartedAt.get(brokerUrl),
+    );
+    if (now - localActivityAt <= LOCAL_SILENCE_TIMEOUT_IN_MS) {
+      const entry = applySourceTransition(gladys, rawCloudDevice, 'local', now);
+      if (entry) {
+        changedEntries.push(entry);
+      }
+    } else {
+      locallySilent.push({ rawCloudDevice, localActivityAt });
+    }
+  }
+
+  // Lazy cloud fallback connection (one consumer per account: connect only
+  // when needed). The freshly-attached listener makes the late cloud runtime
+  // publish states like the ones attached by startPush.
+  if (locallySilent.length > 0 && !cloudMqttRuntime) {
+    logger.info(
+      `fallback: connecting the cloud broker for ${locallySilent.length} locally-silent device(s)`,
+    );
+    try {
+      await ensureCloudRuntime(config, now);
+      dynamicUnsubscribes.push(attachSourceListener(gladys, config, cloudMqttRuntime, 'cloud'));
+    } catch (e) {
+      logger.warn(`fallback: cloud broker connection failed: ${e.message}`);
+    }
+  }
+
+  for (const { rawCloudDevice, localActivityAt } of locallySilent) {
+    const cloudActivityAt = lastSourceActivityAt(
+      cloudMqttRuntime,
+      deviceKeyOf(rawCloudDevice),
+      cloudRuntimeStartedAt,
+    );
+    let entry = null;
+    if (now - cloudActivityAt <= LOCAL_SILENCE_TIMEOUT_IN_MS) {
+      entry = applySourceTransition(gladys, rawCloudDevice, 'cloud', now);
+    } else if (
+      now - localActivityAt > UNREACHABLE_TIMEOUT_IN_MS &&
+      now - cloudActivityAt > UNREACHABLE_TIMEOUT_IN_MS
+    ) {
+      entry = applySourceTransition(gladys, rawCloudDevice, 'unreachable', now);
+    }
+    // Otherwise: pending state, keep the previous source (no flapping).
+    if (entry) {
+      changedEntries.push(entry);
+    }
+  }
+
+  await publishTransportEntries(gladys, changedEntries);
+
+  // Lazy cloud disconnect: once every local-mode device has been back on
+  // 'local' for two consecutive evaluations (and no device statically needs
+  // the cloud), release the cloud broker for other consumers of the account.
+  const everyDeviceLocal = localModeDevices.every((rawCloudDevice) => {
+    const effective = effectiveSourceByDeviceKey.get(deviceKeyOf(rawCloudDevice));
+    return effective !== undefined && effective.source === 'local';
+  });
+  allLocalEvaluationStreak = everyDeviceLocal ? allLocalEvaluationStreak + 1 : 0;
+  const cloudStaticallyNeeded = allDevices.length > localModeDevices.length;
+  if (allLocalEvaluationStreak >= 2 && cloudMqttRuntime && !cloudStaticallyNeeded) {
+    cloudMqttRuntime.disconnect();
+    cloudMqttRuntime = null;
+    cloudRuntimeStartedAt = 0;
+    logger.info('fallback: all devices back on local -> cloud broker disconnected');
+  }
 }
 
 function findSupportedDevice(data, deviceKey) {
@@ -517,7 +871,9 @@ export const solarflow = {
   /**
    * Per-device transport badges: devices the Zendure account reports offline
    * (`online === false` in the deviceList) are 'unreachable'; devices served
-   * by their LOCAL MQTT broker are 'local'; everything else is 'cloud'.
+   * by their LOCAL MQTT broker follow their EFFECTIVE source when the
+   * evaluator tracked one (local/cloud fallback/unreachable), the static
+   * 'local' otherwise; everything else is 'cloud'.
    * Reads the cloudData cached by the last discovery.
    */
   async buildTransports(gladys, config) {
@@ -527,7 +883,8 @@ export const solarflow = {
       if (rawCloudDevice.online === false) {
         transport = DEVICE_TRANSPORTS.UNREACHABLE;
       } else if (isDeviceLocallyReachable(config, rawCloudDevice)) {
-        transport = DEVICE_TRANSPORTS.LOCAL;
+        const effective = effectiveSourceByDeviceKey.get(deviceKeyOf(rawCloudDevice));
+        transport = effective ? transportOfSource(effective.source) : DEVICE_TRANSPORTS.LOCAL;
       }
       return {
         external_id: gladys.externalIds(DEVICE_TYPE, deviceKeyOf(rawCloudDevice)).device,
@@ -558,7 +915,7 @@ export const solarflow = {
       return;
     }
 
-    const { runtime, source } = await selectSourceRuntime(config, rawCloudDevice);
+    const { runtime, source } = await selectPollRuntime(config, rawCloudDevice);
     logger.debug(`onPoll: using ${source} MQTT source for ${deviceKey}`);
     // Local telemetry is keyed by serial number, cloud telemetry by device key.
     const telemetryKey = telemetryKeyOf(source, rawCloudDevice);
@@ -598,34 +955,6 @@ export const solarflow = {
   startPush(gladys, config) {
     let stopped = false;
     const unsubscribes = [];
-
-    // Publish a payload only when THIS runtime is the selected source for the
-    // device: a device could otherwise be reported by both its local broker
-    // and the shared cloud broker, causing duplicate states.
-    function makeListener(source) {
-      return (key, payload) => {
-        // The local runtime emits the serial number as key; the cloud one emits
-        // the device key.
-        const rawCloudDevice =
-          source === 'local'
-            ? findSupportedDeviceBySerial(cloudData, key)
-            : findSupportedDevice(cloudData, key);
-        if (!rawCloudDevice) {
-          return;
-        }
-        const selectedSource = isDeviceLocallyReachable(config, rawCloudDevice) ? 'local' : 'cloud';
-        if (selectedSource !== source) {
-          return;
-        }
-        const states = buildStates(gladys, rawCloudDevice, payload);
-        if (states.length === 0) {
-          return;
-        }
-        // Coalesce instead of publishing immediately: bursts of reports (many
-        // devices at once) would otherwise flood the core with 429 errors.
-        queueStates(gladys, states);
-      };
-    }
 
     (async () => {
       try {
@@ -679,39 +1008,45 @@ export const solarflow = {
         // Tear down runtimes no longer used by any device: when the user enables
         // local MQTT for every device, the cloud runtime must be disconnected so
         // it stops reconnecting (and stops fighting a second cloud consumer over
-        // the shared cloud client id).
-        if (cloudMqttRuntime && !runtimesBySource.has(cloudMqttRuntime)) {
+        // the shared cloud client id). The cloud runtime is kept when a device
+        // currently FELL BACK to it (effective source tracked by the evaluator).
+        const cloudNeededByFallback = devices.some((rawCloudDevice) => {
+          const effective = effectiveSourceByDeviceKey.get(deviceKeyOf(rawCloudDevice));
+          return effective !== undefined && effective.source !== 'local';
+        });
+        if (cloudMqttRuntime && !runtimesBySource.has(cloudMqttRuntime) && !cloudNeededByFallback) {
           cloudMqttRuntime.disconnect();
           cloudMqttRuntime = null;
+          cloudRuntimeStartedAt = 0;
           logger.info('push: cloud broker no longer needed -> disconnected');
         }
         for (const [url, runtime] of localMqttRuntimes) {
           if (!runtimesBySource.has(runtime)) {
             runtime.disconnect();
             localMqttRuntimes.delete(url);
+            localRuntimeStartedAt.delete(url);
             logger.info(`push: local broker ${url} no longer needed -> disconnected`);
           }
         }
 
-        // Resolve the broker URL behind a runtime (for the diagnostics logs):
-        // local runtimes are keyed by URL, the cloud one uses the deviceList
-        // metadata.
-        const brokerUrlOf = (runtime, source) => {
-          if (source === 'cloud') {
-            return data.mqtt?.url || 'cloud';
-          }
-          for (const [url, localRuntime] of localMqttRuntimes) {
-            if (localRuntime === runtime) {
-              return url;
-            }
-          }
-          return 'local';
-        };
+        // Attach the push listeners to EVERY live runtime (a device may be
+        // served by its local broker AND, during a fallback, by the cloud
+        // one): the per-source listeners decide per device what to publish.
+        const activeRuntimes = [];
+        for (const [url, runtime] of localMqttRuntimes) {
+          activeRuntimes.push({ runtime, source: 'local', url });
+        }
+        if (cloudMqttRuntime) {
+          activeRuntimes.push({
+            runtime: cloudMqttRuntime,
+            source: 'cloud',
+            url: data.mqtt?.url || 'cloud',
+          });
+        }
 
         const runtimeInfos = [];
-        for (const [runtime, source] of runtimesBySource) {
-          unsubscribes.push(runtime.onPayload(makeListener(source)));
-          const url = brokerUrlOf(runtime, source);
+        for (const { runtime, source, url } of activeRuntimes) {
+          unsubscribes.push(attachSourceListener(gladys, config, runtime, source));
           // The devices this runtime serves (for the telemetry watchdog): on a
           // local runtime, only the devices publishing to THIS broker.
           const ownedDevices = devices.filter((rawCloudDevice) => {
@@ -755,6 +1090,22 @@ export const solarflow = {
         if (typeof telemetryWatchdogTimer.unref === 'function') {
           telemetryWatchdogTimer.unref();
         }
+
+        // Per-device source evaluator: in local mode, re-assess every 30 s
+        // which source actually delivers telemetry, with automatic cloud
+        // fallback and recovery (see evaluateTelemetrySources).
+        stopSourceEvaluator();
+        if (config.enable_local_mqtt === true) {
+          sourceEvaluatorTimer = setInterval(() => {
+            evaluateTelemetrySources(gladys, config).catch((e) =>
+              logger.warn(`telemetry: source evaluation failed: ${e.message}`),
+            );
+          }, SOURCE_EVALUATOR_INTERVAL_IN_MS);
+          // Do not keep the process alive just for the evaluator.
+          if (typeof sourceEvaluatorTimer.unref === 'function') {
+            sourceEvaluatorTimer.unref();
+          }
+        }
       } catch (e) {
         logger.error('push: Zendure MQTT setup failed', e);
       }
@@ -763,9 +1114,14 @@ export const solarflow = {
     return () => {
       stopped = true;
       stopTelemetryWatchdog();
+      stopSourceEvaluator();
       for (const unsubscribe of unsubscribes) {
         unsubscribe();
       }
+      for (const unsubscribe of dynamicUnsubscribes) {
+        unsubscribe();
+      }
+      dynamicUnsubscribes = [];
     };
   },
 };
