@@ -152,3 +152,15 @@ test('fetchCloudData rejects an invalid cloud key without calling fetch', async 
   await assert.rejects(fetchCloudData('bad', { fetchImpl }), ZendureCloudError);
   assert.equal(called, false);
 });
+
+test('fetchCloudData maps a fetch timeout to a ZendureCloudError', async () => {
+  const timeoutError = new Error('The operation was aborted due to timeout');
+  timeoutError.name = 'TimeoutError';
+  const fetchImpl = async () => {
+    throw timeoutError;
+  };
+  await assert.rejects(
+    fetchCloudData(CLOUD_KEY, { fetchImpl }),
+    (error) => error.name === 'ZendureCloudError' && /timed out/.test(error.message),
+  );
+});

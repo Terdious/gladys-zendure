@@ -10,7 +10,7 @@ built with the official JavaScript SDK
 - Discovers your Zendure devices through the Zendure cloud API, using the
   authorization key generated from the Zendure mobile app.
 - Publishes read-only telemetry (battery level, input/output power, home
-  output power, solar input power) for the **SolarFlow 800 Pro**.
+  output power, solar input power) for the supported SolarFlow / Hyper models.
 
 Device control and local MQTT support are planned for a later version.
 

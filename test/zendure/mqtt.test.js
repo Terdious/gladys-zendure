@@ -11,6 +11,8 @@ import {
   parseLocalScalar,
   mergeMqttPayload,
   buildLocalBrokerConfig,
+  isReportTopic,
+  isRequestTopic,
 } from '../../src/zendure/mqtt.js';
 import { extractMetricValue } from '../../src/zendure/deviceMapping.js';
 
@@ -291,6 +293,76 @@ test('payload listeners are notified with the merged payload', async () => {
   assert.equal(seen.length, 1);
 });
 
+test('isReportTopic only accepts properties/report topics', () => {
+  assert.equal(isReportTopic('iot/prodA/DevKey1/properties/report'), true);
+  assert.equal(isReportTopic('/prodA/DevKey1/properties/report'), true);
+  assert.equal(isReportTopic('iot/prodA/DevKey1/properties/read'), false);
+  assert.equal(isReportTopic('iot/prodA/DevKey1/properties/write'), false);
+  assert.equal(isReportTopic('iot/prodA/DevKey1/time-sync'), false);
+  assert.equal(isReportTopic(undefined), false);
+});
+
+test('isRequestTopic flags the command channels', () => {
+  assert.equal(isRequestTopic('iot/prodA/DevKey1/properties/read'), true);
+  assert.equal(isRequestTopic('iot/prodA/DevKey1/properties/write'), true);
+  assert.equal(isRequestTopic('iot/prodA/DevKey1/function/invoke'), true);
+  assert.equal(isRequestTopic('iot/prodA/DevKey1/properties/report'), false);
+  assert.equal(isRequestTopic('iot/prodA/DevKey1/state'), false);
+  assert.equal(isRequestTopic(undefined), false);
+});
+
+test('the echo of our own properties/read request neither feeds the cache nor refreshes freshness', async () => {
+  const { runtime, client } = await createConnectedRuntime();
+  runtime.subscribeDevice(DEVICE);
+
+  // A real report arrives first.
+  client.emit(
+    'message',
+    'iot/prodA/DevKey1/properties/report',
+    Buffer.from(JSON.stringify({ properties: { electricLevel: 47 } })),
+  );
+  const freshnessAfterReport = runtime.getLastPayloadAt('DevKey1');
+
+  // We ask for fresh properties; the broker delivers our own publication back
+  // to us (wildcard subscription includes the read topic).
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(runtime.requestDeviceProperties(DEVICE), true);
+  const readRequest = client.published.find((entry) => entry.topic.endsWith('properties/read'));
+  client.emit('message', readRequest.topic, Buffer.from(readRequest.payload));
+
+  // The cache is untouched (no junk keys, no `properties: ['getAll']` spread)
+  // and the freshness timestamp did NOT move: a dead device must not look
+  // alive just because we keep asking it for data.
+  assert.deepEqual(runtime.getLatestPayload('DevKey1'), { properties: { electricLevel: 47 } });
+  assert.equal(runtime.getLastPayloadAt('DevKey1'), freshnessAfterReport);
+});
+
+test('non-report cloud topics (time-sync, register...) are ignored', async () => {
+  const { runtime, client } = await createConnectedRuntime();
+
+  client.emit(
+    'message',
+    'iot/prodA/DevKey1/time-sync',
+    Buffer.from(JSON.stringify({ timestamp: 1234567890 })),
+  );
+  client.emit(
+    'message',
+    'iot/prodA/DevKey1/register/replay',
+    Buffer.from(JSON.stringify({ deviceId: 'DevKey1' })),
+  );
+
+  assert.equal(runtime.getLatestPayload('DevKey1'), null);
+  assert.equal(runtime.getLastPayloadAt('DevKey1'), null);
+});
+
+test('mergeMqttPayload ignores a non-object properties field (read-request array)', () => {
+  const merged = mergeMqttPayload(
+    { properties: { electricLevel: 47 } },
+    { properties: ['getAll'], messageId: 3 },
+  );
+  assert.deepEqual(merged.properties, { electricLevel: 47 });
+});
+
 test('own isHA echoes and invalid JSON payloads are ignored', async () => {
   const { runtime, client } = await createConnectedRuntime();
 
@@ -474,6 +546,28 @@ test('local runtime consumes legacy iot JSON reports keyed by SERIAL and merges 
   // Listeners are notified with the SERIAL as key, never the deviceKey.
   assert.deepEqual(seen, ['SN-LOCAL-1']);
   assert.equal(runtime.getLatestPayload('SN-LOCAL-1').electricLevel, 67);
+});
+
+test('local runtime ignores legacy non-report topics (properties/write and friends)', async () => {
+  const { runtime, client } = await createConnectedLocalRuntime();
+  runtime.subscribeDevice(LOCAL_DEVICE_WITH_KEYS);
+
+  // A write bundle published on the shared broker (by us in a future control
+  // phase, or by another client without the isHA tag) must neither feed the
+  // telemetry cache nor refresh the freshness.
+  client.emit(
+    'message',
+    'iot/prodA/LocKey1/properties/write',
+    Buffer.from(JSON.stringify({ properties: { outputLimit: 800 } })),
+  );
+  client.emit(
+    'message',
+    'iot/prodA/LocKey1/properties/read',
+    Buffer.from(JSON.stringify({ properties: ['getAll'] })),
+  );
+
+  assert.equal(runtime.getLatestPayload('SN-LOCAL-1'), null);
+  assert.equal(runtime.getLastPayloadAt('SN-LOCAL-1'), null);
 });
 
 test('local runtime falls back to top-level numeric fields when properties is absent', async () => {

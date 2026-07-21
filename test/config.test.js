@@ -24,6 +24,15 @@ test('normalizeConfig falls back to the default for a missing field', () => {
   assert.equal(config.poll_frequency, DEFAULT_CONFIG.poll_frequency);
 });
 
+test('normalizeConfig falls back to the default for an empty or invalid poll_frequency', () => {
+  // An empty form field coerces to 0 (`Number('') === 0`) and garbage to NaN:
+  // both used to snap to the FASTEST allowed frequency (1 s) instead of 30 s.
+  assert.equal(normalizeConfig({ poll_frequency: '' }).poll_frequency, 30);
+  assert.equal(normalizeConfig({ poll_frequency: 'abc' }).poll_frequency, 30);
+  assert.equal(normalizeConfig({ poll_frequency: 0 }).poll_frequency, 30);
+  assert.equal(normalizeConfig({ poll_frequency: -5 }).poll_frequency, 30);
+});
+
 test('normalizeConfig defaults enable_local_mqtt to false', () => {
   assert.equal(normalizeConfig().enable_local_mqtt, false);
   assert.equal(normalizeConfig({ cloud_key: 'aGVsbG8=' }).enable_local_mqtt, false);
@@ -46,4 +55,11 @@ test('toGladysPollFrequency snaps seconds to the allowed Gladys values (ms)', ()
   assert.equal(toGladysPollFrequency(45), 30000); // 45 s is closer to 30 s than 60 s
   assert.equal(toGladysPollFrequency(300), 60000); // capped at every minute
   assert.equal(toGladysPollFrequency(3600), 60000); // schema max still allowed
+});
+
+test('toGladysPollFrequency snaps invalid input to the default frequency, not the fastest', () => {
+  assert.equal(toGladysPollFrequency(NaN), 30000);
+  assert.equal(toGladysPollFrequency(''), 30000);
+  assert.equal(toGladysPollFrequency(0), 30000);
+  assert.equal(toGladysPollFrequency(-5), 30000);
 });

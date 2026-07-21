@@ -117,6 +117,40 @@ export function extractDeviceKeyFromTopic(topic) {
   return null;
 }
 
+/**
+ * Whether a JSON-format topic carries device telemetry (`properties/report`).
+ * The wildcard subscriptions also deliver every OTHER message under the device
+ * root — time-sync, register, firmware chatter, and even the ECHO of the
+ * `properties/read` requests WE publish (a broker delivers a publication back
+ * to a matching subscriber, including its author). Merging those into the
+ * telemetry cache pollutes it with junk keys and, worse, refreshes the
+ * per-device freshness timestamp: a dead device would look alive just because
+ * we keep asking it for data. Only report topics may feed the cache.
+ * @param {string} topic MQTT topic
+ * @returns {boolean}
+ */
+export function isReportTopic(topic) {
+  return typeof topic === 'string' && topic.endsWith('/properties/report');
+}
+
+/**
+ * Whether a JSON-format topic is a REQUEST/COMMAND channel (read requests,
+ * write bundles, function invocations) rather than telemetry. Used as a
+ * deny-list by the LOCAL legacy path, which must stay permissive about
+ * telemetry topics (some firmwares publish root-level metrics outside
+ * `properties/report`) but must never ingest command echoes.
+ * @param {string} topic MQTT topic
+ * @returns {boolean}
+ */
+export function isRequestTopic(topic) {
+  return (
+    typeof topic === 'string' &&
+    (topic.endsWith('/properties/read') ||
+      topic.endsWith('/properties/write') ||
+      topic.endsWith('/function/invoke'))
+  );
+}
+
 // Prefix of the native local topic scheme the device publishes its telemetry
 // to: `Zendure/sensor/{serialNumber}/{metricName}`.
 const LOCAL_SENSOR_TOPIC_PREFIX = 'Zendure/sensor';
@@ -175,10 +209,13 @@ export function mergeMqttPayload(previousPayload, incomingPayload) {
 
   const merged = { ...base, ...incoming };
 
-  const baseProperties =
-    base.properties && typeof base.properties === 'object' ? base.properties : {};
-  const incomingProperties =
-    incoming.properties && typeof incoming.properties === 'object' ? incoming.properties : {};
+  // `properties` must be a plain object: a read REQUEST carries an ARRAY
+  // (`properties: ['getAll']`) which would otherwise spread into junk
+  // index keys and shadow the object cache.
+  const isPlainObject = (value) =>
+    value !== null && typeof value === 'object' && !Array.isArray(value);
+  const baseProperties = isPlainObject(base.properties) ? base.properties : {};
+  const incomingProperties = isPlainObject(incoming.properties) ? incoming.properties : {};
   if (Object.keys(baseProperties).length > 0 || Object.keys(incomingProperties).length > 0) {
     merged.properties = { ...baseProperties, ...incomingProperties };
   }
@@ -529,6 +566,12 @@ export function createZendureMqtt({ mqttLibrary = mqtt, clientId, connectTimeout
       return [`iot/${productKey}/${deviceKey}/#`, `/${productKey}/${deviceKey}/#`];
     },
     parseMessage(topic, payload) {
+      // Only `properties/report` carries telemetry; everything else under the
+      // wildcard (read/write requests — including OUR OWN echoes — time-sync,
+      // register...) must neither feed the cache nor refresh the freshness.
+      if (!isReportTopic(topic)) {
+        return null;
+      }
       const deviceKey = extractDeviceKeyFromTopic(topic);
       if (!deviceKey) {
         return null;
@@ -650,7 +693,15 @@ export function createZendureLocalMqtt({ mqttLibrary = mqtt, clientId, connectTi
         };
       }
 
-      // Legacy JSON format (iot/{productKey}/{deviceKey}/... topics).
+      // Legacy JSON format (iot/{productKey}/{deviceKey}/... topics). Unlike
+      // the cloud runtime (strict report allow-list), the local path stays
+      // permissive about telemetry topics — some firmwares publish root-level
+      // metrics outside properties/report — but command channels (read/write
+      // bundles, ours or another client's) must never feed the cache nor
+      // refresh the freshness.
+      if (isRequestTopic(topic)) {
+        return null;
+      }
       const deviceKey = extractDeviceKeyFromTopic(topic);
       if (!deviceKey) {
         return null;
