@@ -61,6 +61,17 @@ npm run lint           # ESLint: catch real mistakes
 npm test               # Unit tests, via the built-in `node --test` runner
 ```
 
+## Troubleshooting
+
+- **One device shows no values (or is slower than the others) while the rest
+  work**: check the per-device transport badge in Gladys. If the device fell
+  back to `cloud` (or is `unreachable`) while local MQTT is enabled, its
+  firmware may have silently stopped publishing to the local broker — in the
+  Zendure app, toggle the device's MQTT control OFF, save, then ON again; the
+  device resumes publishing within a minute. The integration falls back to the
+  cloud automatically in the meantime and returns to local on its own once the
+  local messages resume (see the `telemetry:` transition lines in the logs).
+
 ## License
 
 Apache-2.0

@@ -15,7 +15,9 @@ import {
   flushStatesNow,
   markPublishedStatesStale,
   buildTelemetrySummary,
+  evaluateTelemetrySources,
   TELEMETRY_WATCHDOG_INTERVAL_IN_MS,
+  LOCAL_SILENCE_TIMEOUT_IN_MS,
 } from '../src/devices/solarflow.js';
 import { normalizeConfig } from '../src/config.js';
 import { createFakeGladys } from './helpers/fakeGladys.js';
@@ -577,6 +579,114 @@ test('resetTelemetryDedup forces an immediate full re-send of unchanged values',
   await solarflow.onPoll(localGladys, config, device);
   await flushStatesNow(localGladys);
   assert.equal(localGladys.published.length, firstCount * 2);
+});
+
+// --- Per-device dynamic source selection (local -> cloud fallback) -----------
+
+test('the evaluator keeps a fresh local device on local and never connects the cloud', async () => {
+  const localGladys = createFakeGladys();
+  const mqttLibrary = createFakeMqttLibrary();
+  setSolarflowDependencies({
+    fetchImpl: createFakeZendureFetch({ deviceList: [FAKE_LOCAL_SOLARFLOW_DEVICE] }),
+    mqttLibrary,
+  });
+
+  await buildDiscoveredDevices(localGladys, localConfig);
+  const stopPush = solarflow.startPush(localGladys, localConfig);
+  const localClient = await waitFor(() => mqttLibrary.clients[0]);
+  await delay(20);
+
+  // A fresh local payload arrives: the device is healthy on its local broker.
+  localClient.emit(
+    'message',
+    LOCAL_SENSOR_TOPIC(FAKE_LOCAL_SOLARFLOW_DEVICE.snNumber, 'electricLevel'),
+    Buffer.from('70'),
+  );
+  await evaluateTelemetrySources(localGladys, localConfig);
+  await evaluateTelemetrySources(localGladys, localConfig);
+
+  // The device stays on 'local': no badge churn, and above all the CLOUD
+  // broker was never connected (one consumer per Zendure account: the cloud
+  // connection must stay down while every device is healthy locally).
+  assert.equal(mqttLibrary.clients.length, 1);
+  assert.equal(mqttLibrary.clients[0].url, LOCAL_BROKER_URL);
+  assert.equal(localGladys.transports.length, 0);
+
+  stopPush();
+});
+
+test('a locally-silent device falls back to the cloud (lazy connect) then recovers', async () => {
+  const localGladys = createFakeGladys();
+  const mqttLibrary = createFakeMqttLibrary();
+  setSolarflowDependencies({
+    fetchImpl: createFakeZendureFetch({ deviceList: [FAKE_LOCAL_SOLARFLOW_DEVICE] }),
+    mqttLibrary,
+  });
+
+  const [device] = await buildDiscoveredDevices(localGladys, localConfig);
+  const stopPush = solarflow.startPush(localGladys, localConfig);
+  const localClient = await waitFor(() => mqttLibrary.clients[0]);
+  await delay(20);
+
+  // The device reports on its local broker, then goes silent.
+  localClient.emit(
+    'message',
+    LOCAL_SENSOR_TOPIC(FAKE_LOCAL_SOLARFLOW_DEVICE.snNumber, 'electricLevel'),
+    Buffer.from('60'),
+  );
+  const start = Date.now();
+  await evaluateTelemetrySources(localGladys, localConfig, start);
+  // While the local payload is fresh, the cloud runtime is NOT created.
+  assert.equal(mqttLibrary.clients.length, 1);
+
+  // Rewind: past the local-silence timeout the evaluator lazily connects the
+  // cloud broker and transitions the device to 'cloud' (startup grace).
+  const fallbackNow = start + LOCAL_SILENCE_TIMEOUT_IN_MS + 5000;
+  await evaluateTelemetrySources(localGladys, localConfig, fallbackNow);
+
+  assert.equal(mqttLibrary.clients.length, 2);
+  const cloudClient = mqttLibrary.clients[1];
+  assert.equal(cloudClient.url, CLOUD_BROKER_URL);
+  assert.deepEqual(localGladys.transports.at(-1), [
+    { external_id: device.external_id, transport: 'cloud' },
+  ]);
+
+  // The lazily-attached cloud listener publishes the cloud reports now that
+  // the device's effective source is 'cloud'.
+  localGladys.published.length = 0;
+  cloudClient.emit(
+    'message',
+    `iot/${FAKE_LOCAL_SOLARFLOW_DEVICE.productKey}/${FAKE_LOCAL_SOLARFLOW_DEVICE.deviceKey}/properties/report`,
+    Buffer.from(JSON.stringify({ properties: { electricLevel: 42 } })),
+  );
+  await flushStatesNow(localGladys);
+  const byId = Object.fromEntries(localGladys.published.map((s) => [s.featureExternalId, s.state]));
+  assert.equal(byId[`${device.external_id}:batteryLevel`], 42);
+
+  // A second evaluation keeps 'cloud' without re-publishing the badge.
+  const transportCallsAfterFallback = localGladys.transports.length;
+  await evaluateTelemetrySources(localGladys, localConfig, fallbackNow + 1000);
+  assert.equal(localGladys.transports.length, transportCallsAfterFallback);
+
+  // A new local message IS proof of local health: the listener transitions
+  // the device back to 'local' and publishes the 'local' badge.
+  localClient.emit(
+    'message',
+    LOCAL_SENSOR_TOPIC(FAKE_LOCAL_SOLARFLOW_DEVICE.snNumber, 'electricLevel'),
+    Buffer.from('61'),
+  );
+  await waitFor(() => localGladys.transports.length > transportCallsAfterFallback);
+  assert.deepEqual(localGladys.transports.at(-1), [
+    { external_id: device.external_id, transport: 'local' },
+  ]);
+
+  // After two consecutive all-local evaluations the cloud broker is released
+  // (one consumer per account: another instance may need it).
+  await evaluateTelemetrySources(localGladys, localConfig);
+  await evaluateTelemetrySources(localGladys, localConfig);
+  assert.equal(cloudClient.ended, true);
+
+  stopPush();
 });
 
 // --- Telemetry watchdog summary (pure helper) ---------------------------------
