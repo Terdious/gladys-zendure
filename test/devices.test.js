@@ -28,6 +28,7 @@ import {
   FAKE_SOLARFLOW_DEVICE,
   FAKE_SECOND_SOLARFLOW_DEVICE,
   FAKE_OFFLINE_SOLARFLOW_DEVICE,
+  FAKE_SOLARFLOW_2400_DEVICE,
   FAKE_LOCAL_SOLARFLOW_DEVICE,
 } from './helpers/fakeZendure.js';
 
@@ -81,6 +82,35 @@ test('buildDiscoveredDevices returns one payload per supported Zendure device', 
     assert.ok(feature.selector.startsWith(device.selector), 'feature selector is device-scoped');
   }
   assert.equal(device.features[0].selector, 'zendure-solarflow-abc123-battery-level');
+});
+
+test('discovers a newly-supported model (SolarFlow 2400) with the baseline features', async () => {
+  const localGladys = createFakeGladys();
+  setSolarflowDependencies({
+    fetchImpl: createFakeZendureFetch({
+      deviceList: [FAKE_SOLARFLOW_DEVICE, FAKE_SOLARFLOW_2400_DEVICE],
+    }),
+    mqttLibrary: createFakeMqttLibrary(),
+  });
+
+  const devices = await buildDiscoveredDevices(localGladys, config);
+  assert.equal(devices.length, 2);
+
+  const sf2400 = devices.find(
+    (device) => device.external_id === `solarflow:${FAKE_SOLARFLOW_2400_DEVICE.deviceKey}`,
+  );
+  assert.ok(sf2400, 'the SolarFlow 2400 device is discovered');
+  assert.equal(sf2400.name, 'Attic battery');
+  assert.equal(sf2400.features.length, 5);
+  assert.equal(sf2400.selector, 'zendure-solarflow-sf2400a');
+  assert.equal(sf2400.features[0].selector, 'zendure-solarflow-sf2400a-battery-level');
+
+  // Its cloud telemetry is published on poll like any other model.
+  await solarflow.onPoll(localGladys, config, sf2400);
+  await flushStatesNow(localGladys);
+  const byId = Object.fromEntries(localGladys.published.map((s) => [s.featureExternalId, s.state]));
+  assert.equal(byId[`${sf2400.external_id}:batteryLevel`], 55);
+  assert.equal(byId[`${sf2400.external_id}:solarInputPower`], 1400);
 });
 
 test('device external_ids are unique across the catalog', async () => {
