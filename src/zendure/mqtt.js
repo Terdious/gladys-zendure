@@ -230,6 +230,7 @@ function createBaseMqttRuntime({
   const latestPayloadByKey = new Map();
   const lastPayloadAtByKey = new Map();
   const payloadListeners = new Set();
+  let messagesReceived = 0;
 
   function subscribeDevice(rawCloudDevice) {
     if (!rawCloudDevice) {
@@ -277,6 +278,7 @@ function createBaseMqttRuntime({
   }
 
   function handleMessage(topic, payload) {
+    messagesReceived += 1;
     const parsed = parseMessage(topic, payload);
     if (!parsed || !parsed.key) {
       return;
@@ -386,9 +388,12 @@ function createBaseMqttRuntime({
       client.on('connect', () => {
         connected = true;
         refreshSubscriptions();
-        logger.info(
-          `Zendure MQTT connected to ${mqttUrl} ` +
-            `(${subscribedTopics.size} topic(s) for ${trackedDevices.size} device(s)).`,
+        logger.info(`Zendure MQTT connected to ${mqttUrl}.`);
+        // Counts are meaningless at connect time (subscriptions are still in
+        // flight): keep them out of the INFO line, expose them via getStats().
+        logger.debug(
+          `Zendure MQTT state after connect: ${subscribedTopics.size} topic(s) ` +
+            `for ${trackedDevices.size} device(s).`,
         );
       });
       client.on('offline', () => {
@@ -455,6 +460,22 @@ function createBaseMqttRuntime({
         return null;
       }
       return lastPayloadAtByKey.get(normalizeKey(key)) || null;
+    },
+
+    /**
+     * Diagnostic snapshot of this runtime, for the device-layer logs: honest
+     * counts of what is actually subscribed/tracked/received right now.
+     * @returns {{ connected: boolean, subscribedTopics: number,
+     * trackedDevices: number, messagesReceived: number, keysWithPayload: number }}
+     */
+    getStats() {
+      return {
+        connected,
+        subscribedTopics: subscribedTopics.size,
+        trackedDevices: trackedDevices.size,
+        messagesReceived,
+        keysWithPayload: latestPayloadByKey.size,
+      };
     },
 
     /**
@@ -568,15 +589,25 @@ export function createZendureMqtt({ mqttLibrary = mqtt, clientId, connectTimeout
 }
 
 /**
- * Create the Zendure LOCAL MQTT runtime. It consumes the native flat topic
- * scheme `Zendure/sensor/{serialNumber}/{metricName}` where each message is a
- * single plain scalar. Telemetry is keyed by SERIAL NUMBER (the cloud
- * `snNumber` field), and accumulated into a flat payload object per serial so
- * `buildStates`/`extractMetricValue` can read the metrics by leaf key.
+ * Create the Zendure LOCAL MQTT runtime. Depending on the firmware generation,
+ * a device publishes on its local broker EITHER the native flat topic scheme
+ * `Zendure/sensor/{serialNumber}/{metricName}` (one plain scalar per message)
+ * OR the legacy JSON topics `iot/{productKey}/{deviceKey}/...` (the same
+ * format as the cloud broker; e.g. the SolarFlow 800 Pro only publishes the
+ * legacy format locally). The runtime subscribes to BOTH and keys everything
+ * by SERIAL NUMBER (the cloud `snNumber` field), accumulating a flat payload
+ * object per serial so `buildStates`/`extractMetricValue` can read the metrics
+ * by leaf key. Legacy JSON payloads are flattened by merging their
+ * `properties` object.
  * @param {{ mqttLibrary?: typeof mqtt, clientId?: string, connectTimeout?: number }} [options]
  * @returns {object} the runtime
  */
 export function createZendureLocalMqtt({ mqttLibrary = mqtt, clientId, connectTimeout } = {}) {
+  // deviceKey (lowercased) -> serial number, so legacy iot/ topics (addressed
+  // by deviceKey) land in the per-serial cache. Filled by getDeviceKey: raw
+  // cloud devices carry both identifiers.
+  const serialByDeviceKey = new Map();
+
   return createBaseMqttRuntime({
     mqttLibrary,
     clientId,
@@ -589,22 +620,73 @@ export function createZendureLocalMqtt({ mqttLibrary = mqtt, clientId, connectTi
       if (!serial || typeof serial !== 'string' || serial.trim() === '') {
         return null;
       }
+      // Remember the deviceKey -> serial translation used by the legacy JSON
+      // topics.
+      const deviceKey = rawCloudDevice.deviceKey || rawCloudDevice.id;
+      if (deviceKey) {
+        serialByDeviceKey.set(String(deviceKey).toLowerCase(), serial);
+      }
       return serial;
     },
     topicsForDevice(rawCloudDevice) {
-      return [`${LOCAL_SENSOR_TOPIC_PREFIX}/${rawCloudDevice.snNumber}/#`];
+      const topics = [`${LOCAL_SENSOR_TOPIC_PREFIX}/${rawCloudDevice.snNumber}/#`];
+      // Also listen to the legacy JSON topics on the local broker: some
+      // firmwares only publish that format locally.
+      const { productKey } = rawCloudDevice;
+      const deviceKey = rawCloudDevice.deviceKey || rawCloudDevice.id;
+      if (productKey && deviceKey) {
+        topics.push(`iot/${productKey}/${deviceKey}/#`, `/${productKey}/${deviceKey}/#`);
+      }
+      return topics;
     },
     parseMessage(topic, payload) {
       const parsedTopic = parseLocalSensorTopic(topic);
-      if (!parsedTopic) {
+      if (parsedTopic) {
+        // Native flat format, one metric per message: build a flat partial
+        // `{ [metric]: value }` that merges into the per-serial payload.
+        return {
+          key: parsedTopic.serial,
+          partialPayload: { [parsedTopic.metric]: parseLocalScalar(payload) },
+        };
+      }
+
+      // Legacy JSON format (iot/{productKey}/{deviceKey}/... topics).
+      const deviceKey = extractDeviceKeyFromTopic(topic);
+      if (!deviceKey) {
         return null;
       }
-      // One metric per message: build a flat partial `{ [metric]: value }` that
-      // merges into the accumulated per-serial payload.
-      return {
-        key: parsedTopic.serial,
-        partialPayload: { [parsedTopic.metric]: parseLocalScalar(payload) },
-      };
+      const serial = serialByDeviceKey.get(String(deviceKey).toLowerCase());
+      if (!serial) {
+        // Not one of the tracked devices: ignore.
+        return null;
+      }
+
+      let decodedPayload;
+      try {
+        decodedPayload = JSON.parse(payload.toString());
+      } catch {
+        logger.debug(`Zendure local MQTT message ignored (invalid JSON) topic=${topic}.`);
+        return null;
+      }
+      // Messages tagged isHA are the ones third-party clients (like us) send:
+      // skip our own echoes.
+      if (!decodedPayload || typeof decodedPayload !== 'object' || decodedPayload.isHA) {
+        return null;
+      }
+
+      // Merge ONLY the report content into the flat per-serial cache: the
+      // `properties` object when present, otherwise the top-level numeric
+      // fields (some legacy messages carry metrics at the root).
+      const properties =
+        decodedPayload.properties && typeof decodedPayload.properties === 'object'
+          ? decodedPayload.properties
+          : Object.fromEntries(
+              Object.entries(decodedPayload).filter(([, value]) => Number.isFinite(value)),
+            );
+      if (Object.keys(properties).length === 0) {
+        return null;
+      }
+      return { key: serial, partialPayload: { ...properties } };
     },
   });
 }

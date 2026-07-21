@@ -304,6 +304,26 @@ test('own isHA echoes and invalid JSON payloads are ignored', async () => {
   assert.equal(runtime.getLatestPayload('DevKey1'), null);
 });
 
+test('getStats reports honest connection, subscription and message counters', async () => {
+  const { runtime, client } = await createConnectedRuntime();
+  runtime.subscribeDevice(DEVICE);
+  client.emit(
+    'message',
+    'iot/prodA/DevKey1/properties/report',
+    Buffer.from(JSON.stringify({ properties: { electricLevel: 12 } })),
+  );
+  client.emit('message', 'iot/prodA/DevKey1/properties/report', Buffer.from('not-json'));
+
+  const stats = runtime.getStats();
+  assert.equal(stats.connected, true);
+  assert.equal(stats.subscribedTopics, 2);
+  assert.equal(stats.trackedDevices, 1);
+  // Every incoming message is counted, even the ignored ones...
+  assert.equal(stats.messagesReceived, 2);
+  // ...but only valid reports produce a cached payload.
+  assert.equal(stats.keysWithPayload, 1);
+});
+
 test('disconnect ends the client and clears the cache', async () => {
   const { runtime, client } = await createConnectedRuntime();
   client.emit(
@@ -400,6 +420,96 @@ test('local runtime notifies listeners with the serial as key', async () => {
   assert.equal(seen[0].key, 'SN-LOCAL-1');
   assert.equal(seen[0].payload.electricLevel, 55);
   assert.equal(seen[0].topic, 'Zendure/sensor/SN-LOCAL-1/electricLevel');
+});
+
+// --- Local runtime: legacy JSON topics on the local broker --------------------
+// Some firmwares (e.g. SolarFlow 800 Pro) publish the legacy JSON format
+// (iot/{productKey}/{deviceKey}/...) on the LOCAL broker instead of the native
+// flat topics: the local runtime must consume both, keyed by SERIAL.
+
+const LOCAL_DEVICE_WITH_KEYS = {
+  snNumber: 'SN-LOCAL-1',
+  deviceKey: 'LocKey1',
+  productKey: 'prodA',
+  productModel: 'SolarFlow 800 Pro',
+};
+
+test('local subscribeDevice also subscribes the legacy iot topics when keys exist', async () => {
+  const { runtime, client } = await createConnectedLocalRuntime();
+
+  runtime.subscribeDevice(LOCAL_DEVICE_WITH_KEYS);
+  runtime.subscribeDevice(LOCAL_DEVICE_WITH_KEYS);
+
+  assert.deepEqual(client.subscriptions, [
+    'Zendure/sensor/SN-LOCAL-1/#',
+    'iot/prodA/LocKey1/#',
+    '/prodA/LocKey1/#',
+  ]);
+});
+
+test('local runtime consumes legacy iot JSON reports keyed by SERIAL and merges with flat topics', async () => {
+  const { runtime, client } = await createConnectedLocalRuntime();
+  runtime.subscribeDevice(LOCAL_DEVICE_WITH_KEYS);
+
+  // Flat native topic first...
+  client.emit('message', 'Zendure/sensor/SN-LOCAL-1/packInputPower', Buffer.from('120'));
+  // ...then a legacy JSON report on the same broker: its `properties` merge
+  // into the SAME flat per-serial payload.
+  client.emit(
+    'message',
+    'iot/prodA/LocKey1/properties/report',
+    Buffer.from(JSON.stringify({ properties: { electricLevel: 66, solarInputPower: 250 } })),
+  );
+
+  const payload = runtime.getLatestPayload('SN-LOCAL-1');
+  assert.deepEqual(payload, { packInputPower: 120, electricLevel: 66, solarInputPower: 250 });
+
+  const seen = [];
+  runtime.onPayload((key) => seen.push(key));
+  client.emit(
+    'message',
+    '/prodA/LocKey1/properties/report',
+    Buffer.from(JSON.stringify({ properties: { electricLevel: 67 } })),
+  );
+  // Listeners are notified with the SERIAL as key, never the deviceKey.
+  assert.deepEqual(seen, ['SN-LOCAL-1']);
+  assert.equal(runtime.getLatestPayload('SN-LOCAL-1').electricLevel, 67);
+});
+
+test('local runtime falls back to top-level numeric fields when properties is absent', async () => {
+  const { runtime, client } = await createConnectedLocalRuntime();
+  runtime.subscribeDevice(LOCAL_DEVICE_WITH_KEYS);
+
+  client.emit(
+    'message',
+    'iot/prodA/LocKey1/state',
+    Buffer.from(JSON.stringify({ electricLevel: 44, packState: 'discharging' })),
+  );
+
+  // Only the numeric root fields are merged; strings are ignored in this mode.
+  assert.deepEqual(runtime.getLatestPayload('SN-LOCAL-1'), { electricLevel: 44 });
+});
+
+test('local runtime ignores iot echoes, invalid JSON and unknown device keys', async () => {
+  const { runtime, client } = await createConnectedLocalRuntime();
+  runtime.subscribeDevice(LOCAL_DEVICE_WITH_KEYS);
+
+  // Our own isHA echo.
+  client.emit(
+    'message',
+    'iot/prodA/LocKey1/properties/read',
+    Buffer.from(JSON.stringify({ isHA: true, properties: ['getAll'] })),
+  );
+  // Invalid JSON.
+  client.emit('message', 'iot/prodA/LocKey1/properties/report', Buffer.from('not-json'));
+  // A deviceKey that maps to no tracked serial.
+  client.emit(
+    'message',
+    'iot/prodA/Unknown9/properties/report',
+    Buffer.from(JSON.stringify({ properties: { electricLevel: 99 } })),
+  );
+
+  assert.equal(runtime.getLatestPayload('SN-LOCAL-1'), null);
 });
 
 test('local requestDeviceProperties is a no-op returning false', async () => {

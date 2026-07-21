@@ -69,6 +69,14 @@ const lastPublishedByFeature = new Map(); // feature external_id -> last publish
 const STALE_REPUBLISH_INTERVAL_IN_MS = 30 * 60 * 1000;
 const lastPublishedAtByFeature = new Map(); // feature external_id -> last publish time (ms)
 
+// Telemetry watchdog: every 5 minutes, log which devices reported vs went
+// silent on each active source, plus the publish-channel counters.
+export const TELEMETRY_WATCHDOG_INTERVAL_IN_MS = 5 * 60 * 1000;
+let telemetryWatchdogTimer = null;
+// Publish-channel counters since the last watchdog report.
+let publishSentCount = 0;
+let publishDeduplicatedCount = 0;
+
 /** Queue states for publication through the single paced channel. */
 function queueStates(gladys, states) {
   for (const state of states) {
@@ -103,15 +111,20 @@ async function flushPendingStates(gladys) {
   // ones that have not been re-published for a while (freshness keep-alive).
   const now = Date.now();
   const changed = [];
+  let deduplicated = 0;
   for (const [featureId, state] of pendingStates) {
     const isChanged = lastPublishedByFeature.get(featureId) !== state.state;
     const lastPublishedAt = lastPublishedAtByFeature.get(featureId) || 0;
     if (isChanged || now - lastPublishedAt > STALE_REPUBLISH_INTERVAL_IN_MS) {
       changed.push(state);
+    } else {
+      deduplicated += 1;
     }
   }
   pendingStates = new Map();
+  publishDeduplicatedCount += deduplicated;
   if (changed.length === 0) {
+    logger.debug(`publish: nothing to send (${deduplicated} state(s) deduplicated)`);
     return;
   }
 
@@ -124,7 +137,8 @@ async function flushPendingStates(gladys) {
       lastPublishedAtByFeature.set(state.device_feature_external_id, Date.now());
     }
     publishBackoffInMs = 0;
-    logger.debug(`publish: sent ${batch.length} changed state(s)`);
+    publishSentCount += batch.length;
+    logger.debug(`publish: sent ${batch.length} changed state(s), ${deduplicated} deduplicated`);
   } catch (e) {
     // Not published: re-queue it (unless a fresher value arrived meanwhile).
     for (const state of batch) {
@@ -149,6 +163,52 @@ async function flushPendingStates(gladys) {
   }
   if (pendingStates.size > 0) {
     schedulePublish(gladys);
+  }
+}
+
+/**
+ * Forget the publish dedup memory (and the watchdog counters) so the NEXT
+ * flush re-sends EVERY value. Called when the user changes the configuration
+ * (e.g. switches cloud<->local): the first sync after the change must
+ * re-publish everything immediately instead of waiting for the 30-min
+ * keep-alive.
+ */
+export function resetPublishDedup() {
+  lastPublishedByFeature.clear();
+  lastPublishedAtByFeature.clear();
+  publishSentCount = 0;
+  publishDeduplicatedCount = 0;
+}
+
+/**
+ * Build the telemetry watchdog summary for one source, from
+ * `[{ label, lastPayloadAt }]` entries (one per supported device of that
+ * source). A device is "reporting" when its last payload is younger than the
+ * watchdog interval. Pure helper, exported for direct unit testing.
+ * @param {Array<{ label: string, lastPayloadAt: number|null }>} entries
+ * @param {number} now current time (ms)
+ * @returns {string} e.g. `14/15 device(s) reported in the last 5 min; silent: ...`
+ */
+export function buildTelemetrySummary(entries, now) {
+  const total = entries.length;
+  const silent = entries.filter(
+    (entry) =>
+      !entry.lastPayloadAt || now - entry.lastPayloadAt > TELEMETRY_WATCHDOG_INTERVAL_IN_MS,
+  );
+  if (silent.length === 0) {
+    return `all ${total} device(s) reporting`;
+  }
+  const minutes = Math.round(TELEMETRY_WATCHDOG_INTERVAL_IN_MS / 60000);
+  return (
+    `${total - silent.length}/${total} device(s) reported in the last ${minutes} min; ` +
+    `silent: ${silent.map((entry) => entry.label).join(', ')}`
+  );
+}
+
+function stopTelemetryWatchdog() {
+  if (telemetryWatchdogTimer) {
+    clearInterval(telemetryWatchdogTimer);
+    telemetryWatchdogTimer = null;
   }
 }
 
@@ -199,8 +259,8 @@ export function resetSolarflowRuntime() {
   }
   pendingStates = new Map();
   publishBackoffInMs = 0;
-  lastPublishedByFeature.clear();
-  lastPublishedAtByFeature.clear();
+  resetPublishDedup();
+  stopTelemetryWatchdog();
   cloudData = null;
 }
 
@@ -399,6 +459,10 @@ function buildStates(gladys, rawCloudDevice, payload) {
 
 export const solarflow = {
   key: DEVICE_TYPE,
+
+  // Optional hook called by the registry when the configuration changes: the
+  // first sync after a change must re-publish every value immediately.
+  resetPublishDedup,
 
   /** Registry dispatch: does this blueprint own the given Gladys device? */
   ownsDevice(gladys, device) {
@@ -629,8 +693,67 @@ export const solarflow = {
           }
         }
 
+        // Resolve the broker URL behind a runtime (for the diagnostics logs):
+        // local runtimes are keyed by URL, the cloud one uses the deviceList
+        // metadata.
+        const brokerUrlOf = (runtime, source) => {
+          if (source === 'cloud') {
+            return data.mqtt?.url || 'cloud';
+          }
+          for (const [url, localRuntime] of localMqttRuntimes) {
+            if (localRuntime === runtime) {
+              return url;
+            }
+          }
+          return 'local';
+        };
+
+        const runtimeInfos = [];
         for (const [runtime, source] of runtimesBySource) {
           unsubscribes.push(runtime.onPayload(makeListener(source)));
+          const url = brokerUrlOf(runtime, source);
+          // The devices this runtime serves (for the telemetry watchdog): on a
+          // local runtime, only the devices publishing to THIS broker.
+          const ownedDevices = devices.filter((rawCloudDevice) => {
+            if (isDeviceLocallyReachable(config, rawCloudDevice)) {
+              return source === 'local' && buildLocalBrokerConfig(rawCloudDevice).url === url;
+            }
+            return source === 'cloud';
+          });
+          runtimeInfos.push({ runtime, source, ownedDevices });
+          logger.info(
+            `push: ${source} broker ${url}: tracking ${runtime.getStats().trackedDevices} device(s)`,
+          );
+        }
+
+        // Telemetry watchdog: one INFO line per active source every 5 minutes
+        // listing reporting vs silent devices, plus the publish-channel
+        // counters, so a device gone quiet is visible without debug logs.
+        stopTelemetryWatchdog();
+        telemetryWatchdogTimer = setInterval(() => {
+          const now = Date.now();
+          for (const { runtime, source, ownedDevices } of runtimeInfos) {
+            if (ownedDevices.length === 0) {
+              continue;
+            }
+            const entries = ownedDevices.map((rawCloudDevice) => ({
+              label:
+                `${rawCloudDevice.deviceName || modelOf(rawCloudDevice)} ` +
+                `(${deviceKeyOf(rawCloudDevice)}, SN ${rawCloudDevice.snNumber || 'unknown'})`,
+              lastPayloadAt: runtime.getLastPayloadAt(telemetryKeyOf(source, rawCloudDevice)),
+            }));
+            logger.info(`telemetry(${source}): ${buildTelemetrySummary(entries, now)}`);
+          }
+          logger.info(
+            `publish: ${publishSentCount} sent, ${publishDeduplicatedCount} deduplicated ` +
+              `since the last report`,
+          );
+          publishSentCount = 0;
+          publishDeduplicatedCount = 0;
+        }, TELEMETRY_WATCHDOG_INTERVAL_IN_MS);
+        // Do not keep the process alive just for the watchdog.
+        if (typeof telemetryWatchdogTimer.unref === 'function') {
+          telemetryWatchdogTimer.unref();
         }
       } catch (e) {
         logger.error('push: Zendure MQTT setup failed', e);
@@ -639,6 +762,7 @@ export const solarflow = {
 
     return () => {
       stopped = true;
+      stopTelemetryWatchdog();
       for (const unsubscribe of unsubscribes) {
         unsubscribe();
       }

@@ -122,6 +122,20 @@ export async function syncDiscoveredDevices(gladys, config) {
 }
 
 /**
+ * Forget every blueprint's publish dedup memory so the next sync re-publishes
+ * EVERY value immediately (instead of waiting for the periodic keep-alive).
+ * Called by the entry point when the user updates the configuration, e.g.
+ * switching a device between the cloud and local telemetry sources.
+ */
+export function resetTelemetryDedup() {
+  for (const bp of DEVICE_BLUEPRINTS) {
+    if (typeof bp.resetPublishDedup === 'function') {
+      bp.resetPublishDedup();
+    }
+  }
+}
+
+/**
  * Find the blueprint that owns a given device, from its external_id
  * (used to route onPoll / onSetValue to the right device).
  */
