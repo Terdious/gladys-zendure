@@ -6,6 +6,7 @@ import {
   buildDiscoveredDevices,
   findBlueprintByDevice,
   syncDiscoveredDevices,
+  resetTelemetryDedup,
 } from '../src/devices/index.js';
 import {
   solarflow,
@@ -13,6 +14,8 @@ import {
   resetSolarflowRuntime,
   flushStatesNow,
   markPublishedStatesStale,
+  buildTelemetrySummary,
+  TELEMETRY_WATCHDOG_INTERVAL_IN_MS,
 } from '../src/devices/solarflow.js';
 import { normalizeConfig } from '../src/config.js';
 import { createFakeGladys } from './helpers/fakeGladys.js';
@@ -550,4 +553,63 @@ test('unchanged values are re-published once the keep-alive interval elapses', a
   await solarflow.onPoll(localGladys, config, device);
   await flushStatesNow(localGladys);
   assert.equal(localGladys.published.length, firstCount * 2);
+});
+
+test('resetTelemetryDedup forces an immediate full re-send of unchanged values', async () => {
+  const localGladys = createFakeGladys();
+  const [device] = await buildDiscoveredDevices(localGladys, config);
+
+  // First poll publishes everything.
+  await solarflow.onPoll(localGladys, config, device);
+  await flushStatesNow(localGladys);
+  const firstCount = localGladys.published.length;
+  assert.ok(firstCount > 0);
+
+  // Identical values are deduplicated on the next poll.
+  await solarflow.onPoll(localGladys, config, device);
+  await flushStatesNow(localGladys);
+  assert.equal(localGladys.published.length, firstCount);
+
+  // A configuration change resets the dedup memory (via the registry hook):
+  // the next poll re-sends EVERY value immediately, without waiting for the
+  // 30-min keep-alive.
+  resetTelemetryDedup();
+  await solarflow.onPoll(localGladys, config, device);
+  await flushStatesNow(localGladys);
+  assert.equal(localGladys.published.length, firstCount * 2);
+});
+
+// --- Telemetry watchdog summary (pure helper) ---------------------------------
+
+test('buildTelemetrySummary lists silent devices with their labels', () => {
+  const now = 1_000_000_000;
+  const fresh = now - 60 * 1000;
+  const stale = now - TELEMETRY_WATCHDOG_INTERVAL_IN_MS - 1;
+
+  const summary = buildTelemetrySummary(
+    [
+      { label: 'Garage battery (AbC123, SN SN-1)', lastPayloadAt: fresh },
+      { label: 'Balcony battery (XyZ789, SN SN-2)', lastPayloadAt: stale },
+      { label: 'Cellar battery (OfF456, SN SN-3)', lastPayloadAt: null },
+    ],
+    now,
+  );
+
+  assert.equal(
+    summary,
+    '1/3 device(s) reported in the last 5 min; ' +
+      'silent: Balcony battery (XyZ789, SN SN-2), Cellar battery (OfF456, SN SN-3)',
+  );
+});
+
+test('buildTelemetrySummary reports the all-reporting case', () => {
+  const now = Date.now();
+  const summary = buildTelemetrySummary(
+    [
+      { label: 'A', lastPayloadAt: now - 1000 },
+      { label: 'B', lastPayloadAt: now - 2000 },
+    ],
+    now,
+  );
+  assert.equal(summary, 'all 2 device(s) reporting');
 });
