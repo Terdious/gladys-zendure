@@ -24,6 +24,20 @@ test('normalizeConfig falls back to the default for a missing field', () => {
   assert.equal(config.poll_frequency, DEFAULT_CONFIG.poll_frequency);
 });
 
+test('normalizeConfig defaults enable_local_mqtt to false', () => {
+  assert.equal(normalizeConfig().enable_local_mqtt, false);
+  assert.equal(normalizeConfig({ cloud_key: 'aGVsbG8=' }).enable_local_mqtt, false);
+});
+
+test('normalizeConfig coerces enable_local_mqtt from booleans and form strings', () => {
+  assert.equal(normalizeConfig({ enable_local_mqtt: true }).enable_local_mqtt, true);
+  assert.equal(normalizeConfig({ enable_local_mqtt: 'true' }).enable_local_mqtt, true);
+  assert.equal(normalizeConfig({ enable_local_mqtt: 'on' }).enable_local_mqtt, true);
+  assert.equal(normalizeConfig({ enable_local_mqtt: '1' }).enable_local_mqtt, true);
+  assert.equal(normalizeConfig({ enable_local_mqtt: 'false' }).enable_local_mqtt, false);
+  assert.equal(normalizeConfig({ enable_local_mqtt: false }).enable_local_mqtt, false);
+});
+
 test('toGladysPollFrequency snaps seconds to the allowed Gladys values (ms)', () => {
   assert.equal(toGladysPollFrequency(30), 30000); // exact match
   assert.equal(toGladysPollFrequency(1), 1000); // lower bound

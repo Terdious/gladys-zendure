@@ -21,6 +21,7 @@ import {
   DEVICE_BLUEPRINTS,
   syncDiscoveredDevices,
   findBlueprintByDevice,
+  resetTelemetryDedup,
 } from './src/devices/index.js';
 
 const gladys = new GladysIntegration();
@@ -62,6 +63,10 @@ gladys.onPoll(async (device) => {
 gladys.onConfigUpdated(async (newConfig) => {
   logger.info('onConfigUpdated -> new configuration received');
   config = normalizeConfig(newConfig);
+  // Forget the publish dedup memory: after a config change (e.g. cloud<->local
+  // switch) the first sync must re-publish every value immediately instead of
+  // waiting for the periodic keep-alive.
+  resetTelemetryDedup();
   // Re-publish the devices: some properties (key, frequency) depend on it.
   // publishDiscoveredDevices is idempotent (upsert by external_id). The sync
   // also reports the connection status and the per-device transport badges.

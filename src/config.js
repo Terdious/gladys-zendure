@@ -15,7 +15,26 @@
 export const DEFAULT_CONFIG = {
   cloud_key: '', // Zendure cloud authorization key (base64 token), secret
   poll_frequency: 30, // seconds, how often device telemetry is refreshed
+  enable_local_mqtt: false, // opt-in to the per-device local MQTT broker (zenSDK)
 };
+
+/**
+ * Coerce a value coming from a form (which may be a string like "true") into a
+ * boolean.
+ * @param {unknown} value raw value
+ * @param {boolean} fallback default when the value is missing
+ * @returns {boolean}
+ */
+function toBoolean(value, fallback) {
+  if (value === undefined || value === null || value === '') {
+    return fallback;
+  }
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  return normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on';
+}
 
 /**
  * Merge the user config with the defaults.
@@ -28,6 +47,7 @@ export function normalizeConfig(raw = {}) {
     // Force the types: config may arrive as strings from a form.
     cloud_key: String(raw.cloud_key ?? DEFAULT_CONFIG.cloud_key).trim(),
     poll_frequency: Number(raw.poll_frequency ?? DEFAULT_CONFIG.poll_frequency),
+    enable_local_mqtt: toBoolean(raw.enable_local_mqtt, DEFAULT_CONFIG.enable_local_mqtt),
   };
 }
 

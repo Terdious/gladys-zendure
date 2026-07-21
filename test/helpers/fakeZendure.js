@@ -46,6 +46,31 @@ export const FAKE_OFFLINE_SOLARFLOW_DEVICE = {
   electricLevel: 12,
 };
 
+// A supported device that also advertises its LOCAL MQTT broker (native local
+// MQTT). Local telemetry is keyed by the device serial number (`snNumber`).
+export const FAKE_LOCAL_SOLARFLOW_DEVICE = {
+  deviceKey: 'LoC456',
+  snNumber: 'SN-LOCAL-1',
+  productKey: 'prodX',
+  productModel: 'SolarFlow 800 Pro',
+  deviceName: 'Local battery',
+  electricLevel: 55,
+  packInputPower: 100,
+  outputPackPower: 0,
+  outputHomePower: 200,
+  solarInputPower: 300,
+  // Local MQTT broker parameters exposed by the cloud deviceList.
+  ip: '192.168.1.50',
+  server: '192.168.1.50',
+  port: 1883,
+  protocol: 'mqtt',
+  username: 'local-user',
+  password: 'local-pass',
+  // The cloud `enable` flag is unreliable and intentionally left false here to
+  // prove reachability no longer depends on it.
+  enable: false,
+};
+
 export const FAKE_UNSUPPORTED_DEVICE = {
   deviceKey: 'ZzZ999',
   productKey: 'prodY',
