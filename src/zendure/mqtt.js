@@ -268,6 +268,15 @@ function createBaseMqttRuntime({
   const lastPayloadAtByKey = new Map();
   const payloadListeners = new Set();
   let messagesReceived = 0;
+  // Connection log throttling: the first connect of a session is INFO, the
+  // automatic reconnections are DEBUG (the 5-min watchdog reports the count).
+  // A rapid take-over cycle (another consumer fighting over a shared client
+  // id, e.g. Home Assistant on the same Zendure cloud account) is diagnosed
+  // once at WARN instead of flooding one INFO line per reconnect.
+  let connectCount = 0;
+  let lastConnectAt = 0;
+  let rapidReconnects = 0;
+  let takeOverWarned = false;
 
   function subscribeDevice(rawCloudDevice) {
     if (!rawCloudDevice) {
@@ -425,7 +434,26 @@ function createBaseMqttRuntime({
       client.on('connect', () => {
         connected = true;
         refreshSubscriptions();
-        logger.info(`Zendure MQTT connected to ${mqttUrl}.`);
+        connectCount += 1;
+        const now = Date.now();
+        const isRapid = lastConnectAt !== 0 && now - lastConnectAt < 60 * 1000;
+        rapidReconnects = isRapid ? rapidReconnects + 1 : 0;
+        lastConnectAt = now;
+        if (connectCount === 1) {
+          logger.info(`Zendure MQTT connected to ${mqttUrl}.`);
+        } else {
+          logger.debug(`Zendure MQTT reconnected to ${mqttUrl} (connection #${connectCount}).`);
+        }
+        if (rapidReconnects >= 5 && !takeOverWarned && mqttConfiguration.clientId) {
+          takeOverWarned = true;
+          logger.warn(
+            `Zendure MQTT session on ${mqttUrl} keeps being taken over ` +
+              `(${rapidReconnects + 1} reconnections in under a minute each): another consumer ` +
+              `of the same Zendure account (Home Assistant, a second Gladys instance...) is ` +
+              `fighting over the shared cloud client id. Telemetry flows but may be intermittent; ` +
+              `only one cloud consumer per account is supported by Zendure.`,
+          );
+        }
         // Counts are meaningless at connect time (subscriptions are still in
         // flight): keep them out of the INFO line, expose them via getStats().
         logger.debug(
@@ -503,7 +531,8 @@ function createBaseMqttRuntime({
      * Diagnostic snapshot of this runtime, for the device-layer logs: honest
      * counts of what is actually subscribed/tracked/received right now.
      * @returns {{ connected: boolean, subscribedTopics: number,
-     * trackedDevices: number, messagesReceived: number, keysWithPayload: number }}
+     * trackedDevices: number, messagesReceived: number, keysWithPayload: number,
+     * connectCount: number }}
      */
     getStats() {
       return {
@@ -512,6 +541,7 @@ function createBaseMqttRuntime({
         trackedDevices: trackedDevices.size,
         messagesReceived,
         keysWithPayload: latestPayloadByKey.size,
+        connectCount,
       };
     },
 

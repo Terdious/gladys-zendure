@@ -106,6 +106,9 @@ const lastPublishedAtByFeature = new Map(); // feature external_id -> last publi
 // silent on each active source, plus the publish-channel counters.
 export const TELEMETRY_WATCHDOG_INTERVAL_IN_MS = 5 * 60 * 1000;
 let telemetryWatchdogTimer = null;
+// connectCount baseline per runtime, to report (re)connections per watchdog
+// period (a rapid delta exposes the shared-cloud-clientId take-over fight).
+const watchdogConnectBaseline = new WeakMap();
 // Publish-channel counters since the last watchdog report.
 let publishSentCount = 0;
 let publishDeduplicatedCount = 0;
@@ -1067,6 +1070,32 @@ export const solarflow = {
         stopTelemetryWatchdog();
         telemetryWatchdogTimer = setInterval(() => {
           const now = Date.now();
+          // Broker connection summary, from the runtimes alive RIGHT NOW (a
+          // lazily-connected cloud fallback runtime is included): connection
+          // state + (re)connections since the last report. The reconnect
+          // delta is the visible trace of the shared-cloud-clientId fight
+          // (one INFO line per reconnect would flood the logs instead).
+          const liveRuntimes = [...localMqttRuntimes].map(([url, runtime]) => ({
+            runtime,
+            source: 'local',
+            url,
+          }));
+          if (cloudMqttRuntime) {
+            liveRuntimes.push({
+              runtime: cloudMqttRuntime,
+              source: 'cloud',
+              url: cloudData?.mqtt?.url || 'cloud',
+            });
+          }
+          for (const { runtime, source, url } of liveRuntimes) {
+            const stats = runtime.getStats();
+            const baseline = watchdogConnectBaseline.get(runtime) || 0;
+            watchdogConnectBaseline.set(runtime, stats.connectCount);
+            logger.info(
+              `broker(${source} ${url}): ${stats.connected ? 'connected' : 'disconnected'}, ` +
+                `${stats.connectCount - baseline} (re)connection(s) in the last 5 min`,
+            );
+          }
           for (const { runtime, source, ownedDevices } of runtimeInfos) {
             if (ownedDevices.length === 0) {
               continue;

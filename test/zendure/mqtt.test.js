@@ -376,6 +376,20 @@ test('own isHA echoes and invalid JSON payloads are ignored', async () => {
   assert.equal(runtime.getLatestPayload('DevKey1'), null);
 });
 
+test('reconnections increment connectCount in getStats (watchdog reconnect delta)', async () => {
+  const { runtime, client } = await createConnectedRuntime();
+  assert.equal(runtime.getStats().connectCount, 1);
+
+  // A take-over cycle: the broker closes the session, mqtt.js reconnects.
+  client.emit('close');
+  client.emit('connect');
+  client.emit('close');
+  client.emit('connect');
+
+  assert.equal(runtime.getStats().connectCount, 3);
+  assert.equal(runtime.getStats().connected, true);
+});
+
 test('getStats reports honest connection, subscription and message counters', async () => {
   const { runtime, client } = await createConnectedRuntime();
   runtime.subscribeDevice(DEVICE);
