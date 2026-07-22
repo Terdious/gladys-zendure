@@ -416,7 +416,8 @@ test('a fresh local MQTT report is pushed in real time (keyed by serial)', async
       localGladys.published.map((s) => [s.featureExternalId, s.state]),
     );
     return map[`${device.external_id}:batteryLevel`] !== undefined ? map : null;
-  });
+    // The paced publish channel ticks every 3.5 s: give it headroom.
+  }, 6000);
   assert.equal(byId[`${device.external_id}:batteryLevel`], 66);
 
   stopPush();

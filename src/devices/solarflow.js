@@ -90,7 +90,12 @@ let dynamicUnsubscribes = [];
 //     publish (huge reduction once the initial sync is done),
 //   - sends everything pending in ONE request per tick (up to the SDK's 100),
 //   - paces ticks and backs off when the core rate-limits us.
-const PUBLISH_INTERVAL_IN_MS = 2000;
+// 3.5 s keeps our sustained request rate around 17/min: the Gladys core
+// rate-limits its API at ~100 requests per 5 minutes (20/min average), a
+// budget also consumed by discovery/status/transport calls — a 2 s tick
+// (30/min) tripped 429 storms in the field on a fast-changing 15-device
+// fleet. Values coalesce in the meantime (latest per feature wins).
+const PUBLISH_INTERVAL_IN_MS = 3500;
 const PUBLISH_MAX_BACKOFF_IN_MS = 30000;
 const MAX_STATES_PER_REQUEST = 100; // SDK hard limit (publishStates)
 let pendingStates = new Map(); // feature external_id -> state object
