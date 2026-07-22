@@ -112,6 +112,12 @@ const watchdogConnectBaseline = new WeakMap();
 // Publish-channel counters since the last watchdog report.
 let publishSentCount = 0;
 let publishDeduplicatedCount = 0;
+// Timestamps of our POST /state requests over the last minute: when the core
+// rate-limits us while OUR rate is modest, the budget is being consumed by
+// something else (typically a SECOND integration instance on the same core),
+// and the failure log should say so instead of leaving the user guessing.
+let publishRequestLog = [];
+let sharedLimitHintLogged = false;
 
 /** Queue states for publication through the single paced channel. */
 function queueStates(gladys, states) {
@@ -166,6 +172,8 @@ async function flushPendingStates(gladys) {
 
   const batch = changed.slice(0, MAX_STATES_PER_REQUEST);
   const overflow = changed.slice(MAX_STATES_PER_REQUEST);
+  publishRequestLog.push(now);
+  publishRequestLog = publishRequestLog.filter((at) => now - at <= 60 * 1000);
   try {
     await gladys.publishStates(batch);
     for (const state of batch) {
@@ -186,10 +194,27 @@ async function flushPendingStates(gladys) {
       PUBLISH_MAX_BACKOFF_IN_MS,
       (publishBackoffInMs || PUBLISH_INTERVAL_IN_MS) * 2,
     );
+    // Name the rejected features (device:feature suffix of the external id)
+    // and our own request rate, so a rate-limit log tells WHAT was refused
+    // and WHETHER we caused it.
+    const sample = batch
+      .slice(0, 3)
+      .map((state) => state.device_feature_external_id.split(':').slice(-2).join(':'));
+    const ourRate = publishRequestLog.length;
     logger.warn(
       `publish: states rejected (${e.message}); retrying ${batch.length} state(s) in ` +
-        `${PUBLISH_INTERVAL_IN_MS + publishBackoffInMs} ms`,
+        `${PUBLISH_INTERVAL_IN_MS + publishBackoffInMs} ms ` +
+        `(our rate: ${ourRate} request(s) in the last 60 s; ` +
+        `batch: ${sample.join(', ')}${batch.length > 3 ? ', ...' : ''})`,
     );
+    if (/Too Many Requests/i.test(e.message || '') && ourRate <= 30 && !sharedLimitHintLogged) {
+      sharedLimitHintLogged = true;
+      logger.warn(
+        'publish: the core rate limit tripped while our own request rate is modest: ' +
+          'the budget is probably shared with ANOTHER integration instance publishing ' +
+          'states on this Gladys (e.g. a second Zendure container - prod + test side by side).',
+      );
+    }
   }
   // Re-queue overflow and schedule the next tick if anything remains.
   for (const state of overflow) {
@@ -214,6 +239,8 @@ export function resetPublishDedup() {
   lastPublishedAtByFeature.clear();
   publishSentCount = 0;
   publishDeduplicatedCount = 0;
+  publishRequestLog = [];
+  sharedLimitHintLogged = false;
 }
 
 /**
@@ -934,6 +961,16 @@ export const solarflow = {
     // cloud value. The cloud payload stays as-is (its `properties` report is
     // complete, and the raw entry would shadow fresher nested values).
     const latestPayload = runtime.getLatestPayload(telemetryKey);
+    // A disconnected broker means the cache is BLIND, not that values are
+    // stable: re-publishing it (30-min keep-alive included) would present
+    // stale data as fresh during an outage. Skip until the broker is back.
+    // (Without any cached payload yet, the raw cloud entry still bootstraps.)
+    if (!runtime.connected && latestPayload) {
+      logger.debug(
+        `onPoll: ${source} broker disconnected for ${deviceKey}, cached republish skipped`,
+      );
+      return;
+    }
     const payload =
       source === 'local' && latestPayload
         ? { ...rawCloudDevice, ...latestPayload }

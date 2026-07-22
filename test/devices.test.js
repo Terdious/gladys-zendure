@@ -491,6 +491,36 @@ test('onPoll prefers the cached MQTT payload over the cloud entry', async () => 
   assert.equal(byId[`${device.external_id}:batteryLevel`], 81);
 });
 
+test('onPoll does not republish the cached payload while the source broker is disconnected', async () => {
+  const localGladys = createFakeGladys();
+  const mqttLibrary = createFakeMqttLibrary();
+  setSolarflowDependencies({ mqttLibrary });
+
+  const [device] = await buildDiscoveredDevices(localGladys, config);
+
+  // First poll connects MQTT; a report fills the cache and is published.
+  await solarflow.onPoll(localGladys, config, device);
+  await flushStatesNow(localGladys);
+  const client = mqttLibrary.clients[0];
+  client.emit(
+    'message',
+    `iot/${FAKE_SOLARFLOW_DEVICE.productKey}/${FAKE_SOLARFLOW_DEVICE.deviceKey}/properties/report`,
+    Buffer.from(JSON.stringify({ properties: { electricLevel: 81 } })),
+  );
+
+  // The broker connection drops (internet cut): the cache is now blind.
+  client.emit('close');
+
+  localGladys.published.length = 0;
+  markPublishedStatesStale(); // the 30-min keep-alive would republish...
+  await solarflow.onPoll(localGladys, config, device);
+  await flushStatesNow(localGladys);
+
+  // ...but nothing is sent while the broker is down: stale data must not be
+  // presented as fresh during an outage.
+  assert.equal(localGladys.published.length, 0);
+});
+
 test('onPoll merges a partial local payload over the cloud snapshot', async () => {
   const localGladys = createFakeGladys();
   const mqttLibrary = createFakeMqttLibrary();
