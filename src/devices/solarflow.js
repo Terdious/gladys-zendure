@@ -90,13 +90,21 @@ let dynamicUnsubscribes = [];
 //     publish (huge reduction once the initial sync is done),
 //   - sends everything pending in ONE request per tick (up to the SDK's 100),
 //   - paces ticks and backs off when the core rate-limits us.
-// 3.5 s keeps our sustained request rate around 17/min: the Gladys core
-// rate-limits its API at ~100 requests per 5 minutes (20/min average), a
-// budget also consumed by discovery/status/transport calls — a 2 s tick
-// (30/min) tripped 429 storms in the field on a fast-changing 15-device
-// fleet. Values coalesce in the meantime (latest per feature wins).
-const PUBLISH_INTERVAL_IN_MS = 3500;
+// Adaptive pacing (AIMD, like TCP congestion control): the tick is
+// PUBLISH_INTERVAL_IN_MS + an adaptive extra delay. When the core accepts our
+// batch the extra delay decays gently (additive decrease) back towards the
+// reactive base; a 429 grows it fast (multiplicative increase). Result: ~2 s
+// ticks (reactive, good for control automations) when we are the only
+// consumer, self-throttling toward ~5-6 s only while the core's shared budget
+// (~100 requests / 5 min, also consumed by discovery/status/transport AND by
+// any second integration instance) is actually saturated. Values coalesce
+// between ticks (latest per feature wins), so a longer tick never loses data,
+// it only delays it. onSetValue commands do NOT go through this channel — they
+// are sent immediately — so control latency is unaffected by the pacing.
+const PUBLISH_INTERVAL_IN_MS = 2000;
 const PUBLISH_MAX_BACKOFF_IN_MS = 30000;
+// How much the adaptive extra delay decays per successful flush.
+const PUBLISH_BACKOFF_DECAY_IN_MS = 500;
 const MAX_STATES_PER_REQUEST = 100; // SDK hard limit (publishStates)
 let pendingStates = new Map(); // feature external_id -> state object
 let publishTimer = null;
@@ -185,7 +193,10 @@ async function flushPendingStates(gladys) {
       lastPublishedByFeature.set(state.device_feature_external_id, state.state);
       lastPublishedAtByFeature.set(state.device_feature_external_id, Date.now());
     }
-    publishBackoffInMs = 0;
+    // Additive decrease: ease back towards the reactive base instead of
+    // resetting to 0, so a single success between 429s does not immediately
+    // re-flood the shared budget (which would just trip the next 429).
+    publishBackoffInMs = Math.max(0, publishBackoffInMs - PUBLISH_BACKOFF_DECAY_IN_MS);
     publishSentCount += batch.length;
     logger.debug(`publish: sent ${batch.length} changed state(s), ${deduplicated} deduplicated`);
   } catch (e) {
