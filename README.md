@@ -5,14 +5,22 @@ batteries (SolarFlow) to [Gladys Assistant](https://gladysassistant.com),
 built with the official JavaScript SDK
 [`@gladysassistant/integration-sdk`](https://github.com/GladysAssistant/integration-sdk-js).
 
-## What it does (v1, read-only)
+> **User documentation** (how to get your cloud key, local MQTT, transport
+> badges, troubleshooting): [`docs/en.md`](docs/en.md) ·
+> [`docs/fr.md`](docs/fr.md). Gladys re-hosts these and links to them from the
+> integration's Configuration screen. This README is the developer overview.
+
+## What it does
 
 - Discovers your Zendure devices through the Zendure cloud API, using the
   authorization key generated from the Zendure mobile app.
-- Publishes read-only telemetry (battery level, input/output power, home
-  output power, solar input power) for the supported SolarFlow / Hyper models.
+- Publishes read-only telemetry (battery level, charge/discharge power, home
+  output power, solar input power) for 7 SolarFlow / Hyper models.
+- Optional **local MQTT** (native `Zendure/sensor/#` + legacy JSON), keyed by
+  serial, with per-device **cloud fallback** and automatic recovery, surfaced
+  as live transport badges (local / cloud / cloud-degraded / unreachable).
 
-Device control and local MQTT support are planned for a later version.
+Device control (writable features) is planned — see the roadmap issue.
 
 ## Configuration
 
