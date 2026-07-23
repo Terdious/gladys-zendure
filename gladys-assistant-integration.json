@@ -20,15 +20,15 @@
         "fr": "Pour commencer"
       },
       "description": {
-        "en": "Paste your Zendure cloud authorization key below (generated from the Zendure mobile app). Your SolarFlow / Hyper batteries then appear in the Discovery tab. Optionally enable local MQTT for LAN-speed, offline-resilient telemetry with automatic cloud fallback.",
-        "fr": "Collez ci-dessous votre clé d'autorisation cloud Zendure (générée depuis l'application mobile Zendure). Vos batteries SolarFlow / Hyper apparaissent alors dans l'onglet Découverte. Activez éventuellement le MQTT local pour une télémétrie rapide et résiliente hors-ligne, avec repli cloud automatique."
+        "en": "Paste your Zendure cloud authorization key below (generated from the Zendure mobile app). Your SolarFlow / Hyper batteries then appear in the Discovery tab. Optionally enable local MQTT for LAN-speed, offline-resilient telemetry with automatic cloud fallback. The full step-by-step is in the Documentation link above.",
+        "fr": "Collez ci-dessous votre clé d'autorisation cloud Zendure (générée depuis l'application mobile Zendure). Vos batteries SolarFlow / Hyper apparaissent alors dans l'onglet Découverte. Activez éventuellement le MQTT local pour une télémétrie rapide et résiliente hors-ligne, avec repli cloud automatique. Le pas à pas complet est dans le lien Documentation ci-dessus."
       },
       "links": [
         {
-          "url": "https://raw.githubusercontent.com/Terdious/gladys-zendure/master/docs/en.md",
+          "url": "https://zendure.com",
           "label": {
-            "en": "How to get your cloud key",
-            "fr": "Comment obtenir votre clé cloud"
+            "en": "Zendure website",
+            "fr": "Site Zendure"
           }
         }
       ]

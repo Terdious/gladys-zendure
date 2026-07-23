@@ -24,6 +24,11 @@ COPY index.js ./
 COPY src ./src
 COPY gladys-assistant-integration.json ./
 
+# User documentation (docs/en.md + docs/fr.md): the core re-hosts it behind the
+# "Documentation" link of the Configuration screen (user's language, English
+# fallback), so it MUST ship inside the image.
+COPY docs ./docs
+
 # The only writable location allowed at runtime.
 ENV NODE_ENV=production
 VOLUME ["/data"]
