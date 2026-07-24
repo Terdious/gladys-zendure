@@ -90,8 +90,21 @@ let dynamicUnsubscribes = [];
 //     publish (huge reduction once the initial sync is done),
 //   - sends everything pending in ONE request per tick (up to the SDK's 100),
 //   - paces ticks and backs off when the core rate-limits us.
+// Adaptive pacing (AIMD, like TCP congestion control): the tick is
+// PUBLISH_INTERVAL_IN_MS + an adaptive extra delay. When the core accepts our
+// batch the extra delay decays gently (additive decrease) back towards the
+// reactive base; a 429 grows it fast (multiplicative increase). Result: ~2 s
+// ticks (reactive, good for control automations) when we are the only
+// consumer, self-throttling toward ~5-6 s only while the core's shared budget
+// (~100 requests / 5 min, also consumed by discovery/status/transport AND by
+// any second integration instance) is actually saturated. Values coalesce
+// between ticks (latest per feature wins), so a longer tick never loses data,
+// it only delays it. onSetValue commands do NOT go through this channel — they
+// are sent immediately — so control latency is unaffected by the pacing.
 const PUBLISH_INTERVAL_IN_MS = 2000;
 const PUBLISH_MAX_BACKOFF_IN_MS = 30000;
+// How much the adaptive extra delay decays per successful flush.
+const PUBLISH_BACKOFF_DECAY_IN_MS = 500;
 const MAX_STATES_PER_REQUEST = 100; // SDK hard limit (publishStates)
 let pendingStates = new Map(); // feature external_id -> state object
 let publishTimer = null;
@@ -106,9 +119,18 @@ const lastPublishedAtByFeature = new Map(); // feature external_id -> last publi
 // silent on each active source, plus the publish-channel counters.
 export const TELEMETRY_WATCHDOG_INTERVAL_IN_MS = 5 * 60 * 1000;
 let telemetryWatchdogTimer = null;
+// connectCount baseline per runtime, to report (re)connections per watchdog
+// period (a rapid delta exposes the shared-cloud-clientId take-over fight).
+const watchdogConnectBaseline = new WeakMap();
 // Publish-channel counters since the last watchdog report.
 let publishSentCount = 0;
 let publishDeduplicatedCount = 0;
+// Timestamps of our POST /state requests over the last minute: when the core
+// rate-limits us while OUR rate is modest, the budget is being consumed by
+// something else (typically a SECOND integration instance on the same core),
+// and the failure log should say so instead of leaving the user guessing.
+let publishRequestLog = [];
+let sharedLimitHintLogged = false;
 
 /** Queue states for publication through the single paced channel. */
 function queueStates(gladys, states) {
@@ -163,13 +185,18 @@ async function flushPendingStates(gladys) {
 
   const batch = changed.slice(0, MAX_STATES_PER_REQUEST);
   const overflow = changed.slice(MAX_STATES_PER_REQUEST);
+  publishRequestLog.push(now);
+  publishRequestLog = publishRequestLog.filter((at) => now - at <= 60 * 1000);
   try {
     await gladys.publishStates(batch);
     for (const state of batch) {
       lastPublishedByFeature.set(state.device_feature_external_id, state.state);
       lastPublishedAtByFeature.set(state.device_feature_external_id, Date.now());
     }
-    publishBackoffInMs = 0;
+    // Additive decrease: ease back towards the reactive base instead of
+    // resetting to 0, so a single success between 429s does not immediately
+    // re-flood the shared budget (which would just trip the next 429).
+    publishBackoffInMs = Math.max(0, publishBackoffInMs - PUBLISH_BACKOFF_DECAY_IN_MS);
     publishSentCount += batch.length;
     logger.debug(`publish: sent ${batch.length} changed state(s), ${deduplicated} deduplicated`);
   } catch (e) {
@@ -183,10 +210,27 @@ async function flushPendingStates(gladys) {
       PUBLISH_MAX_BACKOFF_IN_MS,
       (publishBackoffInMs || PUBLISH_INTERVAL_IN_MS) * 2,
     );
+    // Name the rejected features (device:feature suffix of the external id)
+    // and our own request rate, so a rate-limit log tells WHAT was refused
+    // and WHETHER we caused it.
+    const sample = batch
+      .slice(0, 3)
+      .map((state) => state.device_feature_external_id.split(':').slice(-2).join(':'));
+    const ourRate = publishRequestLog.length;
     logger.warn(
       `publish: states rejected (${e.message}); retrying ${batch.length} state(s) in ` +
-        `${PUBLISH_INTERVAL_IN_MS + publishBackoffInMs} ms`,
+        `${PUBLISH_INTERVAL_IN_MS + publishBackoffInMs} ms ` +
+        `(our rate: ${ourRate} request(s) in the last 60 s; ` +
+        `batch: ${sample.join(', ')}${batch.length > 3 ? ', ...' : ''})`,
     );
+    if (/Too Many Requests/i.test(e.message || '') && ourRate <= 30 && !sharedLimitHintLogged) {
+      sharedLimitHintLogged = true;
+      logger.warn(
+        'publish: the core rate limit tripped while our own request rate is modest: ' +
+          'the budget is probably shared with ANOTHER integration instance publishing ' +
+          'states on this Gladys (e.g. a second Zendure container - prod + test side by side).',
+      );
+    }
   }
   // Re-queue overflow and schedule the next tick if anything remains.
   for (const state of overflow) {
@@ -211,6 +255,8 @@ export function resetPublishDedup() {
   lastPublishedAtByFeature.clear();
   publishSentCount = 0;
   publishDeduplicatedCount = 0;
+  publishRequestLog = [];
+  sharedLimitHintLogged = false;
 }
 
 /**
@@ -931,6 +977,16 @@ export const solarflow = {
     // cloud value. The cloud payload stays as-is (its `properties` report is
     // complete, and the raw entry would shadow fresher nested values).
     const latestPayload = runtime.getLatestPayload(telemetryKey);
+    // A disconnected broker means the cache is BLIND, not that values are
+    // stable: re-publishing it (30-min keep-alive included) would present
+    // stale data as fresh during an outage. Skip until the broker is back.
+    // (Without any cached payload yet, the raw cloud entry still bootstraps.)
+    if (!runtime.connected && latestPayload) {
+      logger.debug(
+        `onPoll: ${source} broker disconnected for ${deviceKey}, cached republish skipped`,
+      );
+      return;
+    }
     const payload =
       source === 'local' && latestPayload
         ? { ...rawCloudDevice, ...latestPayload }
@@ -1067,6 +1123,32 @@ export const solarflow = {
         stopTelemetryWatchdog();
         telemetryWatchdogTimer = setInterval(() => {
           const now = Date.now();
+          // Broker connection summary, from the runtimes alive RIGHT NOW (a
+          // lazily-connected cloud fallback runtime is included): connection
+          // state + (re)connections since the last report. The reconnect
+          // delta is the visible trace of the shared-cloud-clientId fight
+          // (one INFO line per reconnect would flood the logs instead).
+          const liveRuntimes = [...localMqttRuntimes].map(([url, runtime]) => ({
+            runtime,
+            source: 'local',
+            url,
+          }));
+          if (cloudMqttRuntime) {
+            liveRuntimes.push({
+              runtime: cloudMqttRuntime,
+              source: 'cloud',
+              url: cloudData?.mqtt?.url || 'cloud',
+            });
+          }
+          for (const { runtime, source, url } of liveRuntimes) {
+            const stats = runtime.getStats();
+            const baseline = watchdogConnectBaseline.get(runtime) || 0;
+            watchdogConnectBaseline.set(runtime, stats.connectCount);
+            logger.info(
+              `broker(${source} ${url}): ${stats.connected ? 'connected' : 'disconnected'}, ` +
+                `${stats.connectCount - baseline} (re)connection(s) in the last 5 min`,
+            );
+          }
           for (const { runtime, source, ownedDevices } of runtimeInfos) {
             if (ownedDevices.length === 0) {
               continue;

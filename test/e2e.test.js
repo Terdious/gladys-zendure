@@ -138,7 +138,8 @@ test('polling publishes telemetry states to the core', async () => {
     device: discoveredDevice,
   });
 
-  await waitFor(() => core.state.states.length >= 5);
+  // The paced publish channel ticks every 3.5 s: give it headroom.
+  await waitFor(() => core.state.states.length >= 5, { timeout: 6000 });
   const byId = Object.fromEntries(
     core.state.states.map((s) => [s.device_feature_external_id, s.state]),
   );
@@ -165,7 +166,7 @@ test('an MQTT report is pushed to the core in real time', async () => {
     Buffer.from(JSON.stringify({ properties: { electricLevel: 81, outputHomePower: 250 } })),
   );
 
-  await waitFor(() => core.state.states.length >= 2);
+  await waitFor(() => core.state.states.length >= 2, { timeout: 6000 });
   const byId = Object.fromEntries(
     core.state.states.map((s) => [s.device_feature_external_id, s.state]),
   );

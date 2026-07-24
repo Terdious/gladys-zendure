@@ -117,6 +117,40 @@ export function extractDeviceKeyFromTopic(topic) {
   return null;
 }
 
+/**
+ * Whether a JSON-format topic carries device telemetry (`properties/report`).
+ * The wildcard subscriptions also deliver every OTHER message under the device
+ * root — time-sync, register, firmware chatter, and even the ECHO of the
+ * `properties/read` requests WE publish (a broker delivers a publication back
+ * to a matching subscriber, including its author). Merging those into the
+ * telemetry cache pollutes it with junk keys and, worse, refreshes the
+ * per-device freshness timestamp: a dead device would look alive just because
+ * we keep asking it for data. Only report topics may feed the cache.
+ * @param {string} topic MQTT topic
+ * @returns {boolean}
+ */
+export function isReportTopic(topic) {
+  return typeof topic === 'string' && topic.endsWith('/properties/report');
+}
+
+/**
+ * Whether a JSON-format topic is a REQUEST/COMMAND channel (read requests,
+ * write bundles, function invocations) rather than telemetry. Used as a
+ * deny-list by the LOCAL legacy path, which must stay permissive about
+ * telemetry topics (some firmwares publish root-level metrics outside
+ * `properties/report`) but must never ingest command echoes.
+ * @param {string} topic MQTT topic
+ * @returns {boolean}
+ */
+export function isRequestTopic(topic) {
+  return (
+    typeof topic === 'string' &&
+    (topic.endsWith('/properties/read') ||
+      topic.endsWith('/properties/write') ||
+      topic.endsWith('/function/invoke'))
+  );
+}
+
 // Prefix of the native local topic scheme the device publishes its telemetry
 // to: `Zendure/sensor/{serialNumber}/{metricName}`.
 const LOCAL_SENSOR_TOPIC_PREFIX = 'Zendure/sensor';
@@ -175,10 +209,13 @@ export function mergeMqttPayload(previousPayload, incomingPayload) {
 
   const merged = { ...base, ...incoming };
 
-  const baseProperties =
-    base.properties && typeof base.properties === 'object' ? base.properties : {};
-  const incomingProperties =
-    incoming.properties && typeof incoming.properties === 'object' ? incoming.properties : {};
+  // `properties` must be a plain object: a read REQUEST carries an ARRAY
+  // (`properties: ['getAll']`) which would otherwise spread into junk
+  // index keys and shadow the object cache.
+  const isPlainObject = (value) =>
+    value !== null && typeof value === 'object' && !Array.isArray(value);
+  const baseProperties = isPlainObject(base.properties) ? base.properties : {};
+  const incomingProperties = isPlainObject(incoming.properties) ? incoming.properties : {};
   if (Object.keys(baseProperties).length > 0 || Object.keys(incomingProperties).length > 0) {
     merged.properties = { ...baseProperties, ...incomingProperties };
   }
@@ -231,6 +268,15 @@ function createBaseMqttRuntime({
   const lastPayloadAtByKey = new Map();
   const payloadListeners = new Set();
   let messagesReceived = 0;
+  // Connection log throttling: the first connect of a session is INFO, the
+  // automatic reconnections are DEBUG (the 5-min watchdog reports the count).
+  // A rapid take-over cycle (another consumer fighting over a shared client
+  // id, e.g. Home Assistant on the same Zendure cloud account) is diagnosed
+  // once at WARN instead of flooding one INFO line per reconnect.
+  let connectCount = 0;
+  let lastConnectAt = 0;
+  let rapidReconnects = 0;
+  let takeOverWarned = false;
 
   function subscribeDevice(rawCloudDevice) {
     if (!rawCloudDevice) {
@@ -388,7 +434,26 @@ function createBaseMqttRuntime({
       client.on('connect', () => {
         connected = true;
         refreshSubscriptions();
-        logger.info(`Zendure MQTT connected to ${mqttUrl}.`);
+        connectCount += 1;
+        const now = Date.now();
+        const isRapid = lastConnectAt !== 0 && now - lastConnectAt < 60 * 1000;
+        rapidReconnects = isRapid ? rapidReconnects + 1 : 0;
+        lastConnectAt = now;
+        if (connectCount === 1) {
+          logger.info(`Zendure MQTT connected to ${mqttUrl}.`);
+        } else {
+          logger.debug(`Zendure MQTT reconnected to ${mqttUrl} (connection #${connectCount}).`);
+        }
+        if (rapidReconnects >= 5 && !takeOverWarned && mqttConfiguration.clientId) {
+          takeOverWarned = true;
+          logger.warn(
+            `Zendure MQTT session on ${mqttUrl} keeps being taken over ` +
+              `(${rapidReconnects + 1} reconnections in under a minute each): another consumer ` +
+              `of the same Zendure account (Home Assistant, a second Gladys instance...) is ` +
+              `fighting over the shared cloud client id. Telemetry flows but may be intermittent; ` +
+              `only one cloud consumer per account is supported by Zendure.`,
+          );
+        }
         // Counts are meaningless at connect time (subscriptions are still in
         // flight): keep them out of the INFO line, expose them via getStats().
         logger.debug(
@@ -466,7 +531,8 @@ function createBaseMqttRuntime({
      * Diagnostic snapshot of this runtime, for the device-layer logs: honest
      * counts of what is actually subscribed/tracked/received right now.
      * @returns {{ connected: boolean, subscribedTopics: number,
-     * trackedDevices: number, messagesReceived: number, keysWithPayload: number }}
+     * trackedDevices: number, messagesReceived: number, keysWithPayload: number,
+     * connectCount: number }}
      */
     getStats() {
       return {
@@ -475,6 +541,7 @@ function createBaseMqttRuntime({
         trackedDevices: trackedDevices.size,
         messagesReceived,
         keysWithPayload: latestPayloadByKey.size,
+        connectCount,
       };
     },
 
@@ -529,6 +596,12 @@ export function createZendureMqtt({ mqttLibrary = mqtt, clientId, connectTimeout
       return [`iot/${productKey}/${deviceKey}/#`, `/${productKey}/${deviceKey}/#`];
     },
     parseMessage(topic, payload) {
+      // Only `properties/report` carries telemetry; everything else under the
+      // wildcard (read/write requests — including OUR OWN echoes — time-sync,
+      // register...) must neither feed the cache nor refresh the freshness.
+      if (!isReportTopic(topic)) {
+        return null;
+      }
       const deviceKey = extractDeviceKeyFromTopic(topic);
       if (!deviceKey) {
         return null;
@@ -650,7 +723,15 @@ export function createZendureLocalMqtt({ mqttLibrary = mqtt, clientId, connectTi
         };
       }
 
-      // Legacy JSON format (iot/{productKey}/{deviceKey}/... topics).
+      // Legacy JSON format (iot/{productKey}/{deviceKey}/... topics). Unlike
+      // the cloud runtime (strict report allow-list), the local path stays
+      // permissive about telemetry topics — some firmwares publish root-level
+      // metrics outside properties/report — but command channels (read/write
+      // bundles, ours or another client's) must never feed the cache nor
+      // refresh the freshness.
+      if (isRequestTopic(topic)) {
+        return null;
+      }
       const deviceKey = extractDeviceKeyFromTopic(topic);
       if (!deviceKey) {
         return null;

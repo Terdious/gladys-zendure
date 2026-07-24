@@ -23,6 +23,9 @@ import { API, AUTH } from './constants.js';
 
 const logger = createLogger({ name: 'zendure-client' });
 
+// A hung cloud request must not block discovery/polling forever.
+const FETCH_TIMEOUT_IN_MS = 15000;
+
 /** Error thrown for every Zendure cloud problem (bad key, HTTP or API error). */
 export class ZendureCloudError extends Error {
   constructor(message) {
@@ -99,11 +102,23 @@ export async function fetchCloudData(cloudKey, { fetchImpl = fetch } = {}) {
 
   logger.debug(`Connecting to Zendure cloud (${apiUrl})...`);
 
-  const response = await fetchImpl(`${apiUrl}${API.DEVICE_LIST}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ appKey }),
-  });
+  let response;
+  try {
+    response = await fetchImpl(`${apiUrl}${API.DEVICE_LIST}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ appKey }),
+      // Abort a hung request instead of blocking discovery/polling forever.
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_IN_MS),
+    });
+  } catch (e) {
+    if (e && (e.name === 'TimeoutError' || e.name === 'AbortError')) {
+      throw new ZendureCloudError(
+        `Zendure cloud request timed out after ${FETCH_TIMEOUT_IN_MS} ms.`,
+      );
+    }
+    throw e;
+  }
 
   if (response.status >= 400) {
     throw new ZendureCloudError(`Zendure cloud request failed (HTTP ${response.status}).`);
