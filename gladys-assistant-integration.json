@@ -10,7 +10,29 @@
   "docker_image": "ghcr.io/terdious/gladys-zendure:1.1.0",
   "gladys_version": ">=4.62.0",
   "cover_image": "https://raw.githubusercontent.com/Terdious/gladys-zendure/master/cover.png",
+  "transports": ["local", "cloud"],
   "config_schema": [
+    {
+      "key": "intro",
+      "type": "section",
+      "label": {
+        "en": "Getting started",
+        "fr": "Pour commencer"
+      },
+      "description": {
+        "en": "Paste your Zendure cloud authorization key below (generated from the Zendure mobile app). Your SolarFlow / Hyper batteries then appear in the Discovery tab. Optionally enable local MQTT for LAN-speed, offline-resilient telemetry with automatic cloud fallback. The full step-by-step is in the Documentation link above.",
+        "fr": "Collez ci-dessous votre clé d'autorisation cloud Zendure (générée depuis l'application mobile Zendure). Vos batteries SolarFlow / Hyper apparaissent alors dans l'onglet Découverte. Activez éventuellement le MQTT local pour une télémétrie rapide et résiliente hors-ligne, avec repli cloud automatique. Le pas à pas complet est dans le lien Documentation ci-dessus."
+      },
+      "links": [
+        {
+          "url": "https://zendure.com",
+          "label": {
+            "en": "Zendure website",
+            "fr": "Site Zendure"
+          }
+        }
+      ]
+    },
     {
       "key": "cloud_key",
       "type": "secret",

@@ -549,6 +549,55 @@ function transportOfSource(source) {
 }
 
 /**
+ * Degraded-badge fields (SDK 0.9 / contract C.3) for a device given its
+ * effective source. A device that is SUPPOSED to be served locally (locally
+ * reachable) but is currently on the CLOUD fallback is "working, but not
+ * nominal": flag it `degraded` with a readable multi-language reason (orange
+ * dot on the badge). Every other state — nominal local, nominal cloud-only,
+ * unreachable — returns no flag, and publishing an entry WITHOUT `degraded`
+ * clears any previous degraded state (back to a clean badge).
+ * @param {object} config normalized configuration
+ * @param {object} rawCloudDevice device from the cloud deviceList
+ * @param {'local'|'cloud'|'unreachable'} source effective source
+ * @returns {{ degraded?: true, message?: { en: string, fr: string } }}
+ */
+function degradedFieldsFor(config, rawCloudDevice, source) {
+  if (source === 'cloud' && isDeviceLocallyReachable(config, rawCloudDevice)) {
+    return {
+      degraded: true,
+      message: {
+        en: 'Local telemetry is silent — running on the Zendure cloud fallback.',
+        fr: 'Télémétrie locale muette — repli sur le cloud Zendure.',
+      },
+    };
+  }
+  return {};
+}
+
+/**
+ * Build a transport badge entry for a device: the transport value, plus the
+ * degraded flag when the device is on cloud fallback while it should be local.
+ * A device the account reports offline stays a plain 'unreachable' (a device
+ * that is not answering at all is not "degraded", it is down).
+ * @param {object} gladys Gladys SDK instance
+ * @param {object} config normalized configuration
+ * @param {object} rawCloudDevice device from the cloud deviceList
+ * @param {'local'|'cloud'|'unreachable'} source effective source
+ * @returns {{ external_id: string, transport: string, degraded?: true, message?: object }}
+ */
+function buildTransportEntry(gladys, config, rawCloudDevice, source) {
+  const external_id = gladys.externalIds(DEVICE_TYPE, deviceKeyOf(rawCloudDevice)).device;
+  if (rawCloudDevice.online === false) {
+    return { external_id, transport: DEVICE_TRANSPORTS.UNREACHABLE };
+  }
+  return {
+    external_id,
+    transport: transportOfSource(source),
+    ...degradedFieldsFor(config, rawCloudDevice, source),
+  };
+}
+
+/**
  * Latest activity timestamp of one source for a device: the last payload, or
  * the runtime creation time when nothing arrived yet (startup grace window).
  * A missing runtime yields 0 (silent since forever).
@@ -569,12 +618,13 @@ function lastSourceActivityAt(runtime, telemetryKey, startedAt) {
  * when the device had no effective state yet (initial observation, not a
  * transition).
  * @param {object} gladys Gladys SDK instance
+ * @param {object} config normalized configuration
  * @param {object} rawCloudDevice device from the cloud deviceList
  * @param {'local'|'cloud'|'unreachable'} nextSource new effective source
  * @param {number} now current time (ms)
- * @returns {{ external_id: string, transport: string }|null}
+ * @returns {{ external_id: string, transport: string, degraded?: true, message?: object }|null}
  */
-function applySourceTransition(gladys, rawCloudDevice, nextSource, now) {
+function applySourceTransition(gladys, config, rawCloudDevice, nextSource, now) {
   const deviceKey = deviceKeyOf(rawCloudDevice);
   const previous = effectiveSourceByDeviceKey.get(deviceKey);
   if (previous && previous.source === nextSource) {
@@ -601,13 +651,7 @@ function applySourceTransition(gladys, rawCloudDevice, nextSource, now) {
   }
   logger.info(`telemetry: ${deviceLabelOf(rawCloudDevice)}: ${detail}`);
 
-  // A device the account reports offline stays 'unreachable' on the badge.
-  const transport =
-    rawCloudDevice.online === false ? DEVICE_TRANSPORTS.UNREACHABLE : transportOfSource(nextSource);
-  return {
-    external_id: gladys.externalIds(DEVICE_TYPE, deviceKey).device,
-    transport,
-  };
+  return buildTransportEntry(gladys, config, rawCloudDevice, nextSource);
 }
 
 /**
@@ -652,7 +696,7 @@ function createPushListener(gladys, config, source) {
     }
     if (source === 'local') {
       if (config.enable_local_mqtt === true) {
-        const entry = applySourceTransition(gladys, rawCloudDevice, 'local', Date.now());
+        const entry = applySourceTransition(gladys, config, rawCloudDevice, 'local', Date.now());
         if (entry) {
           publishTransportEntries(gladys, [entry]);
         }
@@ -732,7 +776,7 @@ export async function evaluateTelemetrySources(gladys, config, now = Date.now())
       localRuntimeStartedAt.get(brokerUrl),
     );
     if (now - localActivityAt <= LOCAL_SILENCE_TIMEOUT_IN_MS) {
-      const entry = applySourceTransition(gladys, rawCloudDevice, 'local', now);
+      const entry = applySourceTransition(gladys, config, rawCloudDevice, 'local', now);
       if (entry) {
         changedEntries.push(entry);
       }
@@ -764,12 +808,12 @@ export async function evaluateTelemetrySources(gladys, config, now = Date.now())
     );
     let entry = null;
     if (now - cloudActivityAt <= LOCAL_SILENCE_TIMEOUT_IN_MS) {
-      entry = applySourceTransition(gladys, rawCloudDevice, 'cloud', now);
+      entry = applySourceTransition(gladys, config, rawCloudDevice, 'cloud', now);
     } else if (
       now - localActivityAt > UNREACHABLE_TIMEOUT_IN_MS &&
       now - cloudActivityAt > UNREACHABLE_TIMEOUT_IN_MS
     ) {
-      entry = applySourceTransition(gladys, rawCloudDevice, 'unreachable', now);
+      entry = applySourceTransition(gladys, config, rawCloudDevice, 'unreachable', now);
     }
     // Otherwise: pending state, keep the previous source (no flapping).
     if (entry) {
@@ -925,17 +969,16 @@ export const solarflow = {
   async buildTransports(gladys, config) {
     const data = await ensureCloudData(config);
     return supportedDevices(data).map((rawCloudDevice) => {
-      let transport = DEVICE_TRANSPORTS.CLOUD;
-      if (rawCloudDevice.online === false) {
-        transport = DEVICE_TRANSPORTS.UNREACHABLE;
-      } else if (isDeviceLocallyReachable(config, rawCloudDevice)) {
+      // Effective source: the one the evaluator tracked (local / cloud
+      // fallback / unreachable), the static 'local' when a locally-reachable
+      // device has no effective state yet, 'cloud' otherwise. The degraded
+      // flag (cloud fallback of a local device) is added by buildTransportEntry.
+      let source = 'cloud';
+      if (isDeviceLocallyReachable(config, rawCloudDevice)) {
         const effective = effectiveSourceByDeviceKey.get(deviceKeyOf(rawCloudDevice));
-        transport = effective ? transportOfSource(effective.source) : DEVICE_TRANSPORTS.LOCAL;
+        source = effective ? effective.source : 'local';
       }
-      return {
-        external_id: gladys.externalIds(DEVICE_TYPE, deviceKeyOf(rawCloudDevice)).device,
-        transport,
-      };
+      return buildTransportEntry(gladys, config, rawCloudDevice, source);
     });
   },
 

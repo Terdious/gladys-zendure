@@ -678,8 +678,18 @@ test('a locally-silent device falls back to the cloud (lazy connect) then recove
   assert.equal(mqttLibrary.clients.length, 2);
   const cloudClient = mqttLibrary.clients[1];
   assert.equal(cloudClient.url, CLOUD_BROKER_URL);
+  // A locally-reachable device on the cloud fallback is DEGRADED (SDK 0.9):
+  // the badge stays "cloud" but carries the orange dot + a readable reason.
   assert.deepEqual(localGladys.transports.at(-1), [
-    { external_id: device.external_id, transport: 'cloud' },
+    {
+      external_id: device.external_id,
+      transport: 'cloud',
+      degraded: true,
+      message: {
+        en: 'Local telemetry is silent — running on the Zendure cloud fallback.',
+        fr: 'Télémétrie locale muette — repli sur le cloud Zendure.',
+      },
+    },
   ]);
 
   // The lazily-attached cloud listener publishes the cloud reports now that
