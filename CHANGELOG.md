@@ -12,6 +12,13 @@ the notes of the version's GitHub Release.
 
 ### Added
 
+- German and Spanish: the configuration screen (labels, descriptions, links),
+  the catalog description, the connection status messages, the degraded badge
+  tooltip and the user documentation (`docs/de.md`, `docs/es.md`) now ship in
+  the four languages of Gladys (en, fr, de, es); a test keeps them complete.
+- User documentation (en, fr, de, es): prerequisites (Gladys 4.86) and how to
+  update the integration from the catalog (Update button, new configuration
+  fields applied on their own) or in developer mode.
 - Catalog category (Gladys 4.86+): the integration sits on the _Energy_ shelf
   of the integration catalog.
 - Manifest tests: `version` matches `package.json`, `docker_image` is tagged
@@ -35,6 +42,8 @@ the notes of the version's GitHub Release.
 - The Release workflow keeps the Prettier layout of the manifest (the 1.2.0
   bump had broken the format check), and refuses to release when the
   Unreleased section of this file lists no change.
+- The configuration screen and the user documentation name the Gladys tabs and
+  buttons by their real labels (Discover, Save configuration, Logs).
 - The user documentation is no longer copied into the Docker image: the store
   re-hosts `docs/` and Gladys reads it from there.
 

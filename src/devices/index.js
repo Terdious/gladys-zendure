@@ -27,10 +27,14 @@ export const CONNECTION_MESSAGES = {
   MISSING_KEY: {
     en: 'Zendure cloud key is not configured yet.',
     fr: "La clé cloud Zendure n'est pas encore configurée.",
+    de: 'Der Zendure-Cloud-Schlüssel ist noch nicht konfiguriert.',
+    es: 'La clave de la nube de Zendure aún no está configurada.',
   },
   CLOUD_UNREACHABLE: {
     en: 'Zendure cloud is unreachable or the cloud key is invalid.',
     fr: 'Le cloud Zendure est injoignable ou la clé cloud est invalide.',
+    de: 'Die Zendure-Cloud ist nicht erreichbar oder der Cloud-Schlüssel ist ungültig.',
+    es: 'La nube de Zendure no está disponible o la clave de la nube no es válida.',
   },
 };
 

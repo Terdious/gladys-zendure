@@ -12,6 +12,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 import { DEFAULT_CONFIG } from '../src/config.js';
+import { CONNECTION_MESSAGES } from '../src/devices/index.js';
+import { LOCAL_SILENT_MESSAGE } from '../src/devices/solarflow.js';
 
 const manifest = JSON.parse(
   await readFile(new URL('../gladys-assistant-integration.json', import.meta.url), 'utf8'),
@@ -37,6 +39,33 @@ const CATALOG_CATEGORIES = [
 // validator refuses a manifest whose `gladys_version` minimum is lower than
 // the first release accepting every field it declares.
 const CATEGORIES_MIN_GLADYS_VERSION = [4, 86, 0];
+// The languages of the Gladys interface: every text the user reads ships in
+// all of them (Gladys falls back to English for a missing one).
+const GLADYS_LANGUAGES = ['en', 'fr', 'de', 'es'];
+
+/** Every multi-language text object ({ en, fr, ... }) of a manifest subtree. */
+function multiLanguageTexts(node, path = 'manifest') {
+  if (Array.isArray(node)) {
+    return node.flatMap((child, index) => multiLanguageTexts(child, `${path}[${index}]`));
+  }
+  if (node === null || typeof node !== 'object') {
+    return [];
+  }
+  if (typeof node.en === 'string') {
+    return [{ path, text: node }];
+  }
+  return Object.entries(node).flatMap(([key, child]) =>
+    multiLanguageTexts(child, `${path}.${key}`),
+  );
+}
+
+function assertEveryLanguage(text, path) {
+  assert.deepEqual(Object.keys(text).sort(), [...GLADYS_LANGUAGES].sort(), `${path} languages`);
+  for (const language of GLADYS_LANGUAGES) {
+    assert.ok(text[language].trim().length > 0, `${path}.${language} is empty`);
+  }
+}
+
 /** Minimum version of the manifest `gladys_version` range, e.g. [4, 86, 0]. */
 function minGladysVersion() {
   const match = manifest.gladys_version.match(/>=\s*(\d+)\.(\d+)\.(\d+)/);
@@ -107,5 +136,36 @@ test('section fields are purely presentational', () => {
     for (const link of section.links ?? []) {
       assert.match(link.url, /^https:\/\//, 'section links must be https');
     }
+  }
+});
+
+test('every manifest text ships in every Gladys language', () => {
+  const texts = multiLanguageTexts(manifest);
+  assert.ok(texts.length > 0);
+  for (const { path, text } of texts) {
+    assertEveryLanguage(text, path);
+  }
+});
+
+test('every runtime message ships in every Gladys language', () => {
+  for (const [key, message] of Object.entries(CONNECTION_MESSAGES)) {
+    assertEveryLanguage(message, `CONNECTION_MESSAGES.${key}`);
+  }
+  assertEveryLanguage(LOCAL_SILENT_MESSAGE, 'LOCAL_SILENT_MESSAGE');
+});
+
+test('the user documentation ships in every Gladys language, with the same sections', async () => {
+  const headings = async (language) => {
+    const text = await readFile(new URL(`../docs/${language}.md`, import.meta.url), 'utf8');
+    // The store skips a file under 300 characters.
+    assert.ok(text.length >= 300, `docs/${language}.md is too short`);
+    return text
+      .split('\n')
+      .filter((line) => /^#{1,3} /.test(line))
+      .map((line) => line.match(/^#+/)[0]);
+  };
+  const reference = await headings('en');
+  for (const language of GLADYS_LANGUAGES) {
+    assert.deepEqual(await headings(language), reference, `docs/${language}.md outline`);
   }
 });

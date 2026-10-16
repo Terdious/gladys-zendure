@@ -7,8 +7,10 @@ built with the official JavaScript SDK
 
 > **User documentation** (how to get your cloud key, local MQTT, transport
 > badges, troubleshooting): [`docs/en.md`](docs/en.md) ·
-> [`docs/fr.md`](docs/fr.md). Gladys re-hosts these and links to them from the
-> integration's Configuration screen. This README is the developer overview.
+> [`docs/fr.md`](docs/fr.md) · [`docs/de.md`](docs/de.md) ·
+> [`docs/es.md`](docs/es.md). The store re-hosts these and Gladys links to them
+> from the integration's Configuration screen. This README is the developer
+> overview.
 
 ## What it does
 
@@ -119,6 +121,16 @@ up to date.
   device resumes publishing within a minute. The integration falls back to the
   cloud automatically in the meantime and returns to local on its own once the
   local messages resume (see the `telemetry:` transition lines in the logs).
+
+## Translations
+
+Every text the user reads ships in the four languages of the Gladys interface
+(en, fr, de, es): the manifest (labels, descriptions, links, catalog
+description), the runtime messages (connection status in
+`src/devices/index.js`, degraded badge tooltip in `src/devices/solarflow.js`)
+and the user documentation (`docs/<lang>.md`, same outline in every language).
+`test/manifest.test.js` fails when one of them misses a language. Feature
+names are still English only.
 
 ## License
 
