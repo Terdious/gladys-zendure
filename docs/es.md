@@ -20,6 +20,28 @@ SolarFlow 2400 AC, SolarFlow 2400 Pro y Hyper 2000 (experimental — la
 correspondencia de la telemetría está pendiente de confirmación por un probador
 de la comunidad).
 
+## Funcionalidades
+
+Cada batería se crea con cinco funcionalidades de solo lectura, en las
+categorías de energía de Gladys (gráficos de energía, historial, paneles):
+
+| Funcionalidad                | Categoría de Gladys             | Unidad |
+| ---------------------------- | ------------------------------- | ------ |
+| Nivel de batería             | Almacenamiento en batería       | %      |
+| Potencia de carga            | Almacenamiento en batería       | W      |
+| Potencia de descarga         | Almacenamiento en batería       | W      |
+| Potencia de salida del hogar | Sensor de salida del hogar      | W      |
+| Potencia de entrada solar    | Sensor de producción de energía | W      |
+
+Desde la versión 1.3.0, el nivel de batería es el de un **almacenamiento en
+batería**, no la pila de un dispositivo que hay que cambiar: Gladys ya no
+cuenta su batería doméstica en sus alertas de batería baja. Una batería creada
+con una versión anterior conserva sus categorías anteriores hasta que aplique
+la nueva definición: en la pestaña **Descubrir**, haga clic en **Actualizar**
+en la batería (marcada como **Ya añadido**). Las funcionalidades se actualizan
+en el mismo lugar, por lo que se conservan su historial, las escenas y los
+paneles.
+
 ## Obtener su clave de la nube de Zendure
 
 La integración se autentica ante la nube de Zendure con una **clave de

@@ -20,6 +20,28 @@ SolarFlow 2400 AC, SolarFlow 2400 Pro und Hyper 2000 (experimentell — die
 Zuordnung der Telemetrie muss noch von einem Tester aus der Community bestätigt
 werden).
 
+## Funktionen
+
+Jede Batterie wird mit fünf nur lesbaren Funktionen angelegt, in den
+Energiekategorien von Gladys (Energiediagramme, Verlauf, Dashboards):
+
+| Funktion                | Gladys-Kategorie         | Einheit |
+| ----------------------- | ------------------------ | ------- |
+| Batteriestand           | Batteriespeicher         | %       |
+| Ladeleistung            | Batteriespeicher         | W       |
+| Entladeleistung         | Batteriespeicher         | W       |
+| Leistung zum Haus       | Hausausgangssensor       | W       |
+| Solare Eingangsleistung | Energieproduktionssensor | W       |
+
+Seit Version 1.3.0 ist der Batteriestand der eines **Batteriespeichers** und
+nicht der Akku eines Geräts, der getauscht werden muss: Gladys zählt deine
+Hausbatterie nicht mehr zu den Warnungen bei schwachem Akku. Eine mit einer
+älteren Version angelegte Batterie behält ihre bisherigen Kategorien, bis du
+die neue Definition übernimmst: Klicke im Tab **Entdecken** bei der Batterie
+(markiert mit **Bereits hinzugefügt**) auf **Aktualisieren**. Die Funktionen
+werden an Ort und Stelle aktualisiert, ihr Verlauf, deine Szenen und Dashboards
+bleiben erhalten.
+
 ## Deinen Zendure-Cloud-Schlüssel erhalten
 
 Die Integration meldet sich bei der Zendure-Cloud mit einem

@@ -5,13 +5,18 @@
 // Ported from the Zendure service of Gladys core (zendure.deviceMapping.js +
 // the metric extraction helpers of zendure.poll.js / zendure.mqtt.js).
 //
-// NOTE on categories/types: Gladys core maps these metrics to the
-// `solar-battery` category (battery-level / battery-input-power /
-// battery-output-power types), but @gladysassistant/integration-sdk 0.2.0
-// does not expose that category yet. We use the closest standard ones
-// instead: `battery` (integer, percent) for the state of charge and
-// `energy-sensor` (power, watt) for the power metrics. Switch back to
-// `solar-battery` once the SDK constants ship it.
+// Categories: the Gladys energy categories of a home battery system (Gladys
+// 4.86+, SDK 0.12+). The state of charge and the pack power flows belong to
+// `battery-storage` — NOT `battery`, which Gladys reads as the battery of a
+// device to replace (low-battery alerts, weekly digest). The power the device
+// delivers to the house is `home-output-sensor`, the PV input
+// `energy-production-sensor`.
+//
+// The feature KEYS are the external ids of the features already created in
+// Gladys: they never change, even where they read oddly. Per the zenSDK
+// property reference, `packInputPower` is the pack DISCHARGE power and
+// `outputPackPower` its CHARGE power (named from the inverter's side), hence
+// `batteryInputPower` -> discharge and `batteryOutputPower` -> charge.
 //
 // Attribution: the model list and the per-model power ratings are derived from
 // the official Home Assistant integration Zendure/Zendure-HA (MIT License,
@@ -69,8 +74,8 @@ function buildBaselineFeatures(maxPower) {
     {
       key: 'batteryLevel',
       name: 'Battery level',
-      category: DEVICE_FEATURE_CATEGORIES.BATTERY,
-      type: DEVICE_FEATURE_TYPES.BATTERY.INTEGER,
+      category: DEVICE_FEATURE_CATEGORIES.BATTERY_STORAGE,
+      type: DEVICE_FEATURE_TYPES.BATTERY_STORAGE.BATTERY_LEVEL,
       unit: DEVICE_FEATURE_UNITS.PERCENT,
       min: 0,
       max: 100,
@@ -78,9 +83,9 @@ function buildBaselineFeatures(maxPower) {
     },
     {
       key: 'batteryInputPower',
-      name: 'Battery input power',
-      category: DEVICE_FEATURE_CATEGORIES.ENERGY_SENSOR,
-      type: DEVICE_FEATURE_TYPES.ENERGY_SENSOR.POWER,
+      name: 'Battery discharge power',
+      category: DEVICE_FEATURE_CATEGORIES.BATTERY_STORAGE,
+      type: DEVICE_FEATURE_TYPES.BATTERY_STORAGE.DISCHARGE_POWER,
       unit: DEVICE_FEATURE_UNITS.WATT,
       min: 0,
       max: maxPower,
@@ -88,9 +93,9 @@ function buildBaselineFeatures(maxPower) {
     },
     {
       key: 'batteryOutputPower',
-      name: 'Battery output power',
-      category: DEVICE_FEATURE_CATEGORIES.ENERGY_SENSOR,
-      type: DEVICE_FEATURE_TYPES.ENERGY_SENSOR.POWER,
+      name: 'Battery charge power',
+      category: DEVICE_FEATURE_CATEGORIES.BATTERY_STORAGE,
+      type: DEVICE_FEATURE_TYPES.BATTERY_STORAGE.CHARGE_POWER,
       unit: DEVICE_FEATURE_UNITS.WATT,
       min: 0,
       max: maxPower,
@@ -99,8 +104,8 @@ function buildBaselineFeatures(maxPower) {
     {
       key: 'homeOutputPower',
       name: 'Home output power',
-      category: DEVICE_FEATURE_CATEGORIES.ENERGY_SENSOR,
-      type: DEVICE_FEATURE_TYPES.ENERGY_SENSOR.POWER,
+      category: DEVICE_FEATURE_CATEGORIES.HOME_OUTPUT_SENSOR,
+      type: DEVICE_FEATURE_TYPES.HOME_OUTPUT_SENSOR.POWER,
       unit: DEVICE_FEATURE_UNITS.WATT,
       min: 0,
       max: maxPower,
@@ -109,8 +114,8 @@ function buildBaselineFeatures(maxPower) {
     {
       key: 'solarInputPower',
       name: 'Solar input power',
-      category: DEVICE_FEATURE_CATEGORIES.ENERGY_SENSOR,
-      type: DEVICE_FEATURE_TYPES.ENERGY_SENSOR.POWER,
+      category: DEVICE_FEATURE_CATEGORIES.ENERGY_PRODUCTION_SENSOR,
+      type: DEVICE_FEATURE_TYPES.ENERGY_PRODUCTION_SENSOR.POWER,
       unit: DEVICE_FEATURE_UNITS.WATT,
       min: 0,
       max: maxPower,

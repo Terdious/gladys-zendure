@@ -18,6 +18,26 @@ SolarFlow 800, SolarFlow 800 Pro, SolarFlow 1600, SolarFlow 2400,
 SolarFlow 2400 AC, SolarFlow 2400 Pro, and Hyper 2000 (experimental — telemetry
 mapping to be confirmed by a community tester).
 
+## Features
+
+Each battery is created with five read-only features, in the Gladys energy
+categories (energy charts, history, dashboards):
+
+| Feature                 | Gladys category          | Unit |
+| ----------------------- | ------------------------ | ---- |
+| Battery level           | Battery storage          | %    |
+| Battery charge power    | Battery storage          | W    |
+| Battery discharge power | Battery storage          | W    |
+| Home output power       | Home output sensor       | W    |
+| Solar input power       | Energy production sensor | W    |
+
+Since version 1.3.0 the battery level is a **battery storage** level, not the
+battery of a device to replace: Gladys no longer counts your home battery in
+its low-battery alerts. A battery created with an older version keeps its
+previous categories until you apply the new definition: in the **Discover**
+tab, click **Update** on the battery (marked **Already added**). The features
+are updated in place, so their history, scenes and dashboards are kept.
+
 ## Getting your Zendure cloud key
 
 The integration authenticates against the Zendure cloud with an **authorization
