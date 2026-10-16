@@ -32,7 +32,13 @@ import {
   ENERGY_FLOWS,
   ENERGY_SAVE_INTERVAL_IN_MS,
 } from '../zendure/energy.js';
-import { buildWriteCommand, createWriteThrottle, ControlRefusedError } from '../zendure/control.js';
+import {
+  buildWriteCommand,
+  createWriteThrottle,
+  ControlRefusedError,
+  reportedValue,
+  socScaleOf,
+} from '../zendure/control.js';
 
 // Scene trigger fired when a battery goes unreachable or comes back
 // (manifest `scene_triggers`).
@@ -1096,6 +1102,73 @@ function buildEnergyStates(gladys, rawCloudDevice, payload, { integrate, at = Da
     });
   }
   return states;
+}
+
+/**
+ * Snapshot of every supported battery for the dashboard widgets: names, the
+ * source serving each one, the latest telemetry and the reported control
+ * settings. Read-only: it uses the runtimes already running and never opens
+ * a broker connection (a dashboard must not change the transport).
+ * @param {object} gladys Gladys SDK instance
+ * @param {object} config normalized configuration
+ * @returns {Promise<Array<object>>}
+ */
+export async function describeBatteries(gladys, config) {
+  const data = cloudData || (await ensureCloudData(config));
+  return supportedDevices(data).map((rawCloudDevice) => {
+    const deviceKey = deviceKeyOf(rawCloudDevice);
+    const ids = gladys.externalIds(DEVICE_TYPE, deviceKey);
+    const locallyReachable = isDeviceLocallyReachable(config, rawCloudDevice);
+    const effective = effectiveSourceByDeviceKey.get(deviceKey)?.source;
+    const source =
+      rawCloudDevice.online === false
+        ? 'unreachable'
+        : (effective ?? (locallyReachable ? 'local' : 'cloud'));
+    const runtime =
+      source === 'local'
+        ? localMqttRuntimes.get(buildLocalBrokerConfig(rawCloudDevice)?.url)
+        : cloudMqttRuntime;
+    const cached = runtime?.getLatestPayload(
+      telemetryKeyOf(source === 'local' ? 'local' : 'cloud', rawCloudDevice),
+    );
+    const payload = cached ? { ...rawCloudDevice, ...cached } : rawCloudDevice;
+
+    const values = {};
+    for (const featureMapping of getFeaturesForModel(modelOf(rawCloudDevice))) {
+      if (!featureMapping.computed) {
+        const value = extractMetricValue(payload, featureMapping.metricPaths);
+        values[featureMapping.key] =
+          value === null ? null : normalizeMetricValue(featureMapping.key, value);
+      }
+    }
+    const capacityKwh = deviceCapacityKwh(payload);
+    const scale = socScaleOf(payload);
+    const scaled = (property) => {
+      const value = reportedValue(payload, property);
+      return value === null || scale === null ? null : Math.round(value / scale);
+    };
+    return {
+      externalId: ids.device,
+      featureExternalId: (key) => ids.feature(key),
+      name: rawCloudDevice.deviceName || modelOf(rawCloudDevice),
+      model: modelOf(rawCloudDevice),
+      source,
+      degraded: source === 'cloud' && locallyReachable,
+      values,
+      capacityKwh,
+      remainingKwh:
+        capacityKwh !== null && values.batteryLevel !== null
+          ? Math.round(values.batteryLevel * capacityKwh) / 100
+          : null,
+      settings: {
+        outputLimit: reportedValue(payload, 'outputLimit'),
+        inputLimit: reportedValue(payload, 'inputLimit'),
+        acMode: reportedValue(payload, 'acMode'),
+        socSet: scaled('socSet'),
+        minSoc: scaled('minSoc'),
+      },
+    };
+  });
 }
 
 export const solarflow = {

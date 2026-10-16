@@ -140,6 +140,27 @@ The trigger **Battery reachability changed** starts a scene when a battery
 stops reporting on every source, or reports again (local MQTT mode). Its
 variables give the battery name, the new state and the telemetry source.
 
+## Dashboard widgets
+
+Two widgets are available in the dashboard editor (Gladys 5.1 or later):
+
+- **Zendure battery**: one battery, chosen in the widget settings. Its charge
+  level and its four powers follow the battery live; below them, its source
+  (local, cloud, fallback, unreachable), the energy stored, the output and
+  charge limits, the AC mode and the charge levels it reports. The **Power
+  limits** and **Mode & levels** buttons open a form pre-filled with the
+  current values: change what you need and confirm. The same protections as
+  the scene actions apply.
+- **Battery group**: several batteries summed up under a name of your choice:
+  average charge level (weighted by the pack capacities when they are all
+  known), total powers, energy stored, and one line per battery colored by its
+  source. Leave the battery list empty for every battery of the account.
+
+**Three-phase installation:** add one **Battery group** per phase, named
+"Phase L1", "Phase L2", "Phase L3", each with the batteries of that phase, plus
+one more with no battery selected for the whole site. A single-phase
+installation needs just one group.
+
 ## One cloud consumer per Zendure account
 
 Zendure allows **only one cloud consumer per account** at a time. If another app

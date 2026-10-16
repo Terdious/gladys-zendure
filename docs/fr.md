@@ -154,6 +154,29 @@ batterie ne remonte plus rien sur aucune source, ou remonte à nouveau (mode
 MQTT local). Ses variables donnent le nom de la batterie, le nouvel état et la
 source de télémétrie.
 
+## Widgets du tableau de bord
+
+Deux widgets sont disponibles dans l'éditeur de tableau de bord (Gladys 5.1 ou
+plus récent) :
+
+- **Batterie Zendure** : une batterie, choisie dans les réglages du widget. Son
+  niveau et ses quatre puissances suivent la batterie en direct ; en dessous,
+  sa source (locale, cloud, repli, injoignable), l'énergie stockée, les limites
+  de sortie et de charge, le mode AC et les niveaux de charge qu'elle remonte.
+  Les boutons **Limites de puissance** et **Mode et niveaux** ouvrent un
+  formulaire pré-rempli avec les valeurs actuelles : modifiez ce qu'il faut et
+  validez. Les mêmes protections que pour les actions de scène s'appliquent.
+- **Groupe de batteries** : plusieurs batteries cumulées sous le nom de votre
+  choix : niveau moyen (pondéré par la capacité des packs quand elles sont
+  toutes connues), puissances totales, énergie stockée, et une ligne par
+  batterie colorée selon sa source. Laissez la liste des batteries vide pour
+  prendre toutes les batteries du compte.
+
+**Installation triphasée :** ajoutez un **Groupe de batteries** par phase,
+nommé « Phase L1 », « Phase L2 », « Phase L3 », chacun avec les batteries de sa
+phase, plus un dernier sans batterie sélectionnée pour l'ensemble du site. Une
+installation monophasée n'a besoin que d'un groupe.
+
 ## Un seul consommateur cloud par compte Zendure
 
 Zendure n'autorise **qu'un seul consommateur cloud par compte** à la fois. Si
