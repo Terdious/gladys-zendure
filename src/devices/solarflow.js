@@ -68,6 +68,15 @@ export const UNREACHABLE_TIMEOUT_IN_MS = 5 * 60 * 1000;
 // The evaluator re-assesses every device at this interval.
 export const SOURCE_EVALUATOR_INTERVAL_IN_MS = 30 * 1000;
 
+// Tooltip of the degraded badge (cloud fallback of a locally reachable device),
+// in every language of the Gladys interface.
+export const LOCAL_SILENT_MESSAGE = {
+  en: 'Local telemetry is silent — running on the Zendure cloud fallback.',
+  fr: 'Télémétrie locale muette — repli sur le cloud Zendure.',
+  de: 'Die lokale Telemetrie schweigt — Betrieb über den Rückfall auf die Zendure-Cloud.',
+  es: 'La telemetría local está en silencio — funcionando con el respaldo de la nube de Zendure.',
+};
+
 // deviceKey -> { source: 'local'|'cloud'|'unreachable', since: ms timestamp }
 const effectiveSourceByDeviceKey = new Map();
 let sourceEvaluatorTimer = null;
@@ -559,16 +568,13 @@ function transportOfSource(source) {
  * @param {object} config normalized configuration
  * @param {object} rawCloudDevice device from the cloud deviceList
  * @param {'local'|'cloud'|'unreachable'} source effective source
- * @returns {{ degraded?: true, message?: { en: string, fr: string } }}
+ * @returns {{ degraded?: true, message?: Record<string, string> }}
  */
 function degradedFieldsFor(config, rawCloudDevice, source) {
   if (source === 'cloud' && isDeviceLocallyReachable(config, rawCloudDevice)) {
     return {
       degraded: true,
-      message: {
-        en: 'Local telemetry is silent — running on the Zendure cloud fallback.',
-        fr: 'Télémétrie locale muette — repli sur le cloud Zendure.',
-      },
+      message: LOCAL_SILENT_MESSAGE,
     };
   }
   return {};

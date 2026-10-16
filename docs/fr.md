@@ -7,6 +7,12 @@ depuis le cloud Zendure et — en option — directement depuis le **broker MQTT
 local** de chaque appareil, pour des mises à jour rapides et résilientes
 hors-ligne, avec repli cloud automatique.
 
+## Prérequis
+
+- Un **compte Zendure**, avec vos batteries déjà installées et en ligne dans
+  l'application Zendure.
+- Gladys Assistant **4.86 ou plus récent**.
+
 ## Modèles pris en charge
 
 SolarFlow 800, SolarFlow 800 Pro, SolarFlow 1600, SolarFlow 2400,
@@ -36,14 +42,15 @@ l'application mobile Zendure :
    la télémétrie est rafraîchie en l'absence de mise à jour temps réel. La
    valeur par défaut (30 s) convient.
 4. (Optionnel) Activez le **MQTT local (zenSDK)** — voir ci-dessous.
-5. **Enregistrez.** Vos batteries apparaissent dans l'onglet **Découverte**,
-   prêtes à être ajoutées.
+5. Cliquez sur **Enregistrer la configuration**. Vos batteries apparaissent dans
+   l'onglet **Découverte**, prêtes à être ajoutées.
 
 ### MQTT local (recommandé si vous l'utilisez)
 
 Quand vous activez le MQTT local dans l'application Zendure (mode développeur),
 chaque appareil publie sa télémétrie sur un broker local de votre réseau.
-Activer **MQTT local** dans Gladys fait lire l'intégration depuis ce broker :
+Activer le **MQTT local (zenSDK)** dans Gladys fait lire l'intégration depuis ce
+broker :
 
 - **Plus rapide** : les valeurs locales se mettent à jour toutes les 1 à 3 s au
   lieu d'environ 30 s via le cloud.
@@ -78,6 +85,27 @@ télémétrie devient intermittente. Privilégiez le **MQTT local** pour tout se
 consommateur — le broker local n'a pas cette limite. L'intégration avertit une
 fois dans ses journaux quand elle détecte ce phénomène de reprise de connexion.
 
+## Mettre à jour l'intégration
+
+**Installée depuis le catalogue** (le cas habituel) : Gladys consulte
+régulièrement le store. Quand une nouvelle version sort, l'intégration affiche
+un badge **« Mise à jour disponible »** (également compté à côté de
+**Intégrations** dans le menu), et son onglet **Supervision** indique la version
+proposée, avec un lien vers ses notes de version. Cliquez sur **Mettre à jour** :
+Gladys récupère la nouvelle image **et** applique le nouveau manifest — les
+nouveaux champs de configuration apparaissent d'eux-mêmes, il n'y a rien à
+recoller. Votre configuration et vos appareils sont conservés.
+
+Gladys peut mettre jusqu'à environ une heure et demie à voir une nouvelle
+version (rafraîchissement de l'index du store). **« Forcer la mise à jour »**
+vérifie immédiatement : il lit la dernière version publiée et récupère son
+image.
+
+**Installée en mode développeur** (manifest collé à la main) : **« Forcer la
+mise à jour »** ne fait que récupérer à nouveau l'image du tag installé, et la
+version affichée comme les champs de configuration proviennent du manifest
+collé — recollez le manifest à jour pour récupérer les nouveaux champs.
+
 ## Dépannage
 
 - **Un appareil n'affiche aucune valeur (ou est plus lent que les autres) alors
@@ -98,5 +126,5 @@ fois dans ses journaux quand elle détecte ce phénomène de reprise de connexio
   correcte : une clé invalide ou expirée affiche un statut « Le cloud Zendure
   est injoignable ou la clé cloud est invalide » sur l'écran de configuration.
 - **Détail complet.** Définissez `LOG_LEVEL=debug` et lisez les journaux de
-  l'intégration depuis l'interface Gladys (ou `docker logs` sur l'hôte). Chaque
+  l'intégration dans son onglet **Journaux** (ou `docker logs` sur l'hôte). Chaque
   changement de source de télémétrie est journalisé sur une ligne `telemetry:`.

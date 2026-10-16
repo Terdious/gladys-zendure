@@ -688,6 +688,8 @@ test('a locally-silent device falls back to the cloud (lazy connect) then recove
       message: {
         en: 'Local telemetry is silent — running on the Zendure cloud fallback.',
         fr: 'Télémétrie locale muette — repli sur le cloud Zendure.',
+        de: 'Die lokale Telemetrie schweigt — Betrieb über den Rückfall auf die Zendure-Cloud.',
+        es: 'La telemetría local está en silencio — funcionando con el respaldo de la nube de Zendure.',
       },
     },
   ]);

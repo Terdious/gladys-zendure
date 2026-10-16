@@ -6,6 +6,12 @@ and solar production) from the Zendure cloud, and — optionally — directly fr
 each device's **local MQTT broker** for LAN-speed, offline-resilient updates
 with automatic cloud fallback.
 
+## Prerequisites
+
+- A **Zendure account**, with your batteries already set up and online in the
+  Zendure app.
+- Gladys Assistant **4.86 or later**.
+
 ## Supported models
 
 SolarFlow 800, SolarFlow 800 Pro, SolarFlow 1600, SolarFlow 2400,
@@ -32,7 +38,8 @@ key** (a base64 token) that you generate once from the Zendure mobile app:
 3. Set the **Refresh interval** (seconds) — how often the telemetry is refreshed
    when no real-time update is flowing. The default (30 s) is fine.
 4. (Optional) Enable **local MQTT (zenSDK)** — see below.
-5. **Save.** Your batteries appear in the **Discovery** tab, ready to be added.
+5. Click **Save configuration**. Your batteries appear in the **Discover** tab,
+   ready to be added.
 
 ### Local MQTT (recommended if you use it)
 
@@ -70,6 +77,25 @@ intermittent. Prefer the **local MQTT** path for any second consumer — the loc
 broker has no such limit. The integration warns once in its logs when it detects
 this take-over pattern.
 
+## Updating the integration
+
+**Installed from the catalog** (the usual case): Gladys checks the store
+regularly. When a new version is out, the integration shows an **"Update
+available"** badge (also counted next to **Integrations** in the menu), and its
+**Supervision** tab names the version offered, with a link to its release
+notes. Click **Update**: Gladys pulls the new image **and** applies the new
+manifest — new configuration fields appear on their own, there is nothing to
+re-paste. Your configuration and your devices are kept.
+
+Gladys can take up to about an hour and a half to notice a new release (store
+index refresh). **"Force update"** checks right away: it reads the latest
+published version and pulls its image.
+
+**Installed in developer mode** (manifest pasted by hand): **"Force update"**
+only re-pulls the image of the tag you installed, and the version shown and the
+configuration fields come from the pasted manifest — re-paste the updated
+manifest to pick up new fields.
+
 ## Troubleshooting
 
 - **One device shows no values (or is slower than the others) while the rest
@@ -86,6 +112,6 @@ this take-over pattern.
 - **Everything is silent right after configuration.** Make sure the cloud key is
   correct: an invalid or expired key shows a "Zendure cloud is unreachable or
   the cloud key is invalid" status on the Configuration screen.
-- **Full detail.** Set `LOG_LEVEL=debug` and read the integration logs from the
-  Gladys UI (or `docker logs` on the host). Every telemetry-source switch is
+- **Full detail.** Set `LOG_LEVEL=debug` and read the integration logs in its
+  **Logs** tab (or `docker logs` on the host). Every telemetry-source switch is
   logged on a `telemetry:` line.

@@ -4,34 +4,40 @@
   "name": "Zendure",
   "description": {
     "en": "Connect your Zendure solar batteries (SolarFlow) to Gladys Assistant through the Zendure cloud.",
-    "fr": "Connectez vos batteries solaires Zendure (SolarFlow) à Gladys Assistant via le cloud Zendure."
+    "fr": "Connectez vos batteries solaires Zendure (SolarFlow) à Gladys Assistant via le cloud Zendure.",
+    "de": "Verbinde deine Zendure-Solarbatterien (SolarFlow) über die Zendure-Cloud mit Gladys Assistant.",
+    "es": "Conecte sus baterías solares Zendure (SolarFlow) a Gladys Assistant a través de la nube de Zendure."
   },
   "version": "1.2.0",
   "docker_image": "ghcr.io/terdious/gladys-zendure:1.2.0",
-  "gladys_version": ">=4.62.0",
+  "gladys_version": ">=4.86.0",
   "cover_image": "https://raw.githubusercontent.com/Terdious/gladys-zendure/master/cover.png",
-  "transports": [
-    "local",
-    "cloud"
-  ],
+  "transports": ["local", "cloud"],
+  "categories": ["energy"],
   "config_schema": [
     {
       "key": "intro",
       "type": "section",
       "label": {
         "en": "Getting started",
-        "fr": "Pour commencer"
+        "fr": "Pour commencer",
+        "de": "Erste Schritte",
+        "es": "Primeros pasos"
       },
       "description": {
-        "en": "Paste your Zendure cloud authorization key below (generated from the Zendure mobile app). Your SolarFlow / Hyper batteries then appear in the Discovery tab. Optionally enable local MQTT for LAN-speed, offline-resilient telemetry with automatic cloud fallback. The full step-by-step is in the Documentation link above.",
-        "fr": "Collez ci-dessous votre clé d'autorisation cloud Zendure (générée depuis l'application mobile Zendure). Vos batteries SolarFlow / Hyper apparaissent alors dans l'onglet Découverte. Activez éventuellement le MQTT local pour une télémétrie rapide et résiliente hors-ligne, avec repli cloud automatique. Le pas à pas complet est dans le lien Documentation ci-dessus."
+        "en": "Paste your Zendure cloud authorization key below (generated from the Zendure mobile app). Your SolarFlow / Hyper batteries then appear in the Discover tab. Optionally enable local MQTT for LAN-speed, offline-resilient telemetry with automatic cloud fallback. The full step-by-step is in the Documentation link above.",
+        "fr": "Collez ci-dessous votre clé d'autorisation cloud Zendure (générée depuis l'application mobile Zendure). Vos batteries SolarFlow / Hyper apparaissent alors dans l'onglet Découverte. Activez éventuellement le MQTT local pour une télémétrie rapide et résiliente hors-ligne, avec repli cloud automatique. Le pas à pas complet est dans le lien Documentation ci-dessus.",
+        "de": "Füge unten deinen Zendure-Cloud-Autorisierungsschlüssel ein (in der Zendure-App erzeugt). Deine SolarFlow- / Hyper-Batterien erscheinen dann im Tab Entdecken. Aktiviere optional lokales MQTT für schnelle, auch ohne Internet stabile Telemetrie mit automatischem Rückfall auf die Cloud. Die vollständige Schritt-für-Schritt-Anleitung findest du über den Link Dokumentation oben.",
+        "es": "Pegue abajo su clave de autorización de la nube de Zendure (generada desde la aplicación móvil Zendure). Sus baterías SolarFlow / Hyper aparecen entonces en la pestaña Descubrir. Active opcionalmente el MQTT local para una telemetría rápida y resistente sin conexión, con respaldo automático en la nube. El paso a paso completo está en el enlace Documentación de arriba."
       },
       "links": [
         {
           "url": "https://zendure.com",
           "label": {
             "en": "Zendure website",
-            "fr": "Site Zendure"
+            "fr": "Site Zendure",
+            "de": "Zendure-Website",
+            "es": "Sitio web de Zendure"
           }
         }
       ]
@@ -41,11 +47,15 @@
       "type": "secret",
       "label": {
         "en": "Zendure cloud authorization key",
-        "fr": "Clé cloud d'autorisation Zendure"
+        "fr": "Clé cloud d'autorisation Zendure",
+        "de": "Zendure-Cloud-Autorisierungsschlüssel",
+        "es": "Clave de autorización de la nube de Zendure"
       },
       "description": {
         "en": "The authorization key generated from the Zendure mobile app (base64 token used to reach the Zendure cloud API).",
-        "fr": "La clé d'autorisation générée depuis l'application mobile Zendure (jeton base64 utilisé pour joindre l'API cloud Zendure)."
+        "fr": "La clé d'autorisation générée depuis l'application mobile Zendure (jeton base64 utilisé pour joindre l'API cloud Zendure).",
+        "de": "Der in der Zendure-App erzeugte Autorisierungsschlüssel (Base64-Token für den Zugriff auf die Zendure-Cloud-API).",
+        "es": "La clave de autorización generada desde la aplicación móvil Zendure (token base64 utilizado para acceder a la API de la nube de Zendure)."
       },
       "required": true
     },
@@ -54,11 +64,15 @@
       "type": "number",
       "label": {
         "en": "Refresh interval (s)",
-        "fr": "Intervalle de rafraîchissement (s)"
+        "fr": "Intervalle de rafraîchissement (s)",
+        "de": "Aktualisierungsintervall (s)",
+        "es": "Intervalo de actualización (s)"
       },
       "description": {
         "en": "How often device telemetry is polled, in seconds.",
-        "fr": "Fréquence d'interrogation de la télémétrie des appareils, en secondes."
+        "fr": "Fréquence d'interrogation de la télémétrie des appareils, en secondes.",
+        "de": "Wie oft die Telemetrie der Geräte abgefragt wird, in Sekunden.",
+        "es": "Frecuencia con la que se consulta la telemetría de los dispositivos, en segundos."
       },
       "required": false,
       "default": 30,
@@ -70,11 +84,15 @@
       "type": "boolean",
       "label": {
         "en": "Enable local MQTT (zenSDK)",
-        "fr": "Activer le MQTT local (zenSDK)"
+        "fr": "Activer le MQTT local (zenSDK)",
+        "de": "Lokales MQTT aktivieren (zenSDK)",
+        "es": "Activar el MQTT local (zenSDK)"
       },
       "description": {
         "en": "Read telemetry from the device's local MQTT broker when available, instead of the Zendure cloud.",
-        "fr": "Lire la télémétrie via le broker MQTT local de l'appareil quand il est disponible."
+        "fr": "Lire la télémétrie via le broker MQTT local de l'appareil quand il est disponible, plutôt que via le cloud Zendure.",
+        "de": "Liest die Telemetrie vom lokalen MQTT-Broker des Geräts, wenn verfügbar, statt aus der Zendure-Cloud.",
+        "es": "Leer la telemetría desde el broker MQTT local del dispositivo cuando esté disponible, en lugar de la nube de Zendure."
       },
       "required": false,
       "default": false
