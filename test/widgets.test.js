@@ -17,6 +17,7 @@ import {
   createFakeZendureFetch,
   createFakeMqttLibrary,
   createTestEnergyMeters,
+  createFakeZenSdkFetch,
   FAKE_CLOUD_KEY,
   FAKE_SOLARFLOW_DEVICE,
   FAKE_SECOND_SOLARFLOW_DEVICE,
@@ -39,6 +40,9 @@ beforeEach(() => {
     }),
     mqttLibrary,
     energyMeters: createTestEnergyMeters().meters,
+    // Never the network: every local HTTP API is unreachable unless a test
+    // injects its own fake.
+    localFetchImpl: createFakeZenSdkFetch(),
   });
 });
 

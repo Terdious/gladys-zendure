@@ -16,6 +16,7 @@ import {
   createFakeZendureFetch,
   createFakeMqttLibrary,
   createTestEnergyMeters,
+  createFakeZenSdkFetch,
   FAKE_CLOUD_KEY,
 } from './helpers/fakeZendure.js';
 
@@ -32,6 +33,9 @@ beforeEach(() => {
     fetchImpl: createFakeZendureFetch(),
     mqttLibrary,
     energyMeters: createTestEnergyMeters().meters,
+    // Never the network: every local HTTP API is unreachable unless a test
+    // injects its own fake.
+    localFetchImpl: createFakeZenSdkFetch(),
   });
 });
 

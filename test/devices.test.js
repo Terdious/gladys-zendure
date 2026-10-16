@@ -34,6 +34,7 @@ import {
   FAKE_SOLARFLOW_2400_DEVICE,
   FAKE_LOCAL_SOLARFLOW_DEVICE,
   createTestEnergyMeters,
+  createFakeZenSdkFetch,
 } from './helpers/fakeZendure.js';
 
 const CLOUD_BROKER_URL = 'mqtt://broker.zendure.example:1883';
@@ -48,6 +49,9 @@ beforeEach(() => {
     fetchImpl: createFakeZendureFetch(),
     mqttLibrary: createFakeMqttLibrary(),
     energyMeters: createTestEnergyMeters().meters,
+    // Never the network: every local HTTP API is unreachable unless a test
+    // injects its own fake.
+    localFetchImpl: createFakeZenSdkFetch(),
   });
 });
 

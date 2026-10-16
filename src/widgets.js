@@ -30,6 +30,10 @@ export const BATTERY_ACTIONS = { POWER_LIMITS: 'power_limits', MODE_AND_LEVELS: 
 const T = (en, fr, de, es) => ({ en, fr, de, es });
 
 const SOURCE_STATUS = {
+  http: {
+    value: T('Local (API)', 'Local (API)', 'Lokal (API)', 'Local (API)'),
+    color: WIDGET_COLORS.SUCCESS,
+  },
   local: { value: T('Local', 'Local', 'Lokal', 'Local'), color: WIDGET_COLORS.SUCCESS },
   cloud: { value: T('Cloud', 'Cloud', 'Cloud', 'Nube'), color: WIDGET_COLORS.INFO },
   degraded: {

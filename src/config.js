@@ -17,6 +17,13 @@ import { DEVICE_POLL_FREQUENCIES } from '@gladysassistant/integration-sdk';
 export const DEFAULT_CONFIG = {
   cloud_key: '', // Zendure cloud authorization key (base64 token), secret
   poll_frequency: 30, // seconds, how often device telemetry is refreshed
+  // Read and drive the devices through their zenSDK local HTTP API (what Home
+  // Assistant uses). On by default: a device that does not answer simply
+  // stays on (or falls back to) the cloud.
+  enable_local_http: true,
+  // Optional `SERIAL=ADDRESS` pairs, for devices whose address the cloud does
+  // not give and whose mDNS name does not resolve in the container.
+  local_http_addresses: '',
   enable_local_mqtt: false, // opt-in to the per-device local MQTT broker (zenSDK)
   feature_names: 'en', // language of the feature names of newly discovered devices
 };
@@ -70,6 +77,10 @@ export function normalizeConfig(raw = {}) {
     // Force the types: config may arrive as strings from a form.
     cloud_key: String(raw.cloud_key ?? DEFAULT_CONFIG.cloud_key).trim(),
     poll_frequency: toPositiveNumber(raw.poll_frequency, DEFAULT_CONFIG.poll_frequency),
+    enable_local_http: toBoolean(raw.enable_local_http, DEFAULT_CONFIG.enable_local_http),
+    local_http_addresses: String(
+      raw.local_http_addresses ?? DEFAULT_CONFIG.local_http_addresses,
+    ).trim(),
     enable_local_mqtt: toBoolean(raw.enable_local_mqtt, DEFAULT_CONFIG.enable_local_mqtt),
     feature_names: FEATURE_NAME_LANGUAGES.includes(raw.feature_names)
       ? raw.feature_names

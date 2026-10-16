@@ -13,7 +13,7 @@ import { readFile } from 'node:fs/promises';
 
 import { DEFAULT_CONFIG } from '../src/config.js';
 import { CONNECTION_MESSAGES } from '../src/devices/index.js';
-import { LOCAL_SILENT_MESSAGE } from '../src/devices/solarflow.js';
+import { LOCAL_HTTP_SILENT_MESSAGE, LOCAL_SILENT_MESSAGE } from '../src/devices/solarflow.js';
 
 const manifest = JSON.parse(
   await readFile(new URL('../gladys-assistant-integration.json', import.meta.url), 'utf8'),
@@ -165,6 +165,7 @@ test('every runtime message ships in every Gladys language', () => {
     assertEveryLanguage(message, `CONNECTION_MESSAGES.${key}`);
   }
   assertEveryLanguage(LOCAL_SILENT_MESSAGE, 'LOCAL_SILENT_MESSAGE');
+  assertEveryLanguage(LOCAL_HTTP_SILENT_MESSAGE, 'LOCAL_HTTP_SILENT_MESSAGE');
 });
 
 test('the user documentation ships in every Gladys language, with the same sections', async () => {
