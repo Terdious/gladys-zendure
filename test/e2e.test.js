@@ -26,6 +26,7 @@ import {
   createFakeMqttLibrary,
   FAKE_CLOUD_KEY,
   FAKE_SOLARFLOW_DEVICE,
+  createTestEnergyMeters,
 } from './helpers/fakeZendure.js';
 
 const SELECTOR = 'zendure';
@@ -44,7 +45,11 @@ before(async () => {
 
   mqttLibrary = createFakeMqttLibrary();
   resetSolarflowRuntime();
-  setSolarflowDependencies({ fetchImpl: createFakeZendureFetch(), mqttLibrary });
+  setSolarflowDependencies({
+    fetchImpl: createFakeZendureFetch(),
+    mqttLibrary,
+    energyMeters: createTestEnergyMeters().meters,
+  });
 
   gladys = new GladysIntegration({
     hostApiUrl: core.url,
@@ -102,7 +107,7 @@ test('discovery publishes the SolarFlow device to the core', async () => {
   // frequencies: 30 s from the config, snapped to milliseconds.
   assert.equal(discoveredDevice.should_poll, true);
   assert.equal(discoveredDevice.poll_frequency, 30000);
-  assert.equal(discoveredDevice.features.length, 5);
+  assert.equal(discoveredDevice.features.length, 10);
   assert.equal(discoveredDevice.selector, 'zendure-solarflow-abc123');
   for (const feature of discoveredDevice.features) {
     assert.equal(feature.read_only, true);

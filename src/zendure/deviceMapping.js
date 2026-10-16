@@ -64,8 +64,12 @@ const MODEL_MAX_POWER = {
   [SUPPORTED_PRODUCT_MODELS.HYPER_2000]: 2000,
 };
 
+// Display ceiling of the energy indexes (kWh): metadata only, never reached.
+const ENERGY_INDEX_MAX_KWH = 1000000;
+
 /**
- * Build the five baseline SolarFlow/Hyper features shared by every model.
+ * Build the baseline SolarFlow/Hyper features shared by every model: the five
+ * measured ones, then the computed energy ones.
  * @param {number} maxPower display ceiling (watts) for the power features
  * @returns {Array<object>} feature mappings
  */
@@ -121,6 +125,58 @@ function buildBaselineFeatures(maxPower) {
       max: maxPower,
       metricPaths: ['solarInputPower', 'properties.solarInputPower'],
     },
+    // Computed features (`computed: true`): no metric of their own, their
+    // values come from src/zendure/energy.js (integrated powers, capacity).
+    {
+      key: 'batteryChargeEnergy',
+      name: 'Battery charged energy',
+      category: DEVICE_FEATURE_CATEGORIES.BATTERY_STORAGE,
+      type: DEVICE_FEATURE_TYPES.BATTERY_STORAGE.CHARGE_INDEX,
+      unit: DEVICE_FEATURE_UNITS.KILOWATT_HOUR,
+      min: 0,
+      max: ENERGY_INDEX_MAX_KWH,
+      computed: true,
+    },
+    {
+      key: 'batteryDischargeEnergy',
+      name: 'Battery discharged energy',
+      category: DEVICE_FEATURE_CATEGORIES.BATTERY_STORAGE,
+      type: DEVICE_FEATURE_TYPES.BATTERY_STORAGE.DISCHARGE_INDEX,
+      unit: DEVICE_FEATURE_UNITS.KILOWATT_HOUR,
+      min: 0,
+      max: ENERGY_INDEX_MAX_KWH,
+      computed: true,
+    },
+    {
+      key: 'homeOutputEnergy',
+      name: 'Home output energy',
+      category: DEVICE_FEATURE_CATEGORIES.HOME_OUTPUT_SENSOR,
+      type: DEVICE_FEATURE_TYPES.HOME_OUTPUT_SENSOR.INDEX,
+      unit: DEVICE_FEATURE_UNITS.KILOWATT_HOUR,
+      min: 0,
+      max: ENERGY_INDEX_MAX_KWH,
+      computed: true,
+    },
+    {
+      key: 'solarEnergy',
+      name: 'Solar energy',
+      category: DEVICE_FEATURE_CATEGORIES.ENERGY_PRODUCTION_SENSOR,
+      type: DEVICE_FEATURE_TYPES.ENERGY_PRODUCTION_SENSOR.INDEX,
+      unit: DEVICE_FEATURE_UNITS.KILOWATT_HOUR,
+      min: 0,
+      max: ENERGY_INDEX_MAX_KWH,
+      computed: true,
+    },
+    {
+      key: 'batteryEnergyRemaining',
+      name: 'Battery energy remaining',
+      category: DEVICE_FEATURE_CATEGORIES.BATTERY_STORAGE,
+      type: DEVICE_FEATURE_TYPES.BATTERY_STORAGE.BATTERY_ENERGY_REMAINING,
+      unit: DEVICE_FEATURE_UNITS.KILOWATT_HOUR,
+      min: 0,
+      max: 100,
+      computed: true,
+    },
   ];
 }
 
@@ -157,6 +213,36 @@ export const FEATURE_NAMES = {
     fr: "Puissance d'entrée solaire",
     de: 'Solare Eingangsleistung',
     es: 'Potencia de entrada solar',
+  },
+  batteryChargeEnergy: {
+    en: 'Battery charged energy',
+    fr: 'Énergie chargée',
+    de: 'Geladene Energie',
+    es: 'Energía cargada',
+  },
+  batteryDischargeEnergy: {
+    en: 'Battery discharged energy',
+    fr: 'Énergie déchargée',
+    de: 'Entladene Energie',
+    es: 'Energía descargada',
+  },
+  homeOutputEnergy: {
+    en: 'Home output energy',
+    fr: 'Énergie vers la maison',
+    de: 'Energie zum Haus',
+    es: 'Energía de salida del hogar',
+  },
+  solarEnergy: {
+    en: 'Solar energy',
+    fr: 'Énergie solaire',
+    de: 'Solarenergie',
+    es: 'Energía solar',
+  },
+  batteryEnergyRemaining: {
+    en: 'Battery energy remaining',
+    fr: 'Énergie restante en batterie',
+    de: 'Verbleibende Batterieenergie',
+    es: 'Energía restante de la batería',
   },
 };
 

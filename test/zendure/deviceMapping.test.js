@@ -14,6 +14,11 @@ const EXPECTED = {
   batteryOutputPower: ['battery-storage', 'charge-power', 'watt'],
   homeOutputPower: ['home-output-sensor', 'power', 'watt'],
   solarInputPower: ['energy-production-sensor', 'power', 'watt'],
+  batteryChargeEnergy: ['battery-storage', 'charge-index', 'kilowatt-hour'],
+  batteryDischargeEnergy: ['battery-storage', 'discharge-index', 'kilowatt-hour'],
+  homeOutputEnergy: ['home-output-sensor', 'index', 'kilowatt-hour'],
+  solarEnergy: ['energy-production-sensor', 'index', 'kilowatt-hour'],
+  batteryEnergyRemaining: ['battery-storage', 'battery-energy-remaining', 'kilowatt-hour'],
 };
 
 test('every model maps the Zendure metrics to the Gladys energy categories', () => {
@@ -27,7 +32,7 @@ test('every model maps the Zendure metrics to the Gladys energy categories', () 
 });
 
 test('the zenSDK pack flows land on the right side: packInputPower is the discharge', () => {
-  const features = Object.values(MODEL_FEATURES)[0];
+  const features = Object.values(MODEL_FEATURES)[0].filter((f) => !f.computed);
   const byPath = Object.fromEntries(features.map((f) => [f.metricPaths[0], f.type]));
   assert.equal(byPath.packInputPower, DEVICE_FEATURE_TYPES.BATTERY_STORAGE.DISCHARGE_POWER);
   assert.equal(byPath.outputPackPower, DEVICE_FEATURE_TYPES.BATTERY_STORAGE.CHARGE_POWER);

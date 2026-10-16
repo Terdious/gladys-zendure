@@ -4,6 +4,11 @@
 // -----------------------------------------------------------------------------
 
 import { EventEmitter } from 'node:events';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { createEnergyMeters } from '../../src/zendure/energy.js';
 
 export const FAKE_API_URL = 'https://app.zendure.example';
 export const FAKE_APP_KEY = 'appKey123';
@@ -165,4 +170,13 @@ export function createFakeMqttLibrary() {
     },
   };
   return library;
+}
+
+/**
+ * Energy meters writing to a fresh temporary directory, never to /data.
+ * @returns {{ meters: ReturnType<typeof createEnergyMeters>, dataDir: string }}
+ */
+export function createTestEnergyMeters() {
+  const dataDir = mkdtempSync(join(tmpdir(), 'gladys-zendure-energy-'));
+  return { meters: createEnergyMeters({ dataDir }), dataDir };
 }

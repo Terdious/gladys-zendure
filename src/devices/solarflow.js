@@ -26,6 +26,12 @@ import {
   normalizeMetricValue,
   featureNameFor,
 } from '../zendure/deviceMapping.js';
+import {
+  createEnergyMeters,
+  deviceCapacityKwh,
+  ENERGY_FLOWS,
+  ENERGY_SAVE_INTERVAL_IN_MS,
+} from '../zendure/energy.js';
 
 const DEVICE_TYPE = 'solarflow';
 
@@ -77,6 +83,47 @@ export const LOCAL_SILENT_MESSAGE = {
   de: 'Die lokale Telemetrie schweigt — Betrieb über den Rückfall auf die Zendure-Cloud.',
   es: 'La telemetría local está en silencio — funcionando con el respaldo de la nube de Zendure.',
 };
+
+// --- Energy meters (src/zendure/energy.js) ------------------------------------
+// Created and loaded from /data on the first push start; `dependencies` can
+// inject a store for the tests.
+let energyMeters = null;
+let energyLoad = null;
+let energyLoaded = false;
+let energySaveTimer = null;
+
+function getEnergyMeters() {
+  if (!energyMeters) {
+    energyMeters = dependencies.energyMeters || createEnergyMeters();
+  }
+  return energyMeters;
+}
+
+/** Load the saved totals once (the push listeners wait for it). */
+function ensureEnergyLoaded() {
+  if (!energyLoad) {
+    energyLoad = getEnergyMeters()
+      .load()
+      .then(() => {
+        energyLoaded = true;
+      });
+  }
+  return energyLoad;
+}
+
+function stopEnergySaveTimer() {
+  if (energySaveTimer) {
+    clearInterval(energySaveTimer);
+    energySaveTimer = null;
+  }
+}
+
+/** Write the energy totals to /data now (shutdown, tests). */
+export async function saveEnergyMeters() {
+  if (energyLoaded) {
+    await getEnergyMeters().save();
+  }
+}
 
 // deviceKey -> { source: 'local'|'cloud'|'unreachable', since: ms timestamp }
 const effectiveSourceByDeviceKey = new Map();
@@ -362,6 +409,10 @@ export function resetSolarflowRuntime() {
   stopSourceEvaluator();
   effectiveSourceByDeviceKey.clear();
   allLocalEvaluationStreak = 0;
+  stopEnergySaveTimer();
+  energyMeters = null;
+  energyLoad = null;
+  energyLoaded = false;
   for (const unsubscribe of dynamicUnsubscribes) {
     unsubscribe();
   }
@@ -720,7 +771,10 @@ function createPushListener(gladys, config, source) {
         return;
       }
     }
-    const states = buildStates(gladys, rawCloudDevice, payload);
+    const states = [
+      ...buildStates(gladys, rawCloudDevice, payload),
+      ...buildEnergyStates(gladys, rawCloudDevice, payload, { integrate: true }),
+    ];
     if (states.length === 0) {
       return;
     }
@@ -889,6 +943,9 @@ function buildStates(gladys, rawCloudDevice, payload) {
   const states = [];
 
   for (const featureMapping of getFeaturesForModel(modelOf(rawCloudDevice))) {
+    if (featureMapping.computed) {
+      continue; // see buildEnergyStates
+    }
     let value = extractMetricValue(payload, featureMapping.metricPaths);
     if (value === null) {
       value = searchMetricByKeys(
@@ -905,6 +962,59 @@ function buildStates(gladys, rawCloudDevice, payload) {
     });
   }
 
+  return states;
+}
+
+/**
+ * Build the states of the computed energy features of one device: the energy
+ * indexes (integrated powers) and the energy remaining in the packs. With
+ * `integrate`, the payload is a FRESH report and its powers advance the
+ * meters; without it (polling a cached payload), the current totals are only
+ * re-published. Nothing before the saved totals are loaded.
+ * @param {object} gladys Gladys SDK instance
+ * @param {object} rawCloudDevice device from the cloud deviceList
+ * @param {object} payload merged telemetry payload
+ * @param {{ integrate: boolean, at?: number }} options
+ * @returns {Array<{ device_feature_external_id: string, state: number }>}
+ */
+function buildEnergyStates(gladys, rawCloudDevice, payload, { integrate, at = Date.now() }) {
+  if (!energyLoaded) {
+    return [];
+  }
+  const ids = gladys.externalIds(DEVICE_TYPE, deviceKeyOf(rawCloudDevice));
+  const features = getFeaturesForModel(modelOf(rawCloudDevice));
+  const meters = getEnergyMeters();
+  let totals;
+  if (integrate) {
+    const powers = {};
+    for (const featureMapping of features) {
+      if (featureMapping.key in ENERGY_FLOWS) {
+        const value = extractMetricValue(payload, featureMapping.metricPaths);
+        if (value !== null) {
+          powers[featureMapping.key] = value;
+        }
+      }
+    }
+    totals = meters.update(deviceKeyOf(rawCloudDevice), powers, at);
+  } else {
+    totals = meters.totals(deviceKeyOf(rawCloudDevice));
+  }
+
+  const states = Object.entries(totals).map(([key, kwh]) => ({
+    device_feature_external_id: ids.feature(key),
+    state: kwh,
+  }));
+
+  // Stored energy = state of charge x capacity of the known packs.
+  const capacity = deviceCapacityKwh(payload);
+  const levelMapping = features.find((featureMapping) => featureMapping.key === 'batteryLevel');
+  const level = levelMapping ? extractMetricValue(payload, levelMapping.metricPaths) : null;
+  if (capacity !== null && level !== null) {
+    states.push({
+      device_feature_external_id: ids.feature('batteryEnergyRemaining'),
+      state: Math.round(normalizeMetricValue('batteryLevel', level) * capacity) / 100,
+    });
+  }
   return states;
 }
 
@@ -967,7 +1077,7 @@ export const solarflow = {
           unit: featureMapping.unit,
           min: featureMapping.min,
           max: featureMapping.max,
-          read_only: true, // v1 is telemetry only: no control
+          read_only: true, // telemetry only: no control
           has_feedback: false,
           keep_history: true,
         })),
@@ -1052,6 +1162,10 @@ export const solarflow = {
         ? { ...rawCloudDevice, ...latestPayload }
         : latestPayload || rawCloudDevice;
     const states = buildStates(gladys, rawCloudDevice, payload);
+    if (states.length > 0) {
+      // The totals only: a cached payload is not a new interval to integrate.
+      states.push(...buildEnergyStates(gladys, rawCloudDevice, payload, { integrate: false }));
+    }
     if (states.length === 0) {
       logger.debug(`onPoll: no telemetry available yet for ${deviceKey}`);
       return;
@@ -1076,6 +1190,14 @@ export const solarflow = {
       try {
         const data = await ensureCloudData(config);
         const devices = supportedDevices(data);
+        await ensureEnergyLoaded();
+        stopEnergySaveTimer();
+        energySaveTimer = setInterval(() => {
+          saveEnergyMeters().catch(() => {});
+        }, ENERGY_SAVE_INTERVAL_IN_MS);
+        if (typeof energySaveTimer.unref === 'function') {
+          energySaveTimer.unref();
+        }
 
         // Explicit source breakdown in the logs: which device is served by the
         // LOCAL broker (and which one) versus the Zendure CLOUD broker.
@@ -1257,6 +1379,8 @@ export const solarflow = {
       stopped = true;
       stopTelemetryWatchdog();
       stopSourceEvaluator();
+      stopEnergySaveTimer();
+      saveEnergyMeters().catch(() => {});
       for (const unsubscribe of unsubscribes) {
         unsubscribe();
       }
