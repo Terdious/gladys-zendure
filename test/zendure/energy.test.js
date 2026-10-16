@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import {
@@ -78,4 +78,31 @@ test('pack capacities follow the serial prefix (Zendure-HA table)', () => {
   assert.equal(deviceCapacityKwh({ properties: { packData: [{ sn: 'J1' }] } }), 2.4);
   assert.equal(deviceCapacityKwh({ packData: [] }), null);
   assert.equal(deviceCapacityKwh({}), null);
+});
+
+test('concurrent saves are serialized, each with its own temporary file', async (t) => {
+  // The logger writes warnings through console.error: none may be a failed save.
+  const errorLines = t.mock.method(console, 'error', () => {});
+  const { meters, dataDir } = createTestEnergyMeters();
+  meters.update('dev', { solarInputPower: 1200 }, T0);
+  meters.update('dev', {}, T0 + 5 * MINUTE); // 0.1 kWh
+  // The periodic timer, the push cleanup and the shutdown hook can all save at
+  // once: before, they shared one temp file and the late rename hit ENOENT.
+  const first = meters.save();
+  meters.update('dev', {}, T0 + 10 * MINUTE); // 0.2 kWh, while the first save runs
+  const second = meters.save();
+  const third = meters.save();
+  await Promise.all([first, second, third]);
+
+  const saved = JSON.parse(await readFile(join(dataDir, 'energy.json'), 'utf8'));
+  assert.equal(saved.devices.dev.kwh.solarEnergy, 0.2, 'the latest totals win');
+  assert.deepEqual(
+    (await readdir(dataDir)).filter((name) => name.endsWith('.tmp')),
+    [],
+    'no temporary file left behind',
+  );
+  const failures = errorLines.mock.calls.filter((call) =>
+    /could not save/.test(call.arguments.join(' ')),
+  );
+  assert.deepEqual(failures, [], 'no save failed');
 });

@@ -52,6 +52,11 @@ the notes of the version's GitHub Release.
 
 ### Fixed
 
+- Energy totals: two saves at once (the periodic save, the push cleanup and
+  the shutdown hook) shared one temporary file, so the second failed with
+  `could not save /data/energy.json (ENOENT ... rename ...)`. Saves are now
+  serialized, each with its own temporary file, and an update landing during
+  a save is kept for the next one.
 - Local MQTT: the reported settings published on `Zendure/number|select|switch/<serial>/...`
   (outputLimit, inputLimit, socSet, minSoc, acMode...) are now read (command
   `/set` topics stay ignored), so the widget no longer shows them as "—".
