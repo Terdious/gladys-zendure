@@ -63,3 +63,9 @@ test('toGladysPollFrequency snaps invalid input to the default frequency, not th
   assert.equal(toGladysPollFrequency(0), 30000);
   assert.equal(toGladysPollFrequency(-5), 30000);
 });
+
+test('normalizeConfig keeps a supported feature_names language, English otherwise', () => {
+  assert.equal(normalizeConfig({ feature_names: 'de' }).feature_names, 'de');
+  assert.equal(normalizeConfig({ feature_names: 'it' }).feature_names, 'en');
+  assert.equal(normalizeConfig({}).feature_names, 'en');
+});

@@ -58,7 +58,9 @@ key** (a base64 token) that you generate once from the Zendure mobile app:
 3. Set the **Refresh interval** (seconds) — how often the telemetry is refreshed
    when no real-time update is flowing. The default (30 s) is fine.
 4. (Optional) Enable **local MQTT (zenSDK)** — see below.
-5. Click **Save configuration**. Your batteries appear in the **Discover** tab,
+5. (Optional) Choose the language of the **Feature names** (English by default):
+   it applies to the batteries you create from now on.
+6. Click **Save configuration**. Your batteries appear in the **Discover** tab,
    ready to be added.
 
 ### Local MQTT (recommended if you use it)
@@ -118,6 +120,11 @@ manifest to pick up new fields.
 
 ## Troubleshooting
 
+- **A battery is not discovered.** Open the **Logs** tab: a line `Unsupported
+Zendure model skipped: productModel "..."` gives the exact model string the
+  Zendure cloud reports. Open an issue on
+  [gladys-zendure](https://github.com/Terdious/gladys-zendure/issues) with it,
+  so the model can be added.
 - **One device shows no values (or is slower than the others) while the rest
   work.** Check its transport badge. If it fell back to **Cloud (degraded)**
   while local MQTT is enabled, its firmware may have silently stopped publishing

@@ -18,7 +18,12 @@ export const DEFAULT_CONFIG = {
   cloud_key: '', // Zendure cloud authorization key (base64 token), secret
   poll_frequency: 30, // seconds, how often device telemetry is refreshed
   enable_local_mqtt: false, // opt-in to the per-device local MQTT broker (zenSDK)
+  feature_names: 'en', // language of the feature names of newly discovered devices
 };
+
+// Languages the `feature_names` option accepts (the Gladys interface ones);
+// anything else falls back to English.
+export const FEATURE_NAME_LANGUAGES = ['en', 'fr', 'de', 'es'];
 
 /**
  * Coerce a value coming from a form (which may be a string like "true") into a
@@ -66,6 +71,9 @@ export function normalizeConfig(raw = {}) {
     cloud_key: String(raw.cloud_key ?? DEFAULT_CONFIG.cloud_key).trim(),
     poll_frequency: toPositiveNumber(raw.poll_frequency, DEFAULT_CONFIG.poll_frequency),
     enable_local_mqtt: toBoolean(raw.enable_local_mqtt, DEFAULT_CONFIG.enable_local_mqtt),
+    feature_names: FEATURE_NAME_LANGUAGES.includes(raw.feature_names)
+      ? raw.feature_names
+      : DEFAULT_CONFIG.feature_names,
   };
 }
 

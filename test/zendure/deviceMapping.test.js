@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 
 import { DEVICE_FEATURE_CATEGORIES, DEVICE_FEATURE_TYPES } from '@gladysassistant/integration-sdk';
 
-import { MODEL_FEATURES } from '../../src/zendure/deviceMapping.js';
+import { FEATURE_NAME_LANGUAGES } from '../../src/config.js';
+import { MODEL_FEATURES, FEATURE_NAMES, featureNameFor } from '../../src/zendure/deviceMapping.js';
 
 // key -> [category, type, unit]. The keys are the feature external ids of the
 // devices users already created: they must never change.
@@ -49,3 +50,14 @@ function categoryKey(category) {
     (key) => DEVICE_FEATURE_CATEGORIES[key] === category,
   );
 }
+
+test('every feature has a name in every feature_names language', () => {
+  for (const feature of Object.values(MODEL_FEATURES)[0]) {
+    assert.equal(FEATURE_NAMES[feature.key].en, feature.name, `${feature.key}: English name`);
+    for (const language of FEATURE_NAME_LANGUAGES) {
+      assert.ok(FEATURE_NAMES[feature.key][language], `${feature.key}.${language}`);
+      assert.equal(featureNameFor(feature, language), FEATURE_NAMES[feature.key][language]);
+    }
+  }
+  assert.equal(featureNameFor({ key: 'unknown', name: 'Raw' }, 'fr'), 'Raw');
+});
