@@ -152,6 +152,28 @@ batería deja de informar en todas las fuentes, o vuelve a hacerlo (modo MQTT
 local). Sus variables dan el nombre de la batería, el nuevo estado y la fuente
 de telemetría.
 
+## Widgets del panel
+
+En el editor del panel hay dos widgets disponibles (Gladys 5.1 o posterior):
+
+- **Batería Zendure**: una batería, elegida en los ajustes del widget. Su nivel
+  y sus cuatro potencias siguen la batería en directo; debajo, su fuente
+  (local, nube, respaldo, inaccesible), la energía almacenada, los límites de
+  salida y de carga, el modo AC y los niveles de carga que informa. Los botones
+  **Límites de potencia** y **Modo y niveles** abren un formulario rellenado
+  con los valores actuales: cambie lo necesario y confirme. Se aplican las
+  mismas protecciones que en las acciones de escena.
+- **Grupo de baterías**: varias baterías sumadas bajo el nombre que elija:
+  nivel medio (ponderado por la capacidad de los packs cuando todas son
+  conocidas), potencias totales, energía almacenada y una línea por batería
+  coloreada según su fuente. Deje la lista de baterías vacía para tomar todas
+  las baterías de la cuenta.
+
+**Instalación trifásica:** añada un **Grupo de baterías** por fase, llamado
+"Fase L1", "Fase L2", "Fase L3", cada uno con las baterías de su fase, más uno
+sin batería seleccionada para toda la instalación. Una instalación monofásica
+solo necesita un grupo.
+
 ## Un solo consumidor de la nube por cuenta Zendure
 
 Zendure solo permite **un consumidor de la nube por cuenta** a la vez. Si otra

@@ -18,6 +18,7 @@
 import { GladysIntegration, logger } from '@gladysassistant/integration-sdk';
 import { normalizeConfig } from './src/config.js';
 import { SCENE_ACTIONS } from './src/scenes.js';
+import { WIDGETS } from './src/widgets.js';
 import {
   DEVICE_BLUEPRINTS,
   syncDiscoveredDevices,
@@ -84,6 +85,18 @@ gladys.onConfigUpdated(async (newConfig) => {
 // trigger needs no handler: the telemetry evaluator fires it.
 for (const [actionKey, handler] of Object.entries(SCENE_ACTIONS)) {
   gladys.onSceneAction(actionKey, (fields) => handler(gladys, { fields, config }));
+}
+
+// --- Dashboard widgets (Gladys 5.1+) ------------------------------------------
+// One content handler per manifest `widgets` key (src/widgets.js); the core
+// pulls the content and relays the taps on its buttons.
+for (const [widgetKey, widget] of Object.entries(WIDGETS)) {
+  gladys.onWidgetGet(widgetKey, (request) => widget.get(gladys, { ...request, config }));
+  if (typeof widget.action === 'function') {
+    gladys.onWidgetAction(widgetKey, (actionKey, params, { settings, values }) =>
+      widget.action(gladys, { actionKey, params, settings, values, config }),
+    );
+  }
 }
 
 // --- Connection lifecycle ----------------------------------------------------

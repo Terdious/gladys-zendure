@@ -571,5 +571,89 @@
         }
       ]
     }
+  ],
+  "widgets": [
+    {
+      "key": "battery",
+      "label": {
+        "en": "Zendure battery",
+        "fr": "Batterie Zendure",
+        "de": "Zendure-Batterie",
+        "es": "Batería Zendure"
+      },
+      "description": {
+        "en": "Charge level, live powers, settings and controls of one battery.",
+        "fr": "Niveau, puissances en direct, réglages et pilotage d'une batterie.",
+        "de": "Ladestand, Live-Leistungen, Einstellungen und Steuerung einer Batterie.",
+        "es": "Nivel, potencias en directo, ajustes y control de una batería."
+      },
+      "icon": "battery-charging",
+      "action_timeout_seconds": 15,
+      "settings": [
+        {
+          "key": "device",
+          "type": "select",
+          "source": "devices",
+          "required": true,
+          "label": {
+            "en": "Battery",
+            "fr": "Batterie",
+            "de": "Batterie",
+            "es": "Batería"
+          }
+        }
+      ]
+    },
+    {
+      "key": "battery_group",
+      "label": {
+        "en": "Battery group",
+        "fr": "Groupe de batteries",
+        "de": "Batteriegruppe",
+        "es": "Grupo de baterías"
+      },
+      "description": {
+        "en": "Several batteries summed up: one widget per phase or for the whole site.",
+        "fr": "Plusieurs batteries cumulées : un widget par phase ou pour tout le site.",
+        "de": "Mehrere Batterien zusammengefasst: ein Widget pro Phase oder für alles.",
+        "es": "Varias baterías sumadas: un widget por fase o para toda la instalación."
+      },
+      "icon": "layers",
+      "settings": [
+        {
+          "key": "title",
+          "type": "string",
+          "label": {
+            "en": "Group name",
+            "fr": "Nom du groupe",
+            "de": "Gruppenname",
+            "es": "Nombre del grupo"
+          },
+          "placeholder": {
+            "en": "Phase L1",
+            "fr": "Phase L1",
+            "de": "Phase L1",
+            "es": "Fase L1"
+          }
+        },
+        {
+          "key": "devices",
+          "type": "multi_select",
+          "source": "devices",
+          "label": {
+            "en": "Batteries",
+            "fr": "Batteries",
+            "de": "Batterien",
+            "es": "Baterías"
+          },
+          "description": {
+            "en": "None selected: every battery of the account.",
+            "fr": "Aucune sélectionnée : toutes les batteries du compte.",
+            "de": "Keine ausgewählt: alle Batterien des Kontos.",
+            "es": "Ninguna seleccionada: todas las baterías de la cuenta."
+          }
+        }
+      ]
+    }
   ]
 }

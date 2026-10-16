@@ -18,6 +18,10 @@ the notes of the version's GitHub Release.
   not flash), each setting rate limited (3 s for power, 30 s for mode and
   charge levels), unchanged values not re-sent, the SoC scale (percent or
   tenths) read from the battery's own report.
+- Dashboard widgets: **Zendure battery** (live level and powers, source,
+  stored energy, reported settings, forms to change the power limits, AC mode
+  and charge levels) and **Battery group** (several batteries summed up under
+  a name: one per phase on a three-phase site, or one for the whole site).
 - Scene trigger **Battery reachability changed** (unreachable / reachable
   again, local MQTT mode), with the battery name, state and source.
 - Energy features (kWh): charged, discharged, solar and home output energy,

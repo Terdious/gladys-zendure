@@ -153,6 +153,28 @@ Batterie auf keiner Quelle mehr meldet oder wieder meldet (lokaler MQTT-Modus).
 Seine Variablen liefern den Namen der Batterie, den neuen Zustand und die
 Telemetriequelle.
 
+## Dashboard-Widgets
+
+Im Dashboard-Editor stehen zwei Widgets bereit (Gladys 5.1 oder neuer):
+
+- **Zendure-Batterie**: eine Batterie, gewählt in den Widget-Einstellungen. Ihr
+  Ladestand und ihre vier Leistungen folgen der Batterie live; darunter ihre
+  Quelle (lokal, Cloud, Rückfall, nicht erreichbar), die gespeicherte Energie,
+  Ausgangs- und Ladelimit, AC-Modus und die gemeldeten Ladestände. Die
+  Schaltflächen **Leistungslimits** und **Modus & Stände** öffnen ein mit den
+  aktuellen Werten vorausgefülltes Formular: Ändere, was nötig ist, und
+  bestätige. Es gelten dieselben Schutzregeln wie bei den Szenenaktionen.
+- **Batteriegruppe**: mehrere Batterien zusammengefasst unter einem Namen
+  deiner Wahl: durchschnittlicher Ladestand (nach Pack-Kapazität gewichtet,
+  wenn alle bekannt sind), Gesamtleistungen, gespeicherte Energie und eine
+  Zeile pro Batterie, gefärbt nach ihrer Quelle. Lass die Batterieliste leer,
+  um alle Batterien des Kontos zu nehmen.
+
+**Dreiphasige Installation:** Füge pro Phase eine **Batteriegruppe** hinzu,
+benannt „Phase L1“, „Phase L2“, „Phase L3“, jede mit den Batterien ihrer Phase,
+dazu eine ohne ausgewählte Batterie für die ganze Anlage. Eine einphasige
+Installation braucht nur eine Gruppe.
+
 ## Ein Cloud-Verbraucher pro Zendure-Konto
 
 Zendure erlaubt **nur einen Cloud-Verbraucher pro Konto** gleichzeitig. Nutzt
