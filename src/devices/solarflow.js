@@ -24,6 +24,7 @@ import {
   extractMetricValue,
   searchMetricByKeys,
   normalizeMetricValue,
+  featureNameFor,
 } from '../zendure/deviceMapping.js';
 
 const DEVICE_TYPE = 'solarflow';
@@ -930,6 +931,16 @@ export const solarflow = {
     const data = await ensureCloudData(config, { refresh: true });
     const devices = supportedDevices(data);
     logger.info(`Found ${devices.length} supported Zendure device(s) in the cloud account`);
+    // The exact cloud string is what a new model entry needs (several model
+    // spellings are still unverified): log it so users can report it as is.
+    for (const rawCloudDevice of data?.deviceList || []) {
+      if (!devices.includes(rawCloudDevice)) {
+        logger.warn(
+          `Unsupported Zendure model skipped: productModel ${JSON.stringify(modelOf(rawCloudDevice))} ` +
+            '(please report it on the gladys-zendure issues)',
+        );
+      }
+    }
 
     return devices.map((rawCloudDevice) => {
       const ids = gladys.externalIds(DEVICE_TYPE, deviceKeyOf(rawCloudDevice));
@@ -946,7 +957,7 @@ export const solarflow = {
         should_poll: true,
         poll_frequency: toGladysPollFrequency(config.poll_frequency),
         features: getFeaturesForModel(modelOf(rawCloudDevice)).map((featureMapping) => ({
-          name: featureMapping.name,
+          name: featureNameFor(featureMapping, config.feature_names),
           external_id: ids.feature(featureMapping.key),
           // Composed with the device selector so two devices never share a
           // feature selector (the core enforces global uniqueness).

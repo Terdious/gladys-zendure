@@ -66,7 +66,9 @@ Zendure-App erzeugst:
    Telemetrie aufgefrischt wird, wenn keine Echtzeit-Updates eintreffen. Der
    Standardwert (30 s) passt.
 4. (Optional) Aktiviere **Lokales MQTT aktivieren (zenSDK)** — siehe unten.
-5. Klicke auf **Konfiguration speichern**. Deine Batterien erscheinen im Tab
+5. (Optional) Wähle die Sprache der **Namen der Funktionen** (standardmäßig
+   Englisch): Sie gilt für die Batterien, die du ab jetzt anlegst.
+6. Klicke auf **Konfiguration speichern**. Deine Batterien erscheinen im Tab
    **Entdecken** und können hinzugefügt werden.
 
 ### Lokales MQTT (empfohlen, wenn du es nutzt)
@@ -132,6 +134,11 @@ Manifest — füge das aktualisierte Manifest erneut ein, um neue Felder zu
 
 ## Fehlerbehebung
 
+- **Eine Batterie wird nicht erkannt.** Öffne den Tab **Protokolle**: Eine
+  Zeile `Unsupported Zendure model skipped: productModel "..."` nennt die
+  genaue Modellbezeichnung, die die Zendure-Cloud meldet. Eröffne damit ein
+  Issue auf [gladys-zendure](https://github.com/Terdious/gladys-zendure/issues),
+  damit das Modell ergänzt werden kann.
 - **Ein Gerät zeigt keine Werte (oder ist langsamer als die anderen), während
   die übrigen funktionieren.** Prüfe sein Transport-Abzeichen. Ist es bei
   aktiviertem lokalem MQTT auf **Cloud (beeinträchtigt)** zurückgefallen, hat

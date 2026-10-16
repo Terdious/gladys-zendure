@@ -10,6 +10,14 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Added
+
+- **Feature names** option (en, fr, de, es): the language of the feature
+  names given to newly discovered batteries. English stays the default; a
+  battery already created keeps its names.
+- An unsupported Zendure model is logged with its exact `productModel` string
+  at each discovery, ready to be reported (documented in Troubleshooting).
+
 ## [1.3.1] - 2026-10-16
 
 ### Security

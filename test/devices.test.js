@@ -84,6 +84,19 @@ test('buildDiscoveredDevices returns one payload per supported Zendure device', 
   assert.equal(device.features[0].selector, 'zendure-solarflow-abc123-battery-level');
 });
 
+test('feature names follow the feature_names option, selectors and ids do not', async () => {
+  const [english] = await buildDiscoveredDevices(gladys, config);
+  resetSolarflowRuntime();
+  const [french] = await buildDiscoveredDevices(gladys, { ...config, feature_names: 'fr' });
+
+  assert.equal(english.features[0].name, 'Battery level');
+  assert.equal(french.features[0].name, 'Niveau de batterie');
+  assert.deepEqual(
+    french.features.map((f) => [f.external_id, f.selector]),
+    english.features.map((f) => [f.external_id, f.selector]),
+  );
+});
+
 test('discovers a newly-supported model (SolarFlow 2400) with the baseline features', async () => {
   const localGladys = createFakeGladys();
   setSolarflowDependencies({

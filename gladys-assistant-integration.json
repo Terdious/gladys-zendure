@@ -96,6 +96,62 @@
       },
       "required": false,
       "default": false
+    },
+    {
+      "key": "feature_names",
+      "type": "select",
+      "label": {
+        "en": "Feature names",
+        "fr": "Noms des fonctionnalités",
+        "de": "Namen der Funktionen",
+        "es": "Nombres de las funcionalidades"
+      },
+      "description": {
+        "en": "Language of the feature names given to newly discovered batteries. A battery already created keeps its names: rename its features in Gladys if needed.",
+        "fr": "Langue des noms de fonctionnalités donnés aux batteries nouvellement découvertes. Une batterie déjà créée garde ses noms : renommez ses fonctionnalités dans Gladys si besoin.",
+        "de": "Sprache der Funktionsnamen neu erkannter Batterien. Eine bereits angelegte Batterie behält ihre Namen: Benenne ihre Funktionen bei Bedarf in Gladys um.",
+        "es": "Idioma de los nombres de funcionalidades de las baterías recién descubiertas. Una batería ya creada conserva sus nombres: cambie el nombre de sus funcionalidades en Gladys si es necesario."
+      },
+      "required": false,
+      "default": "en",
+      "options": [
+        {
+          "value": "en",
+          "label": {
+            "en": "English",
+            "fr": "Anglais",
+            "de": "Englisch",
+            "es": "Inglés"
+          }
+        },
+        {
+          "value": "fr",
+          "label": {
+            "en": "French",
+            "fr": "Français",
+            "de": "Französisch",
+            "es": "Francés"
+          }
+        },
+        {
+          "value": "de",
+          "label": {
+            "en": "German",
+            "fr": "Allemand",
+            "de": "Deutsch",
+            "es": "Alemán"
+          }
+        },
+        {
+          "value": "es",
+          "label": {
+            "en": "Spanish",
+            "fr": "Espagnol",
+            "de": "Spanisch",
+            "es": "Español"
+          }
+        }
+      ]
     }
   ]
 }

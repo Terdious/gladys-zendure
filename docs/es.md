@@ -65,7 +65,9 @@ aplicación móvil Zendure:
    que se refresca la telemetría cuando no llegan actualizaciones en tiempo
    real. El valor por defecto (30 s) es adecuado.
 4. (Opcional) Active **Activar el MQTT local (zenSDK)** — vea más abajo.
-5. Haga clic en **Guardar configuración**. Sus baterías aparecen en la pestaña
+5. (Opcional) Elija el idioma de los **Nombres de las funcionalidades** (inglés
+   por defecto): se aplica a las baterías que cree a partir de ahora.
+6. Haga clic en **Guardar configuración**. Sus baterías aparecen en la pestaña
    **Descubrir**, listas para añadirse.
 
 ### MQTT local (recomendado si lo utiliza)
@@ -131,6 +133,11 @@ campos.
 
 ## Solución de problemas
 
+- **Una batería no se descubre.** Abra la pestaña **Registros**: una línea
+  `Unsupported Zendure model skipped: productModel "..."` indica el nombre de
+  modelo exacto que devuelve la nube de Zendure. Abra una issue en
+  [gladys-zendure](https://github.com/Terdious/gladys-zendure/issues) con ese
+  nombre para que se añada el modelo.
 - **Un dispositivo no muestra ningún valor (o va más lento que los demás)
   mientras el resto funciona.** Revise su insignia de transporte. Si ha pasado
   a **Nube (degradado)** con el MQTT local activado, puede que su firmware haya

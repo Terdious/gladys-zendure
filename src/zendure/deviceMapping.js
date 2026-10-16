@@ -124,6 +124,52 @@ function buildBaselineFeatures(maxPower) {
   ];
 }
 
+// Feature names per language (`feature_names` option), the same words as the
+// Gladys interface uses for these feature types. Names are only applied to
+// newly created devices: a name is the user's to edit once the device exists.
+export const FEATURE_NAMES = {
+  batteryLevel: {
+    en: 'Battery level',
+    fr: 'Niveau de batterie',
+    de: 'Batteriestand',
+    es: 'Nivel de batería',
+  },
+  batteryOutputPower: {
+    en: 'Battery charge power',
+    fr: 'Puissance de charge',
+    de: 'Ladeleistung',
+    es: 'Potencia de carga',
+  },
+  batteryInputPower: {
+    en: 'Battery discharge power',
+    fr: 'Puissance de décharge',
+    de: 'Entladeleistung',
+    es: 'Potencia de descarga',
+  },
+  homeOutputPower: {
+    en: 'Home output power',
+    fr: 'Puissance vers la maison',
+    de: 'Leistung zum Haus',
+    es: 'Potencia de salida del hogar',
+  },
+  solarInputPower: {
+    en: 'Solar input power',
+    fr: "Puissance d'entrée solaire",
+    de: 'Solare Eingangsleistung',
+    es: 'Potencia de entrada solar',
+  },
+};
+
+/**
+ * Name of a feature in the configured language, English when unknown.
+ * @param {{ key: string, name: string }} featureMapping
+ * @param {string} language `feature_names` option
+ * @returns {string}
+ */
+export function featureNameFor(featureMapping, language) {
+  return FEATURE_NAMES[featureMapping.key]?.[language] ?? featureMapping.name;
+}
+
 // Feature mappings per product model. Keyed by the lowercase/trimmed cloud
 // `productModel` string (see SUPPORTED_PRODUCT_MODELS).
 export const MODEL_FEATURES = Object.fromEntries(
