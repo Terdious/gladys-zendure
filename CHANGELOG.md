@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-16
+
 ### Added
 
 - German and Spanish: the configuration screen (labels, descriptions, links),
@@ -117,7 +119,8 @@ the notes of the version's GitHub Release.
   read-only telemetry (battery level, battery input and output power, home
   output power, solar input power), polling and real-time MQTT push.
 
-[Unreleased]: https://github.com/Terdious/gladys-zendure/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/Terdious/gladys-zendure/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/Terdious/gladys-zendure/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/Terdious/gladys-zendure/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/Terdious/gladys-zendure/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/Terdious/gladys-zendure/releases/tag/v1.0.1
