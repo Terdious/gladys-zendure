@@ -15,12 +15,14 @@ export function createFakeGladys() {
   const discovered = [];
   const connectionStatuses = [];
   const transports = [];
+  const sceneEvents = [];
 
   return {
     published,
     discovered,
     connectionStatuses,
     transports,
+    sceneEvents,
 
     externalId(suffix) {
       return suffix;
@@ -54,6 +56,10 @@ export function createFakeGladys() {
 
     async publishTransports(entries) {
       transports.push(entries);
+    },
+
+    async publishSceneEvent(key, data) {
+      sceneEvents.push({ key, data });
     },
   };
 }

@@ -10,7 +10,7 @@ with automatic cloud fallback.
 
 - A **Zendure account**, with your batteries already set up and online in the
   Zendure app.
-- Gladys Assistant **4.86 or later**.
+- Gladys Assistant **5.1 or later**.
 
 ## Supported models
 
@@ -105,6 +105,40 @@ Each device shows a badge telling you **how it is currently reached**:
   badge for the reason. This clears by itself when the device resumes locally.
 - **Unreachable** (red) — the Zendure cloud reports the device offline, or it is
   silent on every source.
+
+## Control from scenes
+
+Gladys has no battery setpoint feature yet, so the batteries are controlled
+from **scenes** (and from the dashboard widget): in a scene, add an action of
+the **Integrations** category.
+
+| Action                    | What it does                                                 |
+| ------------------------- | ------------------------------------------------------------ |
+| **Set the output limit**  | Maximum power the battery delivers to the home (W)           |
+| **Set the charge limit**  | Maximum power the battery draws from the grid, AC charge (W) |
+| **Set the AC mode**       | Charge from the grid, or discharge to the home               |
+| **Set the charge levels** | Charge target (70-100 %) and discharge floor (0-50 %)        |
+
+The integration protects the battery:
+
+- a limit is clamped to the battery's rating (e.g. 800 W out on a SolarFlow
+  800 Pro);
+- power limits are sent in "smart mode", kept in memory instead of being
+  written to the battery's flash (frequent changes would wear it out);
+- one setting cannot change more than once every 3 s (power limits) or 30 s
+  (AC mode, charge levels): a scene that tries sooner fails with the delay to
+  wait;
+- a value the battery already runs with is not sent again (the action output
+  **Command sent** is then false);
+- the charge levels are refused until the battery has reported its current
+  ones (its scale differs between firmwares).
+
+The command goes through the broker that currently serves the battery (local
+or cloud); the new value shows up with the battery's next report.
+
+The trigger **Battery reachability changed** starts a scene when a battery
+stops reporting on every source, or reports again (local MQTT mode). Its
+variables give the battery name, the new state and the telemetry source.
 
 ## One cloud consumer per Zendure account
 

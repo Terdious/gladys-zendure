@@ -10,7 +10,7 @@
   },
   "version": "1.4.0",
   "docker_image": "ghcr.io/terdious/gladys-zendure:1.4.0",
-  "gladys_version": ">=4.86.0",
+  "gladys_version": ">=5.1.0",
   "cover_image": "https://raw.githubusercontent.com/Terdious/gladys-zendure/master/cover.png",
   "transports": ["local", "cloud"],
   "categories": ["energy"],
@@ -149,6 +149,424 @@
             "fr": "Espagnol",
             "de": "Spanisch",
             "es": "Español"
+          }
+        }
+      ]
+    }
+  ],
+  "scene_triggers": [
+    {
+      "key": "battery_reachability_changed",
+      "label": {
+        "en": "Battery reachability changed",
+        "fr": "Joignabilité d'une batterie",
+        "de": "Erreichbarkeit einer Batterie",
+        "es": "Accesibilidad de una batería"
+      },
+      "description": {
+        "en": "A battery stopped reporting, or reports again (local MQTT mode).",
+        "fr": "Une batterie ne remonte plus rien, ou remonte à nouveau (mode MQTT local).",
+        "de": "Eine Batterie meldet nichts mehr oder wieder (lokaler MQTT-Modus).",
+        "es": "Una batería deja de informar o vuelve a hacerlo (modo MQTT local)."
+      },
+      "fields": [
+        {
+          "key": "device",
+          "type": "select",
+          "source": "devices",
+          "label": {
+            "en": "Battery",
+            "fr": "Batterie",
+            "de": "Batterie",
+            "es": "Batería"
+          }
+        },
+        {
+          "key": "state",
+          "type": "select",
+          "label": {
+            "en": "New state",
+            "fr": "Nouvel état",
+            "de": "Neuer Zustand",
+            "es": "Nuevo estado"
+          },
+          "options": [
+            {
+              "value": "unreachable",
+              "label": {
+                "en": "Unreachable",
+                "fr": "Injoignable",
+                "de": "Nicht erreichbar",
+                "es": "Inaccesible"
+              }
+            },
+            {
+              "value": "reachable",
+              "label": {
+                "en": "Reachable again",
+                "fr": "De nouveau joignable",
+                "de": "Wieder erreichbar",
+                "es": "Accesible de nuevo"
+              }
+            }
+          ]
+        }
+      ],
+      "variables": [
+        {
+          "key": "device_name",
+          "type": "string",
+          "label": {
+            "en": "Battery name",
+            "fr": "Nom de la batterie",
+            "de": "Name der Batterie",
+            "es": "Nombre de la batería"
+          }
+        },
+        {
+          "key": "state",
+          "type": "string",
+          "label": {
+            "en": "New state",
+            "fr": "Nouvel état",
+            "de": "Neuer Zustand",
+            "es": "Nuevo estado"
+          }
+        },
+        {
+          "key": "source",
+          "type": "string",
+          "label": {
+            "en": "Telemetry source",
+            "fr": "Source de télémétrie",
+            "de": "Telemetriequelle",
+            "es": "Fuente de telemetría"
+          },
+          "description": {
+            "en": "local, cloud or unreachable.",
+            "fr": "local, cloud ou unreachable.",
+            "de": "local, cloud oder unreachable.",
+            "es": "local, cloud o unreachable."
+          }
+        }
+      ]
+    }
+  ],
+  "scene_actions": [
+    {
+      "key": "set_output_limit",
+      "label": {
+        "en": "Set the output limit",
+        "fr": "Régler la limite de sortie",
+        "de": "Ausgangslimit setzen",
+        "es": "Ajustar el límite de salida"
+      },
+      "description": {
+        "en": "Maximum power the battery delivers to the home.",
+        "fr": "Puissance maximale que la batterie fournit à la maison.",
+        "de": "Maximale Leistung, die die Batterie ans Haus abgibt.",
+        "es": "Potencia máxima que la batería entrega al hogar."
+      },
+      "timeout_seconds": 15,
+      "fields": [
+        {
+          "key": "device",
+          "type": "select",
+          "source": "devices",
+          "label": {
+            "en": "Battery",
+            "fr": "Batterie",
+            "de": "Batterie",
+            "es": "Batería"
+          },
+          "required": true
+        },
+        {
+          "key": "watts",
+          "type": "number",
+          "label": {
+            "en": "Limit (W)",
+            "fr": "Limite (W)",
+            "de": "Limit (W)",
+            "es": "Límite (W)"
+          },
+          "description": {
+            "en": "Clamped to the battery's rating.",
+            "fr": "Plafonnée à la puissance nominale de la batterie.",
+            "de": "Auf die Nennleistung der Batterie begrenzt.",
+            "es": "Limitado a la potencia nominal de la batería."
+          },
+          "required": true,
+          "min": 0,
+          "max": 3200
+        }
+      ],
+      "outputs": [
+        {
+          "key": "sent",
+          "type": "boolean",
+          "label": {
+            "en": "Command sent",
+            "fr": "Commande envoyée",
+            "de": "Befehl gesendet",
+            "es": "Comando enviado"
+          },
+          "description": {
+            "en": "False when the battery already ran with this value.",
+            "fr": "Faux quand la batterie était déjà à cette valeur.",
+            "de": "Falsch, wenn die Batterie diesen Wert bereits hatte.",
+            "es": "Falso si la batería ya tenía este valor."
+          }
+        },
+        {
+          "key": "watts",
+          "type": "number",
+          "label": {
+            "en": "Applied limit (W)",
+            "fr": "Limite appliquée (W)",
+            "de": "Angewendetes Limit (W)",
+            "es": "Límite aplicado (W)"
+          }
+        }
+      ]
+    },
+    {
+      "key": "set_input_limit",
+      "label": {
+        "en": "Set the charge limit",
+        "fr": "Régler la limite de charge",
+        "de": "Ladelimit setzen",
+        "es": "Ajustar el límite de carga"
+      },
+      "description": {
+        "en": "Maximum power the battery draws from the grid (AC charge).",
+        "fr": "Puissance maximale que la batterie tire du réseau (charge AC).",
+        "de": "Maximale Leistung, die die Batterie aus dem Netz bezieht (AC-Laden).",
+        "es": "Potencia máxima que la batería toma de la red (carga AC)."
+      },
+      "timeout_seconds": 15,
+      "fields": [
+        {
+          "key": "device",
+          "type": "select",
+          "source": "devices",
+          "label": {
+            "en": "Battery",
+            "fr": "Batterie",
+            "de": "Batterie",
+            "es": "Batería"
+          },
+          "required": true
+        },
+        {
+          "key": "watts",
+          "type": "number",
+          "label": {
+            "en": "Limit (W)",
+            "fr": "Limite (W)",
+            "de": "Limit (W)",
+            "es": "Límite (W)"
+          },
+          "description": {
+            "en": "Clamped to the battery's rating.",
+            "fr": "Plafonnée à la puissance nominale de la batterie.",
+            "de": "Auf die Nennleistung der Batterie begrenzt.",
+            "es": "Limitado a la potencia nominal de la batería."
+          },
+          "required": true,
+          "min": 0,
+          "max": 3200
+        }
+      ],
+      "outputs": [
+        {
+          "key": "sent",
+          "type": "boolean",
+          "label": {
+            "en": "Command sent",
+            "fr": "Commande envoyée",
+            "de": "Befehl gesendet",
+            "es": "Comando enviado"
+          },
+          "description": {
+            "en": "False when the battery already ran with this value.",
+            "fr": "Faux quand la batterie était déjà à cette valeur.",
+            "de": "Falsch, wenn die Batterie diesen Wert bereits hatte.",
+            "es": "Falso si la batería ya tenía este valor."
+          }
+        },
+        {
+          "key": "watts",
+          "type": "number",
+          "label": {
+            "en": "Applied limit (W)",
+            "fr": "Limite appliquée (W)",
+            "de": "Angewendetes Limit (W)",
+            "es": "Límite aplicado (W)"
+          }
+        }
+      ]
+    },
+    {
+      "key": "set_ac_mode",
+      "label": {
+        "en": "Set the AC mode",
+        "fr": "Régler le mode AC",
+        "de": "AC-Modus setzen",
+        "es": "Ajustar el modo AC"
+      },
+      "description": {
+        "en": "Charge from the grid, or discharge to the home.",
+        "fr": "Charger depuis le réseau, ou décharger vers la maison.",
+        "de": "Aus dem Netz laden oder ans Haus entladen.",
+        "es": "Cargar desde la red o descargar hacia el hogar."
+      },
+      "timeout_seconds": 15,
+      "fields": [
+        {
+          "key": "device",
+          "type": "select",
+          "source": "devices",
+          "label": {
+            "en": "Battery",
+            "fr": "Batterie",
+            "de": "Batterie",
+            "es": "Batería"
+          },
+          "required": true
+        },
+        {
+          "key": "mode",
+          "type": "select",
+          "label": {
+            "en": "Mode",
+            "fr": "Mode",
+            "de": "Modus",
+            "es": "Modo"
+          },
+          "required": true,
+          "display": "radio",
+          "options": [
+            {
+              "value": "charge",
+              "label": {
+                "en": "Charge from the grid",
+                "fr": "Charge depuis le réseau",
+                "de": "Aus dem Netz laden",
+                "es": "Cargar desde la red"
+              }
+            },
+            {
+              "value": "discharge",
+              "label": {
+                "en": "Discharge to the home",
+                "fr": "Décharge vers la maison",
+                "de": "Ans Haus entladen",
+                "es": "Descargar al hogar"
+              }
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "key": "sent",
+          "type": "boolean",
+          "label": {
+            "en": "Command sent",
+            "fr": "Commande envoyée",
+            "de": "Befehl gesendet",
+            "es": "Comando enviado"
+          },
+          "description": {
+            "en": "False when the battery already ran with this value.",
+            "fr": "Faux quand la batterie était déjà à cette valeur.",
+            "de": "Falsch, wenn die Batterie diesen Wert bereits hatte.",
+            "es": "Falso si la batería ya tenía este valor."
+          }
+        }
+      ]
+    },
+    {
+      "key": "set_soc_limits",
+      "label": {
+        "en": "Set the charge levels",
+        "fr": "Régler les niveaux de charge",
+        "de": "Ladestände setzen",
+        "es": "Ajustar los niveles de carga"
+      },
+      "description": {
+        "en": "Charge target (70-100 %) and discharge floor (0-50 %).",
+        "fr": "Cible de charge (70-100 %) et plancher de décharge (0-50 %).",
+        "de": "Ladeziel (70-100 %) und Entladegrenze (0-50 %).",
+        "es": "Objetivo de carga (70-100 %) y mínimo de descarga (0-50 %)."
+      },
+      "timeout_seconds": 15,
+      "fields": [
+        {
+          "key": "device",
+          "type": "select",
+          "source": "devices",
+          "label": {
+            "en": "Battery",
+            "fr": "Batterie",
+            "de": "Batterie",
+            "es": "Batería"
+          },
+          "required": true
+        },
+        {
+          "key": "max_soc",
+          "type": "number",
+          "label": {
+            "en": "Charge target (%)",
+            "fr": "Cible de charge (%)",
+            "de": "Ladeziel (%)",
+            "es": "Objetivo de carga (%)"
+          },
+          "description": {
+            "en": "Empty: unchanged.",
+            "fr": "Vide : inchangée.",
+            "de": "Leer: unverändert.",
+            "es": "Vacío: sin cambios."
+          },
+          "min": 70,
+          "max": 100
+        },
+        {
+          "key": "min_soc",
+          "type": "number",
+          "label": {
+            "en": "Discharge floor (%)",
+            "fr": "Plancher de décharge (%)",
+            "de": "Entladegrenze (%)",
+            "es": "Mínimo de descarga (%)"
+          },
+          "description": {
+            "en": "Empty: unchanged.",
+            "fr": "Vide : inchangé.",
+            "de": "Leer: unverändert.",
+            "es": "Vacío: sin cambios."
+          },
+          "min": 0,
+          "max": 50
+        }
+      ],
+      "outputs": [
+        {
+          "key": "sent",
+          "type": "boolean",
+          "label": {
+            "en": "Command sent",
+            "fr": "Commande envoyée",
+            "de": "Befehl gesendet",
+            "es": "Comando enviado"
+          },
+          "description": {
+            "en": "False when the battery already ran with this value.",
+            "fr": "Faux quand la batterie était déjà à cette valeur.",
+            "de": "Falsch, wenn die Batterie diesen Wert bereits hatte.",
+            "es": "Falso si la batería ya tenía este valor."
           }
         }
       ]

@@ -369,6 +369,40 @@ function createBaseMqttRuntime({
     : // Local devices push continuously: there is no read-request to send.
       () => false;
 
+  let writeMessageId = 0;
+  /**
+   * Publish a `properties/write` command (zenSDK / Zendure-HA format) on this
+   * broker. Both the cloud broker and the local broker of a legacy-format
+   * firmware listen on `iot/{productKey}/{deviceKey}/properties/write`.
+   * @param {object} rawCloudDevice device from the cloud deviceList
+   * @param {Record<string, number>} properties properties to write
+   * @returns {Promise<void>} resolves once the broker accepted the publish
+   */
+  function writeDeviceProperties(rawCloudDevice, properties) {
+    const { productKey } = rawCloudDevice || {};
+    const deviceKey = rawCloudDevice?.deviceKey || rawCloudDevice?.id;
+    if (!client || !connected) {
+      return Promise.reject(new Error('MQTT broker not connected'));
+    }
+    if (!productKey || !deviceKey) {
+      return Promise.reject(new Error('device has no productKey/deviceKey'));
+    }
+    writeMessageId = (writeMessageId + 1) % 1000000;
+    const payload = {
+      deviceId: deviceKey,
+      messageId: writeMessageId,
+      timestamp: Math.floor(Date.now() / 1000),
+      properties,
+    };
+    return new Promise((resolve, reject) => {
+      client.publish(
+        `iot/${productKey}/${deviceKey}/properties/write`,
+        JSON.stringify(payload),
+        (error) => (error ? reject(error) : resolve()),
+      );
+    });
+  }
+
   return {
     get connected() {
       return connected;
@@ -508,6 +542,8 @@ function createBaseMqttRuntime({
      * @returns {boolean} true when a request was published
      */
     requestDeviceProperties,
+
+    writeDeviceProperties,
 
     /**
      * Latest merged payload for one key (deviceKey on cloud, serial on local),

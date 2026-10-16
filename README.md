@@ -28,7 +28,7 @@ Device control (writable features) is planned — see the roadmap issue.
 
 ## Installation & updates
 
-Requires **Gladys Assistant 4.86.0 or later** (`gladys_version` in the
+Requires **Gladys Assistant 5.1.0 or later** (`gladys_version` in the
 manifest).
 
 The integration is listed in the Gladys integration catalog (category

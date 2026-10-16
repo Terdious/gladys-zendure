@@ -11,7 +11,7 @@ die Cloud. Die Werte sind nur lesbar.
 
 - Ein **Zendure-Konto**, bei dem deine Batterien bereits in der Zendure-App
   eingerichtet und online sind.
-- Gladys Assistant **4.86 oder neuer**.
+- Gladys Assistant **5.1 oder neuer**.
 
 ## Unterstützte Modelle
 
@@ -116,6 +116,42 @@ Jedes Gerät zeigt ein Abzeichen, das angibt, **wie es gerade erreicht wird**:
   verschwindet von selbst, sobald das Gerät wieder lokal sendet.
 - **Nicht erreichbar** (rot) — die Zendure-Cloud meldet das Gerät offline, oder
   es schweigt auf allen Quellen.
+
+## Steuerung über Szenen
+
+Gladys hat noch keine Sollwert-Funktion für Batterien: Die Batterien werden
+über **Szenen** gesteuert (und über das Dashboard-Widget). Füge in einer Szene
+eine Aktion der Kategorie **Integrationen** hinzu.
+
+| Aktion                   | Wirkung                                            |
+| ------------------------ | -------------------------------------------------- |
+| **Ausgangslimit setzen** | Maximale Leistung, die ans Haus abgegeben wird (W) |
+| **Ladelimit setzen**     | Maximale Leistung aus dem Netz, AC-Laden (W)       |
+| **AC-Modus setzen**      | Aus dem Netz laden oder ans Haus entladen          |
+| **Ladestände setzen**    | Ladeziel (70-100 %) und Entladegrenze (0-50 %)     |
+
+Die Integration schützt die Batterie:
+
+- ein Limit wird auf die Nennleistung der Batterie begrenzt (z. B. 800 W
+  Ausgang bei einer SolarFlow 800 Pro);
+- Leistungslimits werden im „Smart-Modus“ gesendet und im Speicher gehalten,
+  statt in den Flash der Batterie geschrieben zu werden (häufige Änderungen
+  würden ihn abnutzen);
+- eine Einstellung kann sich höchstens alle 3 s (Leistungslimits) oder 30 s
+  (AC-Modus, Ladestände) ändern: Eine Szene, die es früher versucht, schlägt
+  mit der Wartezeit fehl;
+- ein Wert, mit dem die Batterie bereits läuft, wird nicht erneut gesendet
+  (die Aktionsausgabe **Befehl gesendet** ist dann falsch);
+- die Ladestände werden abgelehnt, bis die Batterie ihre aktuellen gemeldet hat
+  (ihre Skala unterscheidet sich je nach Firmware).
+
+Der Befehl geht über den Broker, der die Batterie gerade bedient (lokal oder
+Cloud); der neue Wert erscheint mit der nächsten Meldung der Batterie.
+
+Der Auslöser **Erreichbarkeit einer Batterie** startet eine Szene, wenn eine
+Batterie auf keiner Quelle mehr meldet oder wieder meldet (lokaler MQTT-Modus).
+Seine Variablen liefern den Namen der Batterie, den neuen Zustand und die
+Telemetriequelle.
 
 ## Ein Cloud-Verbraucher pro Zendure-Konto
 

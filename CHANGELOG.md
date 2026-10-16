@@ -12,6 +12,14 @@ the notes of the version's GitHub Release.
 
 ### Added
 
+- Battery control from scenes (scene actions, Integrations category): output
+  limit, AC charge limit, AC mode, charge target and discharge floor. Limits
+  are clamped to the battery rating, power limits sent in smart mode (RAM,
+  not flash), each setting rate limited (3 s for power, 30 s for mode and
+  charge levels), unchanged values not re-sent, the SoC scale (percent or
+  tenths) read from the battery's own report.
+- Scene trigger **Battery reachability changed** (unreachable / reachable
+  again, local MQTT mode), with the battery name, state and source.
 - Energy features (kWh): charged, discharged, solar and home output energy,
   computed by integrating the powers (Zendure reports no energy counter) and
   saved under `/data` across restarts; a silence of more than 5 minutes is
@@ -19,6 +27,10 @@ the notes of the version's GitHub Release.
 - Battery energy remaining (kWh): state of charge x capacity of the reported
   packs. Batteries created before pick up the new features with **Update** in
   the Discover tab.
+
+### Changed
+
+- Gladys Assistant 5.1.0 or later is required (scene actions and triggers).
 
 ## [1.4.0] - 2026-10-16
 

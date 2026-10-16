@@ -17,6 +17,7 @@
 
 import { GladysIntegration, logger } from '@gladysassistant/integration-sdk';
 import { normalizeConfig } from './src/config.js';
+import { SCENE_ACTIONS } from './src/scenes.js';
 import {
   DEVICE_BLUEPRINTS,
   syncDiscoveredDevices,
@@ -77,6 +78,13 @@ gladys.onConfigUpdated(async (newConfig) => {
     startPushSubscriptions();
   }
 });
+
+// --- Scene actions (Gladys 5.1+) ----------------------------------------------
+// One handler per manifest `scene_actions` key (src/scenes.js). The scene
+// trigger needs no handler: the telemetry evaluator fires it.
+for (const [actionKey, handler] of Object.entries(SCENE_ACTIONS)) {
+  gladys.onSceneAction(actionKey, (fields) => handler(gladys, { fields, config }));
+}
 
 // --- Connection lifecycle ----------------------------------------------------
 gladys.on('connected', async () => {
