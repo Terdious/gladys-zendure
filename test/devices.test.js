@@ -30,6 +30,7 @@ import {
   FAKE_OFFLINE_SOLARFLOW_DEVICE,
   FAKE_SOLARFLOW_2400_DEVICE,
   FAKE_LOCAL_SOLARFLOW_DEVICE,
+  createTestEnergyMeters,
 } from './helpers/fakeZendure.js';
 
 const CLOUD_BROKER_URL = 'mqtt://broker.zendure.example:1883';
@@ -43,6 +44,7 @@ beforeEach(() => {
   setSolarflowDependencies({
     fetchImpl: createFakeZendureFetch(),
     mqttLibrary: createFakeMqttLibrary(),
+    energyMeters: createTestEnergyMeters().meters,
   });
 });
 
@@ -72,7 +74,7 @@ test('buildDiscoveredDevices returns one payload per supported Zendure device', 
   // frequencies: 30 s from the config, snapped to milliseconds.
   assert.equal(device.should_poll, true);
   assert.equal(device.poll_frequency, 30000);
-  assert.equal(device.features.length, 5);
+  assert.equal(device.features.length, 10);
   // The device carries an explicit, globally-unique selector, and every
   // feature selector is composed with it.
   assert.equal(device.selector, 'zendure-solarflow-abc123');
@@ -114,7 +116,7 @@ test('discovers a newly-supported model (SolarFlow 2400) with the baseline featu
   );
   assert.ok(sf2400, 'the SolarFlow 2400 device is discovered');
   assert.equal(sf2400.name, 'Attic battery');
-  assert.equal(sf2400.features.length, 5);
+  assert.equal(sf2400.features.length, 10);
   assert.equal(sf2400.selector, 'zendure-solarflow-sf2400a');
   assert.equal(sf2400.features[0].selector, 'zendure-solarflow-sf2400a-battery-level');
 
@@ -503,6 +505,36 @@ test('onPoll prefers the cached MQTT payload over the cloud entry', async () => 
 
   const byId = Object.fromEntries(localGladys.published.map((s) => [s.featureExternalId, s.state]));
   assert.equal(byId[`${device.external_id}:batteryLevel`], 81);
+});
+
+test('pushed reports feed the energy indexes and the energy remaining', async (t) => {
+  const localGladys = createFakeGladys();
+  const mqttLibrary = createFakeMqttLibrary();
+  setSolarflowDependencies({ mqttLibrary });
+  t.mock.timers.enable({ apis: ['Date'], now: 1_700_000_000_000 });
+
+  const [device] = await buildDiscoveredDevices(localGladys, config);
+  const stopPush = solarflow.startPush(localGladys, config);
+  const client = await waitFor(() => mqttLibrary.clients[0]);
+  await delay(20);
+  const topic = `iot/${FAKE_SOLARFLOW_DEVICE.productKey}/${FAKE_SOLARFLOW_DEVICE.deviceKey}/properties/report`;
+  const report = (properties, extra = {}) =>
+    client.emit('message', topic, Buffer.from(JSON.stringify({ properties, ...extra })));
+
+  report(
+    { electricLevel: 50, outputPackPower: 1200, solarInputPower: 600, packInputPower: 0 },
+    { packData: [{ sn: 'C0A1' }, { sn: 'C0A2' }] }, // 2 x AB2000 = 3.84 kWh
+  );
+  t.mock.timers.tick(60 * 1000);
+  report({ electricLevel: 51 });
+  await flushStatesNow(localGladys);
+
+  const byId = Object.fromEntries(localGladys.published.map((s) => [s.featureExternalId, s.state]));
+  assert.equal(byId[`${device.external_id}:batteryChargeEnergy`], 0.02); // 1200 W x 1 min
+  assert.equal(byId[`${device.external_id}:solarEnergy`], 0.01);
+  assert.equal(byId[`${device.external_id}:batteryDischargeEnergy`], 0);
+  assert.equal(byId[`${device.external_id}:batteryEnergyRemaining`], 1.96); // 51 % of 3.84
+  stopPush();
 });
 
 test('onPoll does not republish the cached payload while the source broker is disconnected', async () => {

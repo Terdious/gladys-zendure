@@ -22,16 +22,31 @@ werden).
 
 ## Funktionen
 
-Jede Batterie wird mit fünf nur lesbaren Funktionen angelegt, in den
+Jede Batterie wird mit zehn nur lesbaren Funktionen angelegt, in den
 Energiekategorien von Gladys (Energiediagramme, Verlauf, Dashboards):
 
-| Funktion                | Gladys-Kategorie         | Einheit |
-| ----------------------- | ------------------------ | ------- |
-| Batteriestand           | Batteriespeicher         | %       |
-| Ladeleistung            | Batteriespeicher         | W       |
-| Entladeleistung         | Batteriespeicher         | W       |
-| Leistung zum Haus       | Hausausgangssensor       | W       |
-| Solare Eingangsleistung | Energieproduktionssensor | W       |
+| Funktion                     | Gladys-Kategorie         | Einheit |
+| ---------------------------- | ------------------------ | ------- |
+| Batteriestand                | Batteriespeicher         | %       |
+| Ladeleistung                 | Batteriespeicher         | W       |
+| Entladeleistung              | Batteriespeicher         | W       |
+| Leistung zum Haus            | Hausausgangssensor       | W       |
+| Solare Eingangsleistung      | Energieproduktionssensor | W       |
+| Geladene Energie             | Batteriespeicher         | kWh     |
+| Entladene Energie            | Batteriespeicher         | kWh     |
+| Energie zum Haus             | Hausausgangssensor       | kWh     |
+| Solarenergie                 | Energieproduktionssensor | kWh     |
+| Verbleibende Batterieenergie | Batteriespeicher         | kWh     |
+
+Zendure meldet nur Leistungen: Die vier **Energie**-Funktionen (kWh) berechnet
+die Integration, indem sie jede Leistung über die Zeit aufsummiert. Es sind
+kumulierte Zählerstände, gespeichert im Datenvolume der Integration, damit ein
+Neustart sie nicht zurücksetzt; eine Funkstille von mehr als 5 Minuten (Batterie
+offline, Broker getrennt) wird ausgelassen statt geschätzt. Gladys macht aus dem
+Zählerstand **Solarenergie** seine Diagramme der Energieproduktion. Die
+**verbleibende Energie** ist der Batteriestand mal der Kapazität der Packs, die
+die Batterie meldet (AB1000, AB2000, AB3000, eingebaute Packs); sie bleibt leer,
+bis die Batterie ihre Pack-Liste sendet.
 
 Seit Version 1.3.0 ist der Batteriestand der eines **Batteriespeichers** und
 nicht der Akku eines Geräts, der getauscht werden muss: Gladys zählt deine
@@ -40,7 +55,8 @@ Hausbatterie nicht mehr zu den Warnungen bei schwachem Akku. Eine mit einer
 die neue Definition übernimmst: Klicke im Tab **Entdecken** bei der Batterie
 (markiert mit **Bereits hinzugefügt**) auf **Aktualisieren**. Die Funktionen
 werden an Ort und Stelle aktualisiert, ihr Verlauf, deine Szenen und Dashboards
-bleiben erhalten.
+bleiben erhalten. Dasselbe **Aktualisieren** fügt einer vor Version 1.5.0
+angelegten Batterie die Energie-Funktionen hinzu.
 
 ## Deinen Zendure-Cloud-Schlüssel erhalten
 

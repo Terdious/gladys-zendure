@@ -22,6 +22,7 @@ import {
   syncDiscoveredDevices,
   findBlueprintByDevice,
   resetTelemetryDedup,
+  saveEnergyMeters,
 } from './src/devices/index.js';
 
 const gladys = new GladysIntegration();
@@ -123,9 +124,11 @@ function startPushSubscriptions() {
 // --- Graceful shutdown -------------------------------------------------------
 // The SDK stops the push subscriptions, disconnects cleanly and exits with
 // code 0 when the supervisor stops the container (SIGTERM/SIGINT).
-gladys.handleShutdown((signal) => {
+gladys.handleShutdown(async (signal) => {
   logger.info(`Received ${signal} -> graceful shutdown`);
   stopPushSubscriptions();
+  // The energy indexes must survive the restart (see src/zendure/energy.js).
+  await saveEnergyMeters();
 });
 
 // --- Startup -----------------------------------------------------------------

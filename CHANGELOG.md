@@ -10,6 +10,16 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Added
+
+- Energy features (kWh): charged, discharged, solar and home output energy,
+  computed by integrating the powers (Zendure reports no energy counter) and
+  saved under `/data` across restarts; a silence of more than 5 minutes is
+  left out. The solar energy index feeds the Gladys energy production charts.
+- Battery energy remaining (kWh): state of charge x capacity of the reported
+  packs. Batteries created before pick up the new features with **Update** in
+  the Discover tab.
+
 ## [1.4.0] - 2026-10-16
 
 ### Added

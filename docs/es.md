@@ -22,16 +22,31 @@ de la comunidad).
 
 ## Funcionalidades
 
-Cada batería se crea con cinco funcionalidades de solo lectura, en las
+Cada batería se crea con diez funcionalidades de solo lectura, en las
 categorías de energía de Gladys (gráficos de energía, historial, paneles):
 
-| Funcionalidad                | Categoría de Gladys             | Unidad |
-| ---------------------------- | ------------------------------- | ------ |
-| Nivel de batería             | Almacenamiento en batería       | %      |
-| Potencia de carga            | Almacenamiento en batería       | W      |
-| Potencia de descarga         | Almacenamiento en batería       | W      |
-| Potencia de salida del hogar | Sensor de salida del hogar      | W      |
-| Potencia de entrada solar    | Sensor de producción de energía | W      |
+| Funcionalidad                  | Categoría de Gladys             | Unidad |
+| ------------------------------ | ------------------------------- | ------ |
+| Nivel de batería               | Almacenamiento en batería       | %      |
+| Potencia de carga              | Almacenamiento en batería       | W      |
+| Potencia de descarga           | Almacenamiento en batería       | W      |
+| Potencia de salida del hogar   | Sensor de salida del hogar      | W      |
+| Potencia de entrada solar      | Sensor de producción de energía | W      |
+| Energía cargada                | Almacenamiento en batería       | kWh    |
+| Energía descargada             | Almacenamiento en batería       | kWh    |
+| Energía de salida del hogar    | Sensor de salida del hogar      | kWh    |
+| Energía solar                  | Sensor de producción de energía | kWh    |
+| Energía restante de la batería | Almacenamiento en batería       | kWh    |
+
+Zendure solo informa de potencias: las cuatro funcionalidades de **energía**
+(kWh) las calcula la integración, que acumula cada potencia en el tiempo. Son
+índices acumulados, guardados en el volumen de datos de la integración para que
+un reinicio no los ponga a cero; un silencio de más de 5 minutos (batería
+desconectada, broker caído) se descarta en lugar de estimarse. Gladys convierte
+el índice de **energía solar** en sus gráficos de producción. La **energía
+restante** es el nivel de batería multiplicado por la capacidad de los packs que
+declara la batería (AB1000, AB2000, AB3000, packs integrados); queda vacía hasta
+que la batería envía la lista de sus packs.
 
 Desde la versión 1.3.0, el nivel de batería es el de un **almacenamiento en
 batería**, no la pila de un dispositivo que hay que cambiar: Gladys ya no
@@ -40,7 +55,8 @@ con una versión anterior conserva sus categorías anteriores hasta que aplique
 la nueva definición: en la pestaña **Descubrir**, haga clic en **Actualizar**
 en la batería (marcada como **Ya añadido**). Las funcionalidades se actualizan
 en el mismo lugar, por lo que se conservan su historial, las escenas y los
-paneles.
+paneles. Ese mismo **Actualizar** añade las funcionalidades de energía a una
+batería creada antes de la versión 1.5.0.
 
 ## Obtener su clave de la nube de Zendure
 

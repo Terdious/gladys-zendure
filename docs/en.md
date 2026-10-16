@@ -20,23 +20,39 @@ mapping to be confirmed by a community tester).
 
 ## Features
 
-Each battery is created with five read-only features, in the Gladys energy
+Each battery is created with ten read-only features, in the Gladys energy
 categories (energy charts, history, dashboards):
 
-| Feature                 | Gladys category          | Unit |
-| ----------------------- | ------------------------ | ---- |
-| Battery level           | Battery storage          | %    |
-| Battery charge power    | Battery storage          | W    |
-| Battery discharge power | Battery storage          | W    |
-| Home output power       | Home output sensor       | W    |
-| Solar input power       | Energy production sensor | W    |
+| Feature                   | Gladys category          | Unit |
+| ------------------------- | ------------------------ | ---- |
+| Battery level             | Battery storage          | %    |
+| Battery charge power      | Battery storage          | W    |
+| Battery discharge power   | Battery storage          | W    |
+| Home output power         | Home output sensor       | W    |
+| Solar input power         | Energy production sensor | W    |
+| Battery charged energy    | Battery storage          | kWh  |
+| Battery discharged energy | Battery storage          | kWh  |
+| Home output energy        | Home output sensor       | kWh  |
+| Solar energy              | Energy production sensor | kWh  |
+| Battery energy remaining  | Battery storage          | kWh  |
+
+Zendure reports powers only: the four **energy** features (kWh) are computed
+by the integration, which adds up each power over time. They are cumulative
+indexes, saved in the integration's data volume so a restart does not reset
+them; a silence of more than 5 minutes (battery offline, broker down) is left
+out instead of being guessed. Gladys turns the **solar energy** index into
+its energy production charts. The **energy remaining** is the state of charge
+times the capacity of the packs the battery reports (AB1000, AB2000, AB3000,
+built-in packs); it stays empty until the battery sends its pack list.
 
 Since version 1.3.0 the battery level is a **battery storage** level, not the
 battery of a device to replace: Gladys no longer counts your home battery in
 its low-battery alerts. A battery created with an older version keeps its
 previous categories until you apply the new definition: in the **Discover**
 tab, click **Update** on the battery (marked **Already added**). The features
-are updated in place, so their history, scenes and dashboards are kept.
+are updated in place, so their history, scenes and dashboards are kept. The
+same **Update** adds the energy features to a battery created before version
+1.5.0.
 
 ## Getting your Zendure cloud key
 
