@@ -32,6 +32,11 @@ import {
   ENERGY_FLOWS,
   ENERGY_SAVE_INTERVAL_IN_MS,
 } from '../zendure/energy.js';
+import { buildWriteCommand, createWriteThrottle, ControlRefusedError } from '../zendure/control.js';
+
+// Scene trigger fired when a battery goes unreachable or comes back
+// (manifest `scene_triggers`).
+export const REACHABILITY_TRIGGER = 'battery_reachability_changed';
 
 const DEVICE_TYPE = 'solarflow';
 
@@ -91,6 +96,9 @@ let energyMeters = null;
 let energyLoad = null;
 let energyLoaded = false;
 let energySaveTimer = null;
+
+// Rate limiter of the control writes (src/zendure/control.js).
+let writeThrottle = createWriteThrottle();
 
 function getEnergyMeters() {
   if (!energyMeters) {
@@ -410,6 +418,7 @@ export function resetSolarflowRuntime() {
   effectiveSourceByDeviceKey.clear();
   allLocalEvaluationStreak = 0;
   stopEnergySaveTimer();
+  writeThrottle = createWriteThrottle();
   energyMeters = null;
   energyLoad = null;
   energyLoaded = false;
@@ -709,7 +718,78 @@ function applySourceTransition(gladys, config, rawCloudDevice, nextSource, now) 
   }
   logger.info(`telemetry: ${deviceLabelOf(rawCloudDevice)}: ${detail}`);
 
+  // "Went unreachable" and "came back" are events, not states: scene trigger.
+  if (nextSource === 'unreachable' || previous.source === 'unreachable') {
+    publishReachabilityEvent(gladys, rawCloudDevice, nextSource);
+  }
+
   return buildTransportEntry(gladys, config, rawCloudDevice, nextSource);
+}
+
+/**
+ * Fire the reachability scene trigger, without ever failing the evaluator
+ * (an older core without scene events, a rate limit...).
+ * @param {object} gladys Gladys SDK instance
+ * @param {object} rawCloudDevice device from the cloud deviceList
+ * @param {'local'|'cloud'|'unreachable'} source new effective source
+ */
+function publishReachabilityEvent(gladys, rawCloudDevice, source) {
+  if (typeof gladys.publishSceneEvent !== 'function') {
+    return;
+  }
+  const data = {
+    device: gladys.externalIds(DEVICE_TYPE, deviceKeyOf(rawCloudDevice)).device,
+    state: source === 'unreachable' ? 'unreachable' : 'reachable',
+    device_name: rawCloudDevice.deviceName || modelOf(rawCloudDevice),
+    source,
+  };
+  Promise.resolve()
+    .then(() => gladys.publishSceneEvent(REACHABILITY_TRIGGER, data))
+    .catch((e) => logger.debug(`scene event ${REACHABILITY_TRIGGER} not published: ${e.message}`));
+}
+
+/**
+ * Send a control command to one battery (scene actions, widget buttons):
+ * validated, clamped and rate limited by src/zendure/control.js, then
+ * published as `properties/write` on the broker currently serving the device.
+ * The new value shows up with the device's next report.
+ * @param {object} gladys Gladys SDK instance
+ * @param {object} config normalized configuration
+ * @param {string} deviceExternalId Gladys device external_id
+ * @param {object} command see buildWriteCommand
+ * @returns {Promise<{ sent: boolean, applied: Record<string, number>, source?: string }>}
+ */
+export async function controlDevice(gladys, config, deviceExternalId, command) {
+  const deviceKey = String(deviceExternalId || '')
+    .split(':')
+    .pop();
+  const data = await ensureCloudData(config);
+  const rawCloudDevice = deviceKey ? findSupportedDevice(data, deviceKey) : null;
+  if (!rawCloudDevice) {
+    throw new ControlRefusedError(`unknown Zendure battery "${deviceExternalId}"`);
+  }
+
+  const { runtime, source } = await selectPollRuntime(config, rawCloudDevice);
+  const latestPayload = runtime.getLatestPayload(telemetryKeyOf(source, rawCloudDevice));
+  const payload = latestPayload ? { ...rawCloudDevice, ...latestPayload } : rawCloudDevice;
+  const write = buildWriteCommand(command, { productModel: modelOf(rawCloudDevice), payload });
+  if (!write) {
+    logger.info(
+      `control: ${deviceLabelOf(rawCloudDevice)} already at ${command.kind}, nothing sent`,
+    );
+    return { sent: false, applied: {} };
+  }
+
+  const now = Date.now();
+  writeThrottle.check(deviceKey, write.setting, now);
+  await runtime.writeDeviceProperties(rawCloudDevice, write.properties);
+  writeThrottle.record(deviceKey, write.setting, now);
+  logger.info(
+    `control: ${deviceLabelOf(rawCloudDevice)} <- ${JSON.stringify(write.properties)} (${source} broker)`,
+  );
+  // Ask for a fresh report so the new value shows up quickly (cloud only).
+  runtime.requestDeviceProperties(rawCloudDevice);
+  return { sent: true, applied: write.applied, source };
 }
 
 /**

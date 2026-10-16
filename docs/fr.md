@@ -11,7 +11,7 @@ hors-ligne, avec repli cloud automatique.
 
 - Un **compte Zendure**, avec vos batteries déjà installées et en ligne dans
   l'application Zendure.
-- Gladys Assistant **4.86 ou plus récent**.
+- Gladys Assistant **5.1 ou plus récent**.
 
 ## Modèles pris en charge
 
@@ -117,6 +117,42 @@ joint** :
   en local.
 - **Injoignable** (rouge) — le cloud Zendure signale l'appareil hors ligne, ou
   il est muet sur toutes les sources.
+
+## Pilotage depuis les scènes
+
+Gladys n'a pas encore de fonctionnalité de consigne pour une batterie : les
+batteries se pilotent depuis les **scènes** (et depuis le widget du tableau de
+bord). Dans une scène, ajoutez une action de la catégorie **Intégrations**.
+
+| Action                           | Effet                                                       |
+| -------------------------------- | ----------------------------------------------------------- |
+| **Régler la limite de sortie**   | Puissance maximale fournie à la maison (W)                  |
+| **Régler la limite de charge**   | Puissance maximale tirée du réseau, charge AC (W)           |
+| **Régler le mode AC**            | Charge depuis le réseau, ou décharge vers la maison         |
+| **Régler les niveaux de charge** | Cible de charge (70-100 %) et plancher de décharge (0-50 %) |
+
+L'intégration protège la batterie :
+
+- une limite est plafonnée à la puissance nominale de la batterie (par ex.
+  800 W en sortie sur une SolarFlow 800 Pro) ;
+- les limites de puissance sont envoyées en « mode intelligent », gardées en
+  mémoire au lieu d'être écrites dans la flash de la batterie (des changements
+  fréquents l'useraient) ;
+- un même réglage ne peut pas changer plus d'une fois toutes les 3 s (limites
+  de puissance) ou 30 s (mode AC, niveaux de charge) : une scène qui essaie
+  plus tôt échoue en indiquant le délai à attendre ;
+- une valeur déjà appliquée par la batterie n'est pas renvoyée (la sortie
+  d'action **Commande envoyée** vaut alors faux) ;
+- les niveaux de charge sont refusés tant que la batterie n'a pas remonté les
+  siens (leur échelle diffère selon les firmwares).
+
+La commande passe par le broker qui sert actuellement la batterie (local ou
+cloud) ; la nouvelle valeur apparaît avec la remontée suivante de la batterie.
+
+Le déclencheur **Joignabilité d'une batterie** lance une scène quand une
+batterie ne remonte plus rien sur aucune source, ou remonte à nouveau (mode
+MQTT local). Ses variables donnent le nom de la batterie, le nouvel état et la
+source de télémétrie.
 
 ## Un seul consommateur cloud par compte Zendure
 

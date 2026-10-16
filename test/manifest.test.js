@@ -39,6 +39,9 @@ const CATALOG_CATEGORIES = [
 // validator refuses a manifest whose `gladys_version` minimum is lower than
 // the first release accepting every field it declares.
 const CATEGORIES_MIN_GLADYS_VERSION = [4, 86, 0];
+// Scene triggers, scene actions and widgets need Gladys 5.1.0.
+const CAPABILITY_FIELDS = ['scene_triggers', 'scene_actions', 'widgets'];
+const CAPABILITY_MIN_GLADYS_VERSION = [5, 1, 0];
 // The languages of the Gladys interface: every text the user reads ships in
 // all of them (Gladys falls back to English for a missing one).
 const GLADYS_LANGUAGES = ['en', 'fr', 'de', 'es'];
@@ -103,6 +106,16 @@ test('catalog categories: 1 to 3 known keys, and Gladys >= 4.86.0', () => {
     isAtLeast(minGladysVersion(), CATEGORIES_MIN_GLADYS_VERSION),
     `categories requires gladys_version >= 4.86.0, got "${manifest.gladys_version}"`,
   );
+});
+
+test('scene triggers, scene actions and widgets require Gladys >= 5.1.0', () => {
+  const declared = CAPABILITY_FIELDS.filter((field) => manifest[field] !== undefined);
+  if (declared.length > 0) {
+    assert.ok(
+      isAtLeast(minGladysVersion(), CAPABILITY_MIN_GLADYS_VERSION),
+      `${declared.join(', ')} requires gladys_version >= 5.1.0, got "${manifest.gladys_version}"`,
+    );
+  }
 });
 
 test('the catalog description holds 10 to 100 characters per language', () => {

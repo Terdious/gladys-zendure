@@ -11,7 +11,7 @@ internet, con respaldo automático en la nube. Los valores son de solo lectura.
 
 - Una **cuenta Zendure**, con sus baterías ya configuradas y en línea en la
   aplicación Zendure.
-- Gladys Assistant **4.86 o posterior**.
+- Gladys Assistant **5.1 o posterior**.
 
 ## Modelos compatibles
 
@@ -115,6 +115,42 @@ momento**:
   Desaparece por sí solo cuando el dispositivo vuelve a publicar en local.
 - **Inaccesible** (rojo) — la nube de Zendure indica que el dispositivo está
   desconectado, o no publica en ninguna fuente.
+
+## Control desde las escenas
+
+Gladys aún no tiene una funcionalidad de consigna para baterías: las baterías se
+controlan desde las **escenas** (y desde el widget del panel). En una escena,
+añada una acción de la categoría **Integraciones**.
+
+| Acción                           | Efecto                                                     |
+| -------------------------------- | ---------------------------------------------------------- |
+| **Ajustar el límite de salida**  | Potencia máxima entregada al hogar (W)                     |
+| **Ajustar el límite de carga**   | Potencia máxima tomada de la red, carga AC (W)             |
+| **Ajustar el modo AC**           | Cargar desde la red o descargar hacia el hogar             |
+| **Ajustar los niveles de carga** | Objetivo de carga (70-100 %) y mínimo de descarga (0-50 %) |
+
+La integración protege la batería:
+
+- un límite se limita a la potencia nominal de la batería (p. ej. 800 W de
+  salida en una SolarFlow 800 Pro);
+- los límites de potencia se envían en "modo inteligente", guardados en memoria
+  en lugar de escribirse en la flash de la batería (los cambios frecuentes la
+  desgastarían);
+- un mismo ajuste no puede cambiar más de una vez cada 3 s (límites de
+  potencia) o 30 s (modo AC, niveles de carga): una escena que lo intenta antes
+  falla indicando el tiempo de espera;
+- un valor que la batería ya aplica no se vuelve a enviar (la salida de acción
+  **Comando enviado** es entonces falsa);
+- los niveles de carga se rechazan hasta que la batería informa de los suyos
+  (su escala difiere según el firmware).
+
+El comando pasa por el broker que sirve la batería en ese momento (local o
+nube); el nuevo valor aparece con el siguiente informe de la batería.
+
+El disparador **Accesibilidad de una batería** inicia una escena cuando una
+batería deja de informar en todas las fuentes, o vuelve a hacerlo (modo MQTT
+local). Sus variables dan el nombre de la batería, el nuevo estado y la fuente
+de telemetría.
 
 ## Un solo consumidor de la nube por cuenta Zendure
 

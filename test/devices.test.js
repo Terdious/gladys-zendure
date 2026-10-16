@@ -18,6 +18,9 @@ import {
   evaluateTelemetrySources,
   TELEMETRY_WATCHDOG_INTERVAL_IN_MS,
   LOCAL_SILENCE_TIMEOUT_IN_MS,
+  UNREACHABLE_TIMEOUT_IN_MS,
+  REACHABILITY_TRIGGER,
+  controlDevice,
 } from '../src/devices/solarflow.js';
 import { normalizeConfig } from '../src/config.js';
 import { createFakeGladys } from './helpers/fakeGladys.js';
@@ -775,6 +778,115 @@ test('a locally-silent device falls back to the cloud (lazy connect) then recove
   assert.equal(cloudClient.ended, true);
 
   stopPush();
+});
+
+test('a battery silent on every source fires the reachability trigger, and again on return', async () => {
+  const localGladys = createFakeGladys();
+  const mqttLibrary = createFakeMqttLibrary();
+  setSolarflowDependencies({
+    fetchImpl: createFakeZendureFetch({ deviceList: [FAKE_LOCAL_SOLARFLOW_DEVICE] }),
+    mqttLibrary,
+  });
+
+  const [device] = await buildDiscoveredDevices(localGladys, localConfig);
+  const stopPush = solarflow.startPush(localGladys, localConfig);
+  const localClient = await waitFor(() => mqttLibrary.clients[0]);
+  await delay(20);
+  const reportLocally = (value) =>
+    localClient.emit(
+      'message',
+      LOCAL_SENSOR_TOPIC(FAKE_LOCAL_SOLARFLOW_DEVICE.snNumber, 'electricLevel'),
+      Buffer.from(String(value)),
+    );
+
+  reportLocally(60);
+  const start = Date.now();
+  await evaluateTelemetrySources(localGladys, localConfig, start);
+  // Silent locally (cloud fallback), then on the cloud too: unreachable.
+  await evaluateTelemetrySources(
+    localGladys,
+    localConfig,
+    start + LOCAL_SILENCE_TIMEOUT_IN_MS + 5000,
+  );
+  assert.equal(localGladys.sceneEvents.length, 0, 'a cloud fallback is not an event');
+  await evaluateTelemetrySources(
+    localGladys,
+    localConfig,
+    start + LOCAL_SILENCE_TIMEOUT_IN_MS + UNREACHABLE_TIMEOUT_IN_MS + 10000,
+  );
+  await waitFor(() => localGladys.sceneEvents.length === 1);
+  assert.deepEqual(localGladys.sceneEvents[0], {
+    key: REACHABILITY_TRIGGER,
+    data: {
+      device: device.external_id,
+      state: 'unreachable',
+      device_name: FAKE_LOCAL_SOLARFLOW_DEVICE.deviceName,
+      source: 'unreachable',
+    },
+  });
+
+  reportLocally(61);
+  await waitFor(() => localGladys.sceneEvents.length === 2);
+  assert.equal(localGladys.sceneEvents[1].data.state, 'reachable');
+  assert.equal(localGladys.sceneEvents[1].data.source, 'local');
+  stopPush();
+});
+
+// --- Control (scene actions, widget buttons) ----------------------------------
+
+test('controlDevice publishes a properties/write with smartMode on the serving broker', async () => {
+  const localGladys = createFakeGladys();
+  const mqttLibrary = createFakeMqttLibrary();
+  setSolarflowDependencies({ mqttLibrary });
+  const [device] = await buildDiscoveredDevices(localGladys, config);
+  await solarflow.onPoll(localGladys, config, device); // connects the cloud broker
+  const client = mqttLibrary.clients[0];
+
+  const result = await controlDevice(localGladys, config, device.external_id, {
+    kind: 'output_limit',
+    watts: 5000, // above the 800 W rating of a SolarFlow 800 Pro
+  });
+
+  assert.deepEqual(result, { sent: true, applied: { outputLimit: 800 }, source: 'cloud' });
+  const write = client.published.find((p) => p.topic.endsWith('/properties/write'));
+  assert.equal(
+    write.topic,
+    `iot/${FAKE_SOLARFLOW_DEVICE.productKey}/${FAKE_SOLARFLOW_DEVICE.deviceKey}/properties/write`,
+  );
+  const body = JSON.parse(write.payload);
+  assert.deepEqual(body.properties, { smartMode: 1, outputLimit: 800 });
+  assert.equal(body.deviceId, FAKE_SOLARFLOW_DEVICE.deviceKey);
+
+  // A second change of the same setting within the write interval is refused.
+  await assert.rejects(
+    controlDevice(localGladys, config, device.external_id, { kind: 'output_limit', watts: 300 }),
+    /retry in \d+ s/,
+  );
+});
+
+test('controlDevice refuses an unknown battery and sends nothing when already applied', async () => {
+  const localGladys = createFakeGladys();
+  const mqttLibrary = createFakeMqttLibrary();
+  setSolarflowDependencies({ mqttLibrary });
+  const [device] = await buildDiscoveredDevices(localGladys, config);
+  await solarflow.onPoll(localGladys, config, device);
+  const client = mqttLibrary.clients[0];
+
+  await assert.rejects(
+    controlDevice(localGladys, config, 'solarflow:nope', { kind: 'ac_mode', mode: 'charge' }),
+    /unknown Zendure battery/,
+  );
+  client.emit(
+    'message',
+    `iot/${FAKE_SOLARFLOW_DEVICE.productKey}/${FAKE_SOLARFLOW_DEVICE.deviceKey}/properties/report`,
+    Buffer.from(JSON.stringify({ properties: { acMode: 2 } })),
+  );
+  const result = await controlDevice(localGladys, config, device.external_id, {
+    kind: 'ac_mode',
+    mode: 'discharge',
+  });
+  assert.deepEqual(result, { sent: false, applied: {} });
+  assert.equal(client.published.filter((p) => p.topic.endsWith('/properties/write')).length, 0);
 });
 
 // --- Telemetry watchdog summary (pure helper) ---------------------------------
