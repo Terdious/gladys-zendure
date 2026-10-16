@@ -10,6 +10,21 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Security
+
+- `mqtt` 5.16.0: fixes six advisories reachable from a malicious or
+  misbehaving broker (GHSA-c8jq-r765-cq7g, GHSA-rj8f-4655-cgg2,
+  GHSA-gfxc-3w7m-8ch4, GHSA-fwrw-4mhv-wxvm, GHSA-8phv-jwjm-93rr,
+  GHSA-h8jm-hm87-fqw3), several of which could crash the integration.
+  A refused connection keeps being retried, as before: mqtt 5.16 stops
+  retrying after a refusal unless asked to, which would have left a battery
+  silent until a restart.
+
+### Changed
+
+- Development tools updated (ESLint 10.12, Prettier 3.9.10, globals 17.13,
+  ws 8.22).
+
 ## [1.3.0] - 2026-10-16
 
 ### Added
