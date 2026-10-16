@@ -10,6 +10,8 @@
 // rest of the code never has to deal with `undefined`.
 // -----------------------------------------------------------------------------
 
+import { DEVICE_POLL_FREQUENCIES } from '@gladysassistant/integration-sdk';
+
 // Defaults: they MUST stay consistent with the `default` values declared in the
 // `config_schema` of the manifest.
 export const DEFAULT_CONFIG = {
@@ -68,9 +70,10 @@ export function normalizeConfig(raw = {}) {
 }
 
 // Gladys only accepts a fixed set of device poll frequencies, expressed in
-// MILLISECONDS (DEVICE_POLL_FREQUENCIES in the core); any other value is
-// rejected by POST /discovered_device.
-const GLADYS_POLL_FREQUENCIES_IN_MS = [1000, 2000, 10000, 15000, 30000, 60000];
+// MILLISECONDS (DEVICE_POLL_FREQUENCIES, mirrored by the SDK); any other value
+// is rejected by POST /discovered_device. Ascending, so a request halfway
+// between two values (45 s) snaps to the faster one.
+const GLADYS_POLL_FREQUENCIES_IN_MS = Object.values(DEVICE_POLL_FREQUENCIES).sort((a, b) => a - b);
 
 /**
  * Snap the user's poll_frequency (in seconds) to the closest poll frequency
