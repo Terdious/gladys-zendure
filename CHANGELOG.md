@@ -34,6 +34,16 @@ the notes of the version's GitHub Release.
 
 ### Changed
 
+- Gladys energy categories for every feature: battery level, charge and
+  discharge power in **battery storage** (so a home battery no longer counts
+  in the Gladys low-battery alerts and weekly digest), home output power in
+  **home output sensor**, solar input power in **energy production sensor**.
+  Batteries created before pick them up with **Update** in the Discover tab;
+  their history is kept (same feature ids).
+- The pack power features are named after what they measure: "Battery
+  charge power" and "Battery discharge power". The zenSDK `packInputPower` is
+  the pack discharge and `outputPackPower` its charge; the old names ("Battery
+  input/output power") read the other way round.
 - Gladys Assistant 4.86.0 or later is required: older releases reject the
   `categories` field.
 - Integration SDK 0.15.0; the poll frequencies accepted by Gladys now come
