@@ -21,6 +21,11 @@ the notes of the version's GitHub Release.
   local MQTT, then the Zendure cloud, with automatic fallback and return.
   The full report brings the settings (limits, AC mode, charge levels) and the
   pack list (stored energy) that the local MQTT feed lacked.
+- Battery widget: remaining time of the current charge or discharge ("Full
+  in" / "Empty in"), as the battery reports it (`remainInputTime` /
+  `remainOutTime`, minutes, the 999 h "no estimate" value ignored) or computed
+  from its capacity and charge levels like Zendure-HA does. The battery group
+  shows it on each battery line.
 
 ### Changed
 
@@ -30,6 +35,16 @@ the notes of the version's GitHub Release.
 - Scene and widget commands go through the local API when it serves the
   battery, with the same guards (clamping, smart mode, rate limit, unchanged
   values not re-sent, SoC scale).
+- Widgets only show what a battery has: a device without a battery pack (a
+  SolarFlow 800 used as a plain micro-inverter, known from `packNum` /
+  `packData`) keeps its solar, home output and output limit, without level,
+  charge figures, charge levels, AC mode, charge limit nor **Mode & levels**
+  button; the battery group leaves it out of its average level and stored
+  energy, and a group without any battery shows no battery figure (no 0 %).
+  AC-coupled models (1600 AC+, 2400 AC, 2400 AC+) have no solar tile, unless
+  they report solar power. While the presence of a pack is not known yet,
+  every figure stays.
+- The battery widget gauge shows its % unit.
 - Transport badges, the battery widget source and the logs
   (`telemetry(local http): ...`) show the local API; the degraded badge tells
   when a battery's local API stopped answering. A battery whose local API

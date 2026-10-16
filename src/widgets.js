@@ -3,7 +3,10 @@
 //
 //   - `battery`: one battery — state of charge gauge and live power tiles
 //     (bound to the device features, they follow the published states), its
-//     source and settings, and two buttons opening a form to change them.
+//     source, remaining time and settings, and two buttons opening a form to
+//     change them. A device without a battery pack (a SolarFlow 800 running
+//     as a plain micro-inverter) only shows what it has: solar, home output
+//     and its output limit; a device without a PV input has no solar tile.
 //   - `battery_group`: several batteries summed up under a name of your
 //     choice. One instance per group: a three-phase installation adds one per
 //     phase (L1, L2, L3), and one more without battery selected for the whole
@@ -17,6 +20,7 @@
 import { createLogger, WIDGET_COLORS } from '@gladysassistant/integration-sdk';
 
 import { controlDevice, describeBatteries } from './devices/index.js';
+import { formatRemainingTime } from './zendure/battery.js';
 import { AC_MODES, MIN_SOC_RANGE, SOC_SET_RANGE } from './zendure/control.js';
 
 const logger = createLogger({ name: 'widgets' });
@@ -85,23 +89,136 @@ const NO_BATTERY = T(
   'No se encontró ninguna batería Zendure: revise la pestaña Configuración de la integración.',
 );
 
+const REMAINING_LABELS = {
+  discharge: T('Empty in', 'Vide dans', 'Leer in', 'Vacía en'),
+  charge: T('Full in', 'Pleine dans', 'Voll in', 'Llena en'),
+};
+
+/** The state of charge gauge, with its unit (a value gauge when known). */
+function levelGauge(battery) {
+  const label = T('Battery', 'Batterie', 'Batterie', 'Batería');
+  const level = battery.values.batteryLevel;
+  if (level === null || level === undefined) {
+    return {
+      type: 'gauge',
+      device_feature: battery.featureExternalId('batteryLevel'),
+      unit: '%',
+      label,
+      color: WIDGET_COLORS.SUCCESS,
+    };
+  }
+  return {
+    type: 'gauge',
+    value: level,
+    min: 0,
+    max: 100,
+    unit: '%',
+    label,
+    color: WIDGET_COLORS.SUCCESS,
+  };
+}
+
 function batteryContent(battery) {
   const feature = battery.featureExternalId;
   const { settings } = battery;
+  // Unknown presence keeps every battery figure: never hide them on a guess.
+  const withBattery = battery.hasBattery !== false;
   const levels =
     settings.socSet === null && settings.minSoc === null
       ? UNKNOWN
       : `${settings.minSoc ?? UNKNOWN} – ${settings.socSet ?? UNKNOWN} %`;
-  return {
-    // The tiles are live; the status rows only change with the reports.
-    ttl_seconds: 30,
-    components: [
+  const statusItems = [
+    {
+      label: T('Source', 'Source', 'Quelle', 'Fuente'),
+      icon: 'wifi',
+      ...sourceStatus(battery),
+    },
+  ];
+  if (withBattery) {
+    statusItems.push({
+      label: T('Energy stored', 'Énergie stockée', 'Gespeicherte Energie', 'Energía almacenada'),
+      icon: 'battery',
+      value:
+        battery.remainingKwh === null
+          ? UNKNOWN
+          : `${battery.remainingKwh} / ${battery.capacityKwh} kWh`,
+      color: WIDGET_COLORS.NEUTRAL,
+    });
+    if (battery.remainingTime) {
+      statusItems.push({
+        label: REMAINING_LABELS[battery.remainingTime.direction],
+        icon: 'clock',
+        value: formatRemainingTime(battery.remainingTime.minutes),
+        color: WIDGET_COLORS.NEUTRAL,
+      });
+    }
+  } else {
+    statusItems.push({
+      label: T('Battery pack', 'Batterie', 'Batteriepack', 'Batería'),
+      icon: 'battery',
+      value: T('None', 'Aucune', 'Keiner', 'Ninguna'),
+      color: WIDGET_COLORS.NEUTRAL,
+    });
+  }
+  statusItems.push({
+    label: T('Output limit', 'Limite de sortie', 'Ausgangslimit', 'Límite de salida'),
+    icon: 'arrow-up-right',
+    value: withUnit(settings.outputLimit, 'W'),
+    color: WIDGET_COLORS.NEUTRAL,
+  });
+  if (withBattery) {
+    statusItems.push(
       {
-        type: 'gauge',
-        device_feature: feature('batteryLevel'),
-        label: T('Battery', 'Batterie', 'Batterie', 'Batería'),
-        color: WIDGET_COLORS.SUCCESS,
+        label: T('Charge limit', 'Limite de charge', 'Ladelimit', 'Límite de carga'),
+        icon: 'arrow-down-left',
+        value: withUnit(settings.inputLimit, 'W'),
+        color: WIDGET_COLORS.NEUTRAL,
       },
+      {
+        label: T('AC mode', 'Mode AC', 'AC-Modus', 'Modo AC'),
+        icon: 'repeat',
+        value: AC_MODE_TEXT[settings.acMode] ?? UNKNOWN,
+        color: WIDGET_COLORS.NEUTRAL,
+      },
+      {
+        label: T('Charge levels', 'Niveaux de charge', 'Ladestände', 'Niveles de carga'),
+        icon: 'sliders',
+        value: levels,
+        color: WIDGET_COLORS.NEUTRAL,
+      },
+    );
+  }
+
+  const powerFields = [
+    {
+      key: 'output_limit',
+      type: 'number',
+      label: T(
+        'Output limit (W)',
+        'Limite de sortie (W)',
+        'Ausgangslimit (W)',
+        'Límite de salida (W)',
+      ),
+      min: 0,
+      max: 3200,
+      ...(settings.outputLimit !== null ? { default: settings.outputLimit } : {}),
+    },
+  ];
+  if (withBattery) {
+    powerFields.push({
+      key: 'input_limit',
+      type: 'number',
+      label: T('Charge limit (W)', 'Limite de charge (W)', 'Ladelimit (W)', 'Límite de carga (W)'),
+      min: 0,
+      max: 3200,
+      ...(settings.inputLimit !== null ? { default: settings.inputLimit } : {}),
+    });
+  }
+
+  const components = [];
+  if (withBattery) {
+    components.push(
+      levelGauge(battery),
       {
         type: 'value',
         device_feature: feature('batteryOutputPower'),
@@ -114,163 +231,114 @@ function batteryContent(battery) {
         label: T('Discharging', 'Décharge', 'Entladen', 'Descarga'),
         icon: 'zap',
       },
-      {
-        type: 'value',
-        device_feature: feature('solarInputPower'),
-        label: T('Solar', 'Solaire', 'Solar', 'Solar'),
-        icon: 'sun',
+    );
+  }
+  if (battery.hasSolar) {
+    components.push({
+      type: 'value',
+      device_feature: feature('solarInputPower'),
+      label: T('Solar', 'Solaire', 'Solar', 'Solar'),
+      icon: 'sun',
+    });
+  }
+  components.push(
+    {
+      type: 'value',
+      device_feature: feature('homeOutputPower'),
+      label: T('To the home', 'Vers la maison', 'Zum Haus', 'Al hogar'),
+      icon: 'home',
+    },
+    { type: 'status', items: statusItems },
+    {
+      type: 'button',
+      label: T('Power limits', 'Limites de puissance', 'Leistungslimits', 'Límites de potencia'),
+      icon: 'sliders',
+      style: 'secondary',
+      action: {
+        key: BATTERY_ACTIONS.POWER_LIMITS,
+        params: { device: battery.externalId },
+        fields: powerFields,
       },
-      {
-        type: 'value',
-        device_feature: feature('homeOutputPower'),
-        label: T('To the home', 'Vers la maison', 'Zum Haus', 'Al hogar'),
-        icon: 'home',
-      },
-      {
-        type: 'status',
-        items: [
+    },
+  );
+  if (withBattery) {
+    components.push({
+      type: 'button',
+      label: T('Mode & levels', 'Mode et niveaux', 'Modus & Stände', 'Modo y niveles'),
+      icon: 'battery',
+      style: 'secondary',
+      action: {
+        key: BATTERY_ACTIONS.MODE_AND_LEVELS,
+        params: { device: battery.externalId },
+        fields: [
           {
-            label: T('Source', 'Source', 'Quelle', 'Fuente'),
-            icon: 'wifi',
-            ...sourceStatus(battery),
-          },
-          {
-            label: T(
-              'Energy stored',
-              'Énergie stockée',
-              'Gespeicherte Energie',
-              'Energía almacenada',
-            ),
-            icon: 'battery',
-            value:
-              battery.remainingKwh === null
-                ? UNKNOWN
-                : `${battery.remainingKwh} / ${battery.capacityKwh} kWh`,
-            color: WIDGET_COLORS.NEUTRAL,
-          },
-          {
-            label: T('Output limit', 'Limite de sortie', 'Ausgangslimit', 'Límite de salida'),
-            icon: 'arrow-up-right',
-            value: withUnit(settings.outputLimit, 'W'),
-            color: WIDGET_COLORS.NEUTRAL,
-          },
-          {
-            label: T('Charge limit', 'Limite de charge', 'Ladelimit', 'Límite de carga'),
-            icon: 'arrow-down-left',
-            value: withUnit(settings.inputLimit, 'W'),
-            color: WIDGET_COLORS.NEUTRAL,
-          },
-          {
+            key: 'ac_mode',
+            type: 'select',
             label: T('AC mode', 'Mode AC', 'AC-Modus', 'Modo AC'),
-            icon: 'repeat',
-            value: AC_MODE_TEXT[settings.acMode] ?? UNKNOWN,
-            color: WIDGET_COLORS.NEUTRAL,
+            display: 'radio',
+            options: [
+              { value: 'charge', label: AC_MODE_TEXT[AC_MODES.charge] },
+              { value: 'discharge', label: AC_MODE_TEXT[AC_MODES.discharge] },
+            ],
+            ...(AC_MODE_TEXT[settings.acMode]
+              ? { default: settings.acMode === AC_MODES.charge ? 'charge' : 'discharge' }
+              : {}),
           },
           {
-            label: T('Charge levels', 'Niveaux de charge', 'Ladestände', 'Niveles de carga'),
-            icon: 'sliders',
-            value: levels,
-            color: WIDGET_COLORS.NEUTRAL,
+            key: 'max_soc',
+            type: 'number',
+            label: T(
+              'Charge target (%)',
+              'Cible de charge (%)',
+              'Ladeziel (%)',
+              'Objetivo de carga (%)',
+            ),
+            min: SOC_SET_RANGE.min,
+            max: SOC_SET_RANGE.max,
+            ...(settings.socSet !== null ? { default: settings.socSet } : {}),
+          },
+          {
+            key: 'min_soc',
+            type: 'number',
+            label: T(
+              'Discharge floor (%)',
+              'Plancher de décharge (%)',
+              'Entladegrenze (%)',
+              'Mínimo de descarga (%)',
+            ),
+            min: MIN_SOC_RANGE.min,
+            max: MIN_SOC_RANGE.max,
+            ...(settings.minSoc !== null ? { default: settings.minSoc } : {}),
           },
         ],
       },
-      {
-        type: 'button',
-        label: T('Power limits', 'Limites de puissance', 'Leistungslimits', 'Límites de potencia'),
-        icon: 'sliders',
-        style: 'secondary',
-        action: {
-          key: BATTERY_ACTIONS.POWER_LIMITS,
-          params: { device: battery.externalId },
-          fields: [
-            {
-              key: 'output_limit',
-              type: 'number',
-              label: T(
-                'Output limit (W)',
-                'Limite de sortie (W)',
-                'Ausgangslimit (W)',
-                'Límite de salida (W)',
-              ),
-              min: 0,
-              max: 3200,
-              ...(settings.outputLimit !== null ? { default: settings.outputLimit } : {}),
-            },
-            {
-              key: 'input_limit',
-              type: 'number',
-              label: T(
-                'Charge limit (W)',
-                'Limite de charge (W)',
-                'Ladelimit (W)',
-                'Límite de carga (W)',
-              ),
-              min: 0,
-              max: 3200,
-              ...(settings.inputLimit !== null ? { default: settings.inputLimit } : {}),
-            },
-          ],
-        },
-      },
-      {
-        type: 'button',
-        label: T('Mode & levels', 'Mode et niveaux', 'Modus & Stände', 'Modo y niveles'),
-        icon: 'battery',
-        style: 'secondary',
-        action: {
-          key: BATTERY_ACTIONS.MODE_AND_LEVELS,
-          params: { device: battery.externalId },
-          fields: [
-            {
-              key: 'ac_mode',
-              type: 'select',
-              label: T('AC mode', 'Mode AC', 'AC-Modus', 'Modo AC'),
-              display: 'radio',
-              options: [
-                { value: 'charge', label: AC_MODE_TEXT[AC_MODES.charge] },
-                { value: 'discharge', label: AC_MODE_TEXT[AC_MODES.discharge] },
-              ],
-              ...(AC_MODE_TEXT[settings.acMode]
-                ? { default: settings.acMode === AC_MODES.charge ? 'charge' : 'discharge' }
-                : {}),
-            },
-            {
-              key: 'max_soc',
-              type: 'number',
-              label: T(
-                'Charge target (%)',
-                'Cible de charge (%)',
-                'Ladeziel (%)',
-                'Objetivo de carga (%)',
-              ),
-              min: SOC_SET_RANGE.min,
-              max: SOC_SET_RANGE.max,
-              ...(settings.socSet !== null ? { default: settings.socSet } : {}),
-            },
-            {
-              key: 'min_soc',
-              type: 'number',
-              label: T(
-                'Discharge floor (%)',
-                'Plancher de décharge (%)',
-                'Entladegrenze (%)',
-                'Mínimo de descarga (%)',
-              ),
-              min: MIN_SOC_RANGE.min,
-              max: MIN_SOC_RANGE.max,
-              ...(settings.minSoc !== null ? { default: settings.minSoc } : {}),
-            },
-          ],
-        },
-      },
-    ],
-  };
+    });
+  }
+  // The tiles are live; the status rows and the gauge follow the TTL.
+  return { ttl_seconds: 30, components };
+}
+
+/** Status row value of a group member: level (and remaining time) or output. */
+function groupRowValue(battery) {
+  if (battery.hasBattery === false) {
+    return withUnit(battery.values.homeOutputPower, 'W');
+  }
+  if (battery.values.batteryLevel === null) {
+    return UNKNOWN;
+  }
+  const time = battery.remainingTime
+    ? ` · ${battery.remainingTime.direction === 'charge' ? '↑' : '↓'} ${formatRemainingTime(battery.remainingTime.minutes)}`
+    : '';
+  return `${battery.values.batteryLevel} %${time}`;
 }
 
 function groupContent(title, batteries) {
+  // Devices known to have no pack (micro-inverter mode) count for the powers
+  // only, never in the state of charge nor in the stored energy.
+  const withPacks = batteries.filter((battery) => battery.hasBattery !== false);
   // Capacity-weighted state of charge when every pack is known, plain
   // average otherwise.
-  const withLevel = batteries.filter((battery) => battery.values.batteryLevel !== null);
+  const withLevel = withPacks.filter((battery) => battery.values.batteryLevel !== null);
   const weighted = withLevel.every((battery) => battery.capacityKwh !== null);
   const weight = (battery) => (weighted ? battery.capacityKwh : 1);
   const totalWeight = withLevel.reduce((total, battery) => total + weight(battery), 0);
@@ -283,21 +351,20 @@ function groupContent(title, batteries) {
           ) / totalWeight,
         )
       : null;
-  const power = (key) => sum(batteries, (battery) => battery.values[key]);
-  const tile = (key, label, icon) => ({
+  const power = (key, members = batteries) => sum(members, (battery) => battery.values[key]);
+  const tile = (key, label, icon, members) => ({
     type: 'value',
-    value: power(key) ?? UNKNOWN,
+    value: power(key, members) ?? UNKNOWN,
     unit: 'W',
     label,
     icon,
   });
-  const stored = sum(batteries, (battery) => battery.remainingKwh);
+  const stored = sum(withPacks, (battery) => battery.remainingKwh);
 
-  return {
-    // Computed sums: refreshed by the TTL.
-    ttl_seconds: 30,
-    components: [
-      { type: 'text', variant: 'heading', text: title },
+  const components = [{ type: 'text', variant: 'heading', text: title }];
+  // A group without any battery shows no battery figure at all (no 0 %).
+  if (withPacks.length > 0) {
+    components.push(
       {
         type: 'gauge',
         value: level ?? 0,
@@ -307,29 +374,47 @@ function groupContent(title, batteries) {
         label: T('Battery', 'Batterie', 'Batterie', 'Batería'),
         color: level === null ? WIDGET_COLORS.NEUTRAL : WIDGET_COLORS.SUCCESS,
       },
-      tile('batteryOutputPower', T('Charging', 'Charge', 'Laden', 'Carga'), 'battery-charging'),
-      tile('batteryInputPower', T('Discharging', 'Décharge', 'Entladen', 'Descarga'), 'zap'),
-      tile('solarInputPower', T('Solar', 'Solaire', 'Solar', 'Solar'), 'sun'),
-      tile('homeOutputPower', T('To the home', 'Vers la maison', 'Zum Haus', 'Al hogar'), 'home'),
-      {
-        type: 'value',
-        value: stored === null ? UNKNOWN : Math.round(stored * 100) / 100,
-        unit: 'kWh',
-        label: T('Stored', 'Stockée', 'Gespeichert', 'Almacenada'),
-        icon: 'battery',
-      },
-      {
-        type: 'status',
-        items: batteries.slice(0, 10).map((battery) => ({
-          label: battery.name.slice(0, 40),
-          icon: 'battery',
-          value:
-            battery.values.batteryLevel === null ? UNKNOWN : `${battery.values.batteryLevel} %`,
-          color: sourceStatus(battery).color,
-        })),
-      },
-    ],
-  };
+      tile(
+        'batteryOutputPower',
+        T('Charging', 'Charge', 'Laden', 'Carga'),
+        'battery-charging',
+        withPacks,
+      ),
+      tile(
+        'batteryInputPower',
+        T('Discharging', 'Décharge', 'Entladen', 'Descarga'),
+        'zap',
+        withPacks,
+      ),
+    );
+  }
+  if (batteries.some((battery) => battery.hasSolar)) {
+    components.push(tile('solarInputPower', T('Solar', 'Solaire', 'Solar', 'Solar'), 'sun'));
+  }
+  components.push(
+    tile('homeOutputPower', T('To the home', 'Vers la maison', 'Zum Haus', 'Al hogar'), 'home'),
+  );
+  if (withPacks.length > 0) {
+    components.push({
+      type: 'value',
+      value: stored === null ? UNKNOWN : Math.round(stored * 100) / 100,
+      unit: 'kWh',
+      label: T('Stored', 'Stockée', 'Gespeichert', 'Almacenada'),
+      icon: 'battery',
+    });
+  }
+  components.push({
+    type: 'status',
+    items: batteries.slice(0, 10).map((battery) => ({
+      label: battery.name.slice(0, 40),
+      icon: battery.hasBattery === false ? 'sun' : 'battery',
+      value: groupRowValue(battery),
+      color: sourceStatus(battery).color,
+    })),
+  });
+
+  // Computed sums: refreshed by the TTL.
+  return { ttl_seconds: 30, components };
 }
 
 const ACTION_SENT = T(

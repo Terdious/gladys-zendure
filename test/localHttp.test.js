@@ -129,6 +129,7 @@ test('a device answering on its local API is served by it, and the cloud broker 
     socSet: 100,
     minSoc: 10,
   });
+  assert.deepEqual(battery.remainingTime, { direction: 'discharge', minutes: 135 });
 });
 
 test('a device whose local API stops answering falls back to the cloud, then returns', async () => {

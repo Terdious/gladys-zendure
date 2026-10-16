@@ -21,6 +21,7 @@ import { createLogger, DEVICE_TRANSPORTS } from '@gladysassistant/integration-sd
 
 import { toGladysPollFrequency } from '../config.js';
 import { fetchCloudData } from '../zendure/client.js';
+import { batteryPresenceOf, hasSolarInput, remainingTimeOf } from '../zendure/battery.js';
 import { modelCapabilitiesOf } from '../zendure/constants.js';
 import { createZendureZenSdk, parseAddressOverrides, zenSdkAddressOf } from '../zendure/zensdk.js';
 import {
@@ -1333,6 +1334,14 @@ export async function describeBatteries(gladys, config) {
       const value = reportedValue(payload, property);
       return value === null || scale === null ? null : Math.round(value / scale);
     };
+    const settings = {
+      outputLimit: reportedValue(payload, 'outputLimit'),
+      inputLimit: reportedValue(payload, 'inputLimit'),
+      acMode: reportedValue(payload, 'acMode'),
+      socSet: scaled('socSet'),
+      minSoc: scaled('minSoc'),
+    };
+    const hasBattery = batteryPresenceOf(modelOf(rawCloudDevice), payload);
     return {
       externalId: ids.device,
       featureExternalId: (key) => ids.feature(key),
@@ -1341,18 +1350,26 @@ export async function describeBatteries(gladys, config) {
       source,
       degraded: source === 'cloud' && expectsLocal(config, rawCloudDevice),
       values,
+      // true / false, or null while the telemetry has not told yet.
+      hasBattery,
+      hasSolar: hasSolarInput(modelOf(rawCloudDevice), values.solarInputPower),
       capacityKwh,
       remainingKwh:
         capacityKwh !== null && values.batteryLevel !== null
           ? Math.round(values.batteryLevel * capacityKwh) / 100
           : null,
-      settings: {
-        outputLimit: reportedValue(payload, 'outputLimit'),
-        inputLimit: reportedValue(payload, 'inputLimit'),
-        acMode: reportedValue(payload, 'acMode'),
-        socSet: scaled('socSet'),
-        minSoc: scaled('minSoc'),
-      },
+      remainingTime:
+        hasBattery === false
+          ? null
+          : remainingTimeOf(payload, {
+              level: values.batteryLevel,
+              chargePower: values.batteryOutputPower,
+              dischargePower: values.batteryInputPower,
+              capacityKwh,
+              socSet: settings.socSet,
+              minSoc: settings.minSoc,
+            }),
+      settings,
     };
   });
 }
