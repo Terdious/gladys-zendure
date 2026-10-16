@@ -52,6 +52,16 @@ gladys.onSetValue(async (device, feature, value) => {
   await blueprint.onSetValue(gladys, { device, feature, value, config });
 });
 
+// --- Device created / updated in Gladys ---------------------------------------
+// The core drops the states of features that do not exist yet: once a device
+// is created, or updated from Discover (new features), its values must be
+// published again instead of being skipped as unchanged.
+const forgetPublishedDevice = async (device) => {
+  findBlueprintByDevice(gladys, device)?.forgetPublishedDevice?.(device);
+};
+gladys.onDeviceCreated(forgetPublishedDevice);
+gladys.onDeviceUpdated(forgetPublishedDevice);
+
 // --- Polling: Gladys asks to refresh a device --------------------------------
 gladys.onPoll(async (device) => {
   const blueprint = findBlueprintByDevice(gladys, device);

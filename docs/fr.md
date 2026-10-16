@@ -1,11 +1,12 @@
 # Zendure pour Gladys Assistant
 
 Connectez vos batteries solaires **Zendure SolarFlow / Hyper** à Gladys
-Assistant. L'intégration récupère la télémétrie en lecture seule (niveau de
-batterie, puissances de charge/décharge, sortie maison et production solaire)
-depuis le cloud Zendure et — en option — directement depuis le **broker MQTT
-local** de chaque appareil, pour des mises à jour rapides et résilientes
-hors-ligne, avec repli cloud automatique.
+Assistant. L'intégration récupère la télémétrie (niveau de batterie, puissances
+de charge/décharge, sortie maison et production solaire) depuis le cloud
+Zendure et — en option — directement depuis le **broker MQTT local** de chaque
+appareil, pour des mises à jour rapides et résilientes hors-ligne, avec repli
+cloud automatique. Les réglages de la batterie (limites de sortie et de charge
+réseau, niveaux de charge, mode AC) se pilotent depuis la carte de l'appareil.
 
 ## Prérequis
 
@@ -23,7 +24,9 @@ télémétrie à confirmer par un testeur de la communauté).
 
 Chaque batterie est créée avec dix fonctionnalités en lecture seule, dans les
 catégories énergie de Gladys (graphiques énergie, historique, tableaux de
-bord) :
+bord), plus cinq réglages de la batterie que vous modifiez depuis la carte de
+l'appareil (voir
+[Pilotage depuis la carte de l'appareil](#pilotage-depuis-la-carte-de-lappareil)) :
 
 | Fonctionnalité               | Catégorie Gladys                | Unité |
 | ---------------------------- | ------------------------------- | ----- |
@@ -57,7 +60,8 @@ n'appliquez pas la nouvelle définition : dans l'onglet **Découverte**, cliquez
 sur **Mettre à jour** sur la batterie (marquée **Déjà ajouté**). Les
 fonctionnalités sont mises à jour sur place : leur historique, les scènes et
 les tableaux de bord sont conservés. Ce même **Mettre à jour** ajoute les
-fonctionnalités d'énergie à une batterie créée avant la version 1.5.0.
+fonctionnalités d'énergie à une batterie créée avant la version 1.5.0, et les
+réglages de la batterie à une batterie créée avant leur arrivée.
 
 ## Obtenir votre clé cloud Zendure
 
@@ -118,11 +122,51 @@ joint** :
 - **Injoignable** (rouge) — le cloud Zendure signale l'appareil hors ligne, ou
   il est muet sur toutes les sources.
 
+## Pilotage depuis la carte de l'appareil
+
+Les réglages de la batterie sont des fonctionnalités de la batterie : vous les
+modifiez directement depuis sa carte sur le tableau de bord, depuis la page de
+l'appareil, ou depuis une scène avec l'action standard **Contrôler un
+appareil** :
+
+| Fonctionnalité                       | Catégorie Gladys     | Plage                     | Réglage Zendure |
+| ------------------------------------ | -------------------- | ------------------------- | --------------- |
+| Limite de puissance de sortie        | Sortie maison        | 0 W à la sortie du modèle | `outputLimit`   |
+| Limite de puissance de charge réseau | Batterie de stockage | 0 W à l'entrée du modèle  | `inputLimit`    |
+| Niveau de charge cible               | Batterie de stockage | 70-100 %                  | `socSet`        |
+| Réserve de décharge                  | Batterie de stockage | 0-50 %                    | `minSoc`        |
+| Mode AC                              | Batterie de stockage | Charge, Décharge          | `acMode`        |
+
+- La **limite de puissance de sortie** borne la puissance que la batterie
+  fournit à la maison, solaire et batterie confondus. La **limite de puissance
+  de charge réseau** ne borne que ce qu'elle prélève sur le réseau : la charge
+  solaire n'est pas limitée par elle. `0` veut dire zéro (aucune sortie, aucune
+  charge réseau), jamais « illimité ».
+- Les plages sont les puissances nominales du modèle (par exemple 800 W en
+  sortie et 1000 W en entrée sur une SolarFlow 800 Pro), élargies quand la
+  batterie remonte elle-même des limites plus hautes.
+- Le **mode AC** ne propose que **Charge** (entrée AC) et **Décharge** (sortie
+  AC) : il choisit le sens du port AC, la puissance qui circule réellement
+  reste bornée par les deux limites et par le soleil. Zendure n'a ni mode auto,
+  ni veille, ni heures creuses, ni secours : Gladys les refuse.
+- Les mêmes protections que pour les actions de scène s'appliquent (puissance
+  nominale, mode smart, un changement toutes les 3 s ou 30 s, valeurs
+  inchangées non renvoyées). Un niveau de charge hors plage y est ramené.
+- La carte affiche la valeur que la batterie **remonte** : la valeur appliquée
+  juste après un changement, puis les remontées de la batterie. Un changement
+  refusé (trop tôt, niveaux de charge pas encore remontés, mode non pris en
+  charge) échoue avec sa raison et la carte revient à la valeur réelle de la
+  batterie.
+
+Ces fonctionnalités demandent une version de Gladys qui connaît la catégorie
+**Sortie maison** et les réglages de batterie de stockage. Une batterie créée
+avant les reçoit avec **Mettre à jour** dans l'onglet **Découverte**, comme les
+fonctionnalités d'énergie de la version 1.5.0.
+
 ## Pilotage depuis les scènes
 
-Gladys n'a pas encore de fonctionnalité de consigne pour une batterie : les
-batteries se pilotent depuis les **scènes** (et depuis le widget du tableau de
-bord). Dans une scène, ajoutez une action de la catégorie **Intégrations**.
+Les scènes peuvent aussi piloter les batteries avec des actions dédiées : dans
+une scène, ajoutez une action de la catégorie **Intégrations**.
 
 | Action                           | Effet                                                       |
 | -------------------------------- | ----------------------------------------------------------- |

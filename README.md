@@ -16,15 +16,18 @@ built with the official JavaScript SDK
 
 - Discovers your Zendure devices through the Zendure cloud API, using the
   authorization key generated from the Zendure mobile app.
-- Publishes read-only telemetry for 7 SolarFlow / Hyper models, in the Gladys
+- Publishes the telemetry for 7 SolarFlow / Hyper models, in the Gladys
   energy categories: battery level, charge and discharge power
   (`battery-storage`), home output power (`home-output-sensor`), solar input
   power (`energy-production-sensor`).
 - Optional **local MQTT** (native `Zendure/sensor/#` + legacy JSON), keyed by
   serial, with per-device **cloud fallback** and automatic recovery, surfaced
   as live transport badges (local / cloud / cloud-degraded / unreachable).
-
-Device control (writable features) is planned — see the roadmap issue.
+- Battery control from the device card (writable features with feedback):
+  output limit (`home-output` / `power-limit`), grid charge limit, target
+  charge level, discharge reserve and AC mode (`battery-storage` commands),
+  plus scene actions and dashboard widgets, all through one control path
+  (rating clamp, smart mode, write throttle).
 
 ## Installation & updates
 

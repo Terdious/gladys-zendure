@@ -1,9 +1,11 @@
 // -----------------------------------------------------------------------------
-// Device type: ZENDURE SOLARFLOW (v1: SolarFlow 800 Pro, read-only telemetry)
+// Device type: ZENDURE SOLARFLOW (SolarFlow and Hyper batteries)
 //
 // Discovery comes from the Zendure cloud deviceList; telemetry comes from the
 // Zendure cloud MQTT broker (`properties/report` payloads), with the raw
-// deviceList entry as a fallback until the first report arrives.
+// deviceList entry as a fallback until the first report arrives. The battery
+// settings are writable features of the device card (onSetValue), sent
+// through the same control path as the scene actions and the widget.
 //
 // Unlike the single-device template blueprints, this blueprint manages ONE
 // Gladys device PER Zendure device found in the cloud account: it exposes
@@ -25,6 +27,9 @@ import {
   searchMetricByKeys,
   normalizeMetricValue,
   featureNameFor,
+  supportedOptionsFor,
+  acModeOfBatteryMode,
+  batteryModeOfAcMode,
 } from '../zendure/deviceMapping.js';
 import {
   createEnergyMeters,
@@ -36,6 +41,7 @@ import {
   buildWriteCommand,
   createWriteThrottle,
   ControlRefusedError,
+  maxPowerFor,
   reportedValue,
   socScaleOf,
 } from '../zendure/control.js';
@@ -203,12 +209,33 @@ let publishDeduplicatedCount = 0;
 let publishRequestLog = [];
 let sharedLimitHintLogged = false;
 
-/** Queue states for publication through the single paced channel. */
-function queueStates(gladys, states) {
+/**
+ * Queue states for publication through the single paced channel. With
+ * `force`, they are sent even when unchanged: the answer to a command must
+ * reach the device card, which may show the value the user just tried.
+ */
+function queueStates(gladys, states, { force = false } = {}) {
   for (const state of states) {
     pendingStates.set(state.device_feature_external_id, state);
+    if (force) {
+      lastPublishedByFeature.delete(state.device_feature_external_id);
+    }
   }
   schedulePublish(gladys);
+}
+
+/**
+ * Forget the published values of one device's features: the core drops the
+ * states of a feature that does not exist yet, so a feature added by
+ * "Update" in Discover must get its value again right away (a setting that
+ * never changes would otherwise wait for the 30-min keep-alive).
+ * @param {{ external_id?: string, features?: Array<{ external_id: string }> }} device
+ */
+export function forgetPublishedDevice(device) {
+  for (const feature of device?.features || []) {
+    lastPublishedByFeature.delete(feature.external_id);
+    lastPublishedAtByFeature.delete(feature.external_id);
+  }
 }
 
 function schedulePublish(gladys) {
@@ -755,17 +782,13 @@ function publishReachabilityEvent(gladys, rawCloudDevice, source) {
 }
 
 /**
- * Send a control command to one battery (scene actions, widget buttons):
- * validated, clamped and rate limited by src/zendure/control.js, then
- * published as `properties/write` on the broker currently serving the device.
- * The new value shows up with the device's next report.
- * @param {object} gladys Gladys SDK instance
+ * The battery a command targets, the runtime serving it and its latest
+ * telemetry (the local or cloud cache merged over the cloud entry).
  * @param {object} config normalized configuration
  * @param {string} deviceExternalId Gladys device external_id
- * @param {object} command see buildWriteCommand
- * @returns {Promise<{ sent: boolean, applied: Record<string, number>, source?: string }>}
+ * @returns {Promise<{ deviceKey: string, rawCloudDevice: object, runtime: object, source: string, payload: object }>}
  */
-export async function controlDevice(gladys, config, deviceExternalId, command) {
+async function resolveControlTarget(config, deviceExternalId) {
   const deviceKey = String(deviceExternalId || '')
     .split(':')
     .pop();
@@ -774,10 +797,29 @@ export async function controlDevice(gladys, config, deviceExternalId, command) {
   if (!rawCloudDevice) {
     throw new ControlRefusedError(`unknown Zendure battery "${deviceExternalId}"`);
   }
-
   const { runtime, source } = await selectPollRuntime(config, rawCloudDevice);
   const latestPayload = runtime.getLatestPayload(telemetryKeyOf(source, rawCloudDevice));
   const payload = latestPayload ? { ...rawCloudDevice, ...latestPayload } : rawCloudDevice;
+  return { deviceKey, rawCloudDevice, runtime, source, payload };
+}
+
+/**
+ * Send a control command to one battery (device card, scene actions, widget
+ * buttons): validated, clamped and rate limited by src/zendure/control.js,
+ * then published as `properties/write` on the broker currently serving the
+ * device.
+ * The new value shows up with the device's next report.
+ * @param {object} gladys Gladys SDK instance
+ * @param {object} config normalized configuration
+ * @param {string} deviceExternalId Gladys device external_id
+ * @param {object} command see buildWriteCommand
+ * @returns {Promise<{ sent: boolean, applied: Record<string, number>, source?: string }>}
+ */
+export async function controlDevice(gladys, config, deviceExternalId, command) {
+  const { deviceKey, rawCloudDevice, runtime, source, payload } = await resolveControlTarget(
+    config,
+    deviceExternalId,
+  );
   const write = buildWriteCommand(command, { productModel: modelOf(rawCloudDevice), payload });
   if (!write) {
     logger.info(
@@ -1042,13 +1084,34 @@ function buildStates(gladys, rawCloudDevice, payload) {
     if (value === null) {
       continue;
     }
-    states.push({
-      device_feature_external_id: ids.feature(featureMapping.key),
-      state: normalizeMetricValue(featureMapping.key, value),
-    });
+    const state = featureStateOf(featureMapping, value, payload);
+    if (state === null) {
+      continue;
+    }
+    states.push({ device_feature_external_id: ids.feature(featureMapping.key), state });
   }
 
   return states;
+}
+
+/**
+ * Gladys value of one reported metric, or null when it cannot be told yet:
+ * a SoC setting before the device reported its scale (percent or tenths, as
+ * src/zendure/control.js reads it), an acMode outside the zenSDK contract.
+ * @param {object} featureMapping see src/zendure/deviceMapping.js
+ * @param {number} value raw reported value
+ * @param {object} payload the whole payload (SoC scale)
+ * @returns {number|null}
+ */
+function featureStateOf(featureMapping, value, payload) {
+  if (featureMapping.socScaled) {
+    const scale = socScaleOf(payload);
+    return scale === null ? null : Math.max(0, Math.round(value / scale));
+  }
+  if (featureMapping.modes) {
+    return batteryModeOfAcMode(value);
+  }
+  return normalizeMetricValue(featureMapping.key, value);
 }
 
 /**
@@ -1135,7 +1198,8 @@ export async function describeBatteries(gladys, config) {
 
     const values = {};
     for (const featureMapping of getFeaturesForModel(modelOf(rawCloudDevice))) {
-      if (!featureMapping.computed) {
+      // Measurements only: the settings are read below, in `settings`.
+      if (!featureMapping.computed && !featureMapping.command) {
         const value = extractMetricValue(payload, featureMapping.metricPaths);
         values[featureMapping.key] =
           value === null ? null : normalizeMetricValue(featureMapping.key, value);
@@ -1171,12 +1235,66 @@ export async function describeBatteries(gladys, config) {
   });
 }
 
+// Device card commands: writable feature key -> control command
+// (src/zendure/control.js). The SoC levels are clamped into the zenSDK range
+// instead of refused, like the power limits: the battery reports the applied
+// value back.
+const SET_VALUE_COMMANDS = {
+  outputLimit: (value) => ({ kind: 'output_limit', watts: value }),
+  inputLimit: (value) => ({ kind: 'input_limit', watts: value }),
+  socSet: (value) => ({ kind: 'soc_limits', max_soc: value, clamp: true }),
+  minSoc: (value) => ({ kind: 'soc_limits', min_soc: value, clamp: true }),
+  acMode: (value) => {
+    const mode = acModeOfBatteryMode(value);
+    if (mode === null) {
+      throw new ControlRefusedError(
+        `mode ${value} is not available on a Zendure battery (charge or discharge only)`,
+      );
+    }
+    return { kind: 'ac_mode', mode };
+  },
+};
+
+/** Gladys value of what a command applied, or null when nothing was sent. */
+function appliedStateOf(key, applied) {
+  const value = applied?.[key];
+  if (value === undefined) {
+    return null;
+  }
+  return key === 'acMode' ? batteryModeOfAcMode(value) : value;
+}
+
+/**
+ * Re-publish the value one setting really has on the battery (its latest
+ * report), sent even when unchanged. Best effort: no report yet means
+ * nothing to publish, and a failure here must not hide the command's own.
+ */
+async function republishReportedSetting(gladys, config, deviceExternalId, key) {
+  try {
+    const { rawCloudDevice, payload } = await resolveControlTarget(config, deviceExternalId);
+    const featureExternalId = gladys
+      .externalIds(DEVICE_TYPE, deviceKeyOf(rawCloudDevice))
+      .feature(key);
+    const states = buildStates(gladys, rawCloudDevice, payload).filter(
+      (state) => state.device_feature_external_id === featureExternalId,
+    );
+    if (states.length > 0) {
+      queueStates(gladys, states, { force: true });
+    }
+  } catch (e) {
+    logger.debug(`onSetValue: reported ${key} not re-published: ${e.message}`);
+  }
+}
+
 export const solarflow = {
   key: DEVICE_TYPE,
 
   // Optional hook called by the registry when the configuration changes: the
   // first sync after a change must re-publish every value immediately.
   resetPublishDedup,
+
+  // Optional hook called when a device is created or updated in Gladys.
+  forgetPublishedDevice,
 
   /** Registry dispatch: does this blueprint own the given Gladys device? */
   ownsDevice(gladys, device) {
@@ -1219,21 +1337,32 @@ export const solarflow = {
         // (seconds) is snapped to the closest allowed one.
         should_poll: true,
         poll_frequency: toGladysPollFrequency(config.poll_frequency),
-        features: getFeaturesForModel(modelOf(rawCloudDevice)).map((featureMapping) => ({
-          name: featureNameFor(featureMapping, config.feature_names),
-          external_id: ids.feature(featureMapping.key),
-          // Composed with the device selector so two devices never share a
-          // feature selector (the core enforces global uniqueness).
-          selector: featureSelectorOf(rawCloudDevice, featureMapping.key),
-          category: featureMapping.category,
-          type: featureMapping.type,
-          unit: featureMapping.unit,
-          min: featureMapping.min,
-          max: featureMapping.max,
-          read_only: true, // telemetry only: no control
-          has_feedback: false,
-          keep_history: true,
-        })),
+        features: getFeaturesForModel(modelOf(rawCloudDevice)).map((featureMapping) => {
+          const supportedOptions = supportedOptionsFor(featureMapping, config.feature_names);
+          return {
+            name: featureNameFor(featureMapping, config.feature_names),
+            external_id: ids.feature(featureMapping.key),
+            // Composed with the device selector so two devices never share a
+            // feature selector (the core enforces global uniqueness).
+            selector: featureSelectorOf(rawCloudDevice, featureMapping.key),
+            category: featureMapping.category,
+            type: featureMapping.type,
+            unit: featureMapping.unit,
+            min: featureMapping.min,
+            // A power limit goes up to what the control path accepts: the
+            // model rating, widened by the maximum the device reports.
+            max: featureMapping.ratingDirection
+              ? maxPowerFor(modelOf(rawCloudDevice), featureMapping.ratingDirection, rawCloudDevice)
+              : featureMapping.max,
+            // The settings are writable; the device applies them on its own
+            // schedule (and may clamp them), so it reports the applied value
+            // back (has_feedback: Gladys does not store the requested one).
+            read_only: !featureMapping.command,
+            has_feedback: featureMapping.command === true,
+            keep_history: true,
+            ...(supportedOptions ? { supported_options: supportedOptions } : {}),
+          };
+        }),
       };
     });
   },
@@ -1259,6 +1388,47 @@ export const solarflow = {
         source = effective ? effective.source : 'local';
       }
       return buildTransportEntry(gladys, config, rawCloudDevice, source);
+    });
+  },
+
+  /**
+   * Device card command: a writable setting changed in Gladys. Sent through
+   * controlDevice (clamping, write throttle, smart mode, unchanged values
+   * skipped), then the applied value is published back. A refused command
+   * re-publishes the value the battery really runs with, so the card does not
+   * keep showing the refused one, and fails the command with a readable
+   * reason (the SDK acks it as a failure: nothing crashes).
+   */
+  async onSetValue(gladys, { device, feature, value, config }) {
+    const featureExternalId = String(feature?.external_id || '');
+    const key = featureExternalId.split(':').pop();
+    const toCommand = Object.hasOwn(SET_VALUE_COMMANDS, key) ? SET_VALUE_COMMANDS[key] : null;
+    if (!toCommand || !featureExternalId.startsWith(`${device?.external_id}:`)) {
+      logger.warn(`onSetValue: ${featureExternalId} is not a writable Zendure setting`);
+      throw new Error(`${featureExternalId} is not a writable Zendure setting`);
+    }
+
+    let result;
+    try {
+      result = await controlDevice(gladys, config, device.external_id, toCommand(value));
+    } catch (e) {
+      if (!(e instanceof ControlRefusedError)) {
+        logger.error(`onSetValue: ${featureExternalId} = ${value} failed: ${e.message}`);
+        throw e;
+      }
+      logger.warn(`onSetValue: ${featureExternalId} = ${value} refused: ${e.message}`);
+      await republishReportedSetting(gladys, config, device.external_id, key);
+      throw e;
+    }
+
+    const applied = appliedStateOf(key, result.applied);
+    if (applied === null) {
+      // Nothing sent (already applied, within tolerance): show the real value.
+      await republishReportedSetting(gladys, config, device.external_id, key);
+      return;
+    }
+    queueStates(gladys, [{ device_feature_external_id: featureExternalId, state: applied }], {
+      force: true,
     });
   },
 

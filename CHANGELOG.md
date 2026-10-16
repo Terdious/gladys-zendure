@@ -10,6 +10,26 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Added
+
+- Battery control from the device card: the output power limit (Home output
+  category), the grid charge power limit, the target charge level, the
+  discharge reserve and the AC mode (Battery storage category) are writable
+  features of the battery. They go through the same protections as the scene
+  actions (rating clamp, smart mode, write throttle, unchanged values not
+  re-sent); the card shows the value the battery reports, and a refused change
+  fails with its reason. The AC mode offers Charge and Discharge only. Needs a
+  Gladys version with the Home output category and the battery storage
+  settings; a battery created before gets these features with **Update** in
+  the Discover tab.
+
+### Fixed
+
+- A charge level the battery already runs with is no longer sent again, as
+  documented for the scene actions and the widget.
+- A feature added by **Update** in the Discover tab gets its value right away,
+  instead of waiting up to 30 minutes when the value does not change.
+
 ## [1.5.0] - 2026-10-16
 
 ### Added

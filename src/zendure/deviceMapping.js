@@ -18,6 +18,15 @@
 // `outputPackPower` its CHARGE power (named from the inverter's side), hence
 // `batteryInputPower` -> discharge and `batteryOutputPower` -> charge.
 //
+// Commands (`command: true`, writable from the device card): the zenSDK
+// battery settings, mapped as the Gladys core specifies for a plug-in storage
+// system (docs/specs/battery-storage.md A.5, docs/specs/home-output.md A.4):
+// outputLimit -> home-output / power-limit, inputLimit -> battery-storage /
+// grid-charge-power-limit, socSet / minSoc -> target-charge-limit /
+// target-discharge-limit, acMode -> mode (lossy, see BATTERY_MODE_BY_AC_MODE).
+// The AC-port limits are deliberately NOT also published as charge / discharge
+// power limits: two controls over one setting would drift apart.
+//
 // Attribution: the model list and the per-model power ratings are derived from
 // the official Home Assistant integration Zendure/Zendure-HA (MIT License,
 // (c) 2024 peteS-UK). Only factual protocol constants (model identifiers and
@@ -30,12 +39,21 @@ import {
   DEVICE_FEATURE_UNITS,
 } from '@gladysassistant/integration-sdk';
 
-import { SUPPORTED_PRODUCT_MODELS } from './constants.js';
+import {
+  AC_MODES,
+  BATTERY_STORAGE_MODE,
+  MIN_SOC_RANGE,
+  MODEL_POWER_RATINGS,
+  SOC_SET_RANGE,
+  SUPPORTED_PRODUCT_MODELS,
+} from './constants.js';
 
 // Every supported model exposes the same five baseline features with identical
 // `metricPaths`; the reference project does not rename these core properties per
 // model. The only per-model difference we apply is the display `max` of the
-// power features, sized from each model's rated power (see MODEL_MAX_POWER).
+// power features, sized from each model's rated power (see MODEL_MAX_POWER),
+// and the range of the writable power limits: the model's rated AC power
+// (MODEL_POWER_RATINGS), the bound the control path clamps to.
 //
 // The reference also exposes two extra off-grid sensors (gridOffPower /
 // aggrGridOffPower) on the Pro/1600/2400 models. We intentionally keep the
@@ -66,6 +84,126 @@ const MODEL_MAX_POWER = {
 
 // Display ceiling of the energy indexes (kWh): metadata only, never reached.
 const ENERGY_INDEX_MAX_KWH = 1000000;
+
+// Gladys battery mode <-> zenSDK acMode. Lossy: acMode only selects the
+// direction of the AC port (1 = AC input, 2 = AC output); the power actually
+// flowing stays bounded by the limits and the sun, so it is not a "charge /
+// discharge at full power" order. AUTO, STANDBY, TIME_OF_USE and BACKUP have
+// no acMode value: they are not offered (supported_options) and refused.
+const AC_MODE_BY_BATTERY_MODE = {
+  [BATTERY_STORAGE_MODE.CHARGE]: 'charge',
+  [BATTERY_STORAGE_MODE.DISCHARGE]: 'discharge',
+};
+const BATTERY_MODE_BY_AC_MODE = {
+  [AC_MODES.charge]: BATTERY_STORAGE_MODE.CHARGE,
+  [AC_MODES.discharge]: BATTERY_STORAGE_MODE.DISCHARGE,
+};
+
+/**
+ * `ac_mode` command mode of a Gladys battery mode.
+ * @param {number|string} batteryMode BATTERY_STORAGE_MODE value
+ * @returns {'charge'|'discharge'|null} null when Zendure has no such mode
+ */
+export function acModeOfBatteryMode(batteryMode) {
+  const value = Number(batteryMode);
+  return Object.hasOwn(AC_MODE_BY_BATTERY_MODE, value) ? AC_MODE_BY_BATTERY_MODE[value] : null;
+}
+
+/**
+ * Gladys battery mode of a reported zenSDK acMode.
+ * @param {number} acMode reported acMode
+ * @returns {number|null} null for a value outside the zenSDK contract
+ */
+export function batteryModeOfAcMode(acMode) {
+  return Object.hasOwn(BATTERY_MODE_BY_AC_MODE, acMode) ? BATTERY_MODE_BY_AC_MODE[acMode] : null;
+}
+
+// Labels of the modes offered on the `mode` feature (supported_options), per
+// `feature_names` language. Gladys shows its own translation of the mode; the
+// label is the fallback.
+export const BATTERY_MODE_LABELS = {
+  [BATTERY_STORAGE_MODE.CHARGE]: { en: 'Charge', fr: 'Charge', de: 'Laden', es: 'Carga' },
+  [BATTERY_STORAGE_MODE.DISCHARGE]: {
+    en: 'Discharge',
+    fr: 'Décharge',
+    de: 'Entladen',
+    es: 'Descarga',
+  },
+};
+
+/**
+ * Build the writable battery settings of one model.
+ * @param {{ charge: number, discharge: number }} rating rated AC power (W)
+ * @returns {Array<object>} feature mappings
+ */
+function buildCommandFeatures(rating) {
+  return [
+    {
+      key: 'outputLimit',
+      name: 'Output power limit',
+      category: DEVICE_FEATURE_CATEGORIES.HOME_OUTPUT,
+      type: DEVICE_FEATURE_TYPES.HOME_OUTPUT.POWER_LIMIT,
+      unit: DEVICE_FEATURE_UNITS.WATT,
+      min: 0,
+      max: rating.discharge,
+      // Widened at discovery by what the device reports (maxPowerFor).
+      ratingDirection: 'discharge',
+      command: true,
+      metricPaths: ['outputLimit', 'properties.outputLimit'],
+    },
+    {
+      key: 'inputLimit',
+      name: 'Grid charge power limit',
+      category: DEVICE_FEATURE_CATEGORIES.BATTERY_STORAGE,
+      type: DEVICE_FEATURE_TYPES.BATTERY_STORAGE.GRID_CHARGE_POWER_LIMIT,
+      unit: DEVICE_FEATURE_UNITS.WATT,
+      min: 0,
+      max: rating.charge,
+      ratingDirection: 'charge',
+      command: true,
+      metricPaths: ['inputLimit', 'properties.inputLimit'],
+    },
+    {
+      key: 'socSet',
+      name: 'Target charge level',
+      category: DEVICE_FEATURE_CATEGORIES.BATTERY_STORAGE,
+      type: DEVICE_FEATURE_TYPES.BATTERY_STORAGE.TARGET_CHARGE_LIMIT,
+      unit: DEVICE_FEATURE_UNITS.PERCENT,
+      min: SOC_SET_RANGE.min,
+      max: SOC_SET_RANGE.max,
+      // Reported in percent or tenths of a percent depending on the firmware.
+      socScaled: true,
+      command: true,
+      metricPaths: ['socSet', 'properties.socSet'],
+    },
+    {
+      key: 'minSoc',
+      name: 'Discharge reserve',
+      category: DEVICE_FEATURE_CATEGORIES.BATTERY_STORAGE,
+      type: DEVICE_FEATURE_TYPES.BATTERY_STORAGE.TARGET_DISCHARGE_LIMIT,
+      unit: DEVICE_FEATURE_UNITS.PERCENT,
+      min: MIN_SOC_RANGE.min,
+      max: MIN_SOC_RANGE.max,
+      socScaled: true,
+      command: true,
+      metricPaths: ['minSoc', 'properties.minSoc'],
+    },
+    {
+      key: 'acMode',
+      name: 'AC mode',
+      category: DEVICE_FEATURE_CATEGORIES.BATTERY_STORAGE,
+      type: DEVICE_FEATURE_TYPES.BATTERY_STORAGE.MODE,
+      unit: null,
+      // The whole BATTERY_STORAGE_MODE range: the modes are a set, which ones
+      // Zendure offers is declared by `modes` (supported_options).
+      min: BATTERY_STORAGE_MODE.AUTO,
+      max: BATTERY_STORAGE_MODE.BACKUP,
+      modes: [BATTERY_STORAGE_MODE.CHARGE, BATTERY_STORAGE_MODE.DISCHARGE],
+      command: true,
+      metricPaths: ['acMode', 'properties.acMode'],
+    },
+  ];
+}
 
 /**
  * Build the baseline SolarFlow/Hyper features shared by every model: the five
@@ -244,6 +382,36 @@ export const FEATURE_NAMES = {
     de: 'Verbleibende Batterieenergie',
     es: 'Energía restante de la batería',
   },
+  outputLimit: {
+    en: 'Output power limit',
+    fr: 'Limite de puissance de sortie',
+    de: 'Ausgangsleistungsgrenze',
+    es: 'Límite de potencia de salida',
+  },
+  inputLimit: {
+    en: 'Grid charge power limit',
+    fr: 'Limite de puissance de charge réseau',
+    de: 'Netzladeleistungsgrenze',
+    es: 'Límite de potencia de carga desde la red',
+  },
+  socSet: {
+    en: 'Target charge level',
+    fr: 'Niveau de charge cible',
+    de: 'Ziel-Ladestand',
+    es: 'Nivel de carga objetivo',
+  },
+  minSoc: {
+    en: 'Discharge reserve',
+    fr: 'Réserve de décharge',
+    de: 'Entladereserve',
+    es: 'Reserva de descarga',
+  },
+  acMode: {
+    en: 'AC mode',
+    fr: 'Mode AC',
+    de: 'AC-Modus',
+    es: 'Modo AC',
+  },
 };
 
 /**
@@ -261,9 +429,29 @@ export function featureNameFor(featureMapping, language) {
 export const MODEL_FEATURES = Object.fromEntries(
   Object.entries(MODEL_MAX_POWER).map(([productModel, maxPower]) => [
     productModel,
-    buildBaselineFeatures(maxPower),
+    [
+      ...buildBaselineFeatures(maxPower),
+      ...buildCommandFeatures(MODEL_POWER_RATINGS[productModel]),
+    ],
   ]),
 );
+
+/**
+ * `supported_options` of a mode feature, labelled in the configured language.
+ * @param {{ modes?: number[] }} featureMapping
+ * @param {string} language `feature_names` option
+ * @returns {Array<{ value: number, label: string, sort_order: number }>|undefined}
+ */
+export function supportedOptionsFor(featureMapping, language) {
+  if (!featureMapping.modes) {
+    return undefined;
+  }
+  return featureMapping.modes.map((value, index) => ({
+    value,
+    label: BATTERY_MODE_LABELS[value][language] ?? BATTERY_MODE_LABELS[value].en,
+    sort_order: index,
+  }));
+}
 
 /**
  * Feature mappings for one product model (case-insensitive match).

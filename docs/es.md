@@ -5,7 +5,9 @@ La integración lee la telemetría (nivel de batería, potencias de carga y
 descarga, salida hacia la casa y producción solar) desde la nube de Zendure y
 — opcionalmente — directamente desde el **broker MQTT local** de cada
 dispositivo, para actualizaciones rápidas y resistentes sin conexión a
-internet, con respaldo automático en la nube. Los valores son de solo lectura.
+internet, con respaldo automático en la nube. Los ajustes de la batería
+(límites de salida y de carga desde la red, niveles de carga, modo AC) se
+controlan desde la tarjeta del dispositivo.
 
 ## Requisitos previos
 
@@ -23,7 +25,9 @@ de la comunidad).
 ## Funcionalidades
 
 Cada batería se crea con diez funcionalidades de solo lectura, en las
-categorías de energía de Gladys (gráficos de energía, historial, paneles):
+categorías de energía de Gladys (gráficos de energía, historial, paneles), más
+cinco ajustes de la batería que se cambian desde la tarjeta del dispositivo
+(vea [Control desde la tarjeta del dispositivo](#control-desde-la-tarjeta-del-dispositivo)):
 
 | Funcionalidad                  | Categoría de Gladys             | Unidad |
 | ------------------------------ | ------------------------------- | ------ |
@@ -56,7 +60,8 @@ la nueva definición: en la pestaña **Descubrir**, haga clic en **Actualizar**
 en la batería (marcada como **Ya añadido**). Las funcionalidades se actualizan
 en el mismo lugar, por lo que se conservan su historial, las escenas y los
 paneles. Ese mismo **Actualizar** añade las funcionalidades de energía a una
-batería creada antes de la versión 1.5.0.
+batería creada antes de la versión 1.5.0, y los ajustes de la batería a una
+batería creada antes de su llegada.
 
 ## Obtener su clave de la nube de Zendure
 
@@ -116,11 +121,50 @@ momento**:
 - **Inaccesible** (rojo) — la nube de Zendure indica que el dispositivo está
   desconectado, o no publica en ninguna fuente.
 
+## Control desde la tarjeta del dispositivo
+
+Los ajustes de la batería son funcionalidades de la batería: los cambia
+directamente desde su tarjeta en el panel, desde la página del dispositivo o
+desde una escena con la acción estándar **Controlar un dispositivo**:
+
+| Funcionalidad                            | Categoría Gladys          | Rango                       | Ajuste Zendure |
+| ---------------------------------------- | ------------------------- | --------------------------- | -------------- |
+| Límite de potencia de salida             | Salida del hogar          | 0 W a la salida del modelo  | `outputLimit`  |
+| Límite de potencia de carga desde la red | Almacenamiento en batería | 0 W a la entrada del modelo | `inputLimit`   |
+| Nivel de carga objetivo                  | Almacenamiento en batería | 70-100 %                    | `socSet`       |
+| Reserva de descarga                      | Almacenamiento en batería | 0-50 %                      | `minSoc`       |
+| Modo AC                                  | Almacenamiento en batería | Carga, Descarga             | `acMode`       |
+
+- El **límite de potencia de salida** limita la potencia que la batería entrega
+  al hogar, solar y batería juntos. El **límite de potencia de carga desde la
+  red** solo limita lo que toma de la red: la carga solar no queda limitada por
+  él. `0` significa cero (sin salida, sin carga desde la red), nunca
+  «ilimitado».
+- Los rangos son las potencias nominales del modelo (por ejemplo 800 W de
+  salida y 1000 W de entrada en una SolarFlow 800 Pro), ampliados cuando la
+  propia batería informa de límites más altos.
+- El **modo AC** solo ofrece **Carga** (entrada AC) y **Descarga** (salida AC):
+  elige el sentido del puerto AC, la potencia que circula realmente sigue
+  limitada por los dos límites y por el sol. Zendure no tiene modo automático,
+  reposo, tarifa horaria ni respaldo: Gladys los rechaza.
+- Se aplican las mismas protecciones que en las acciones de escena (potencia
+  nominal, modo smart, un cambio cada 3 s o 30 s, valores sin cambios no
+  reenviados). Un nivel de carga fuera de rango se lleva dentro del rango.
+- La tarjeta muestra el valor que la batería **informa**: el valor aplicado
+  justo después de un cambio, luego los informes de la batería. Un cambio
+  rechazado (demasiado pronto, niveles de carga aún no informados, modo no
+  admitido) falla con su motivo y la tarjeta vuelve al valor real de la
+  batería.
+
+Estas funcionalidades necesitan una versión de Gladys que conozca la categoría
+**Salida del hogar** y los ajustes del almacenamiento en batería. Una batería
+creada antes las recibe con **Actualizar** en la pestaña **Descubrir**, como
+las funcionalidades de energía de la versión 1.5.0.
+
 ## Control desde las escenas
 
-Gladys aún no tiene una funcionalidad de consigna para baterías: las baterías se
-controlan desde las **escenas** (y desde el widget del panel). En una escena,
-añada una acción de la categoría **Integraciones**.
+Las escenas también pueden controlar las baterías con acciones propias: en una
+escena, añada una acción de la categoría **Integraciones**.
 
 | Acción                           | Efecto                                                     |
 | -------------------------------- | ---------------------------------------------------------- |

@@ -1,9 +1,10 @@
 // -----------------------------------------------------------------------------
 // Battery control: the `properties/write` commands of the zenSDK contract.
 //
-// The Gladys feature taxonomy has no battery setpoint type yet (no output
-// limit, target SoC or AC mode in `battery-storage`), so control is offered
-// through scene actions and widget buttons rather than writable features.
+// One control path for every entry point: the writable features of the device
+// card (onSetValue, src/devices/solarflow.js), the scene actions
+// (src/scenes.js) and the widget forms (src/widgets.js) all build their
+// command here and send it through controlDevice.
 //
 // Safety rules (zenSDK docs, Zendure-HA practice):
 //   - power limits are written with `smartMode: 1`, which keeps them in RAM
@@ -15,31 +16,20 @@
 //   - the SoC scale is read from the device's own report: some firmwares
 //     report socSet / minSoc in tenths of a percent (1000 = 100 %).
 //
-// Attribution: the per-model charge / discharge ratings come from the official
-// Home Assistant integration Zendure/Zendure-HA (MIT License, (c) 2024
-// peteS-UK). Only those factual constants are reused; the code is our own.
+// The per-model ratings, SoC ranges and acMode values are protocol constants,
+// in src/zendure/constants.js (with their attribution).
 // -----------------------------------------------------------------------------
 
-import { SUPPORTED_PRODUCT_MODELS } from './constants.js';
+import {
+  AC_MODES,
+  DEFAULT_POWER_RATING,
+  MIN_SOC_RANGE,
+  MODEL_POWER_RATINGS,
+  SOC_SET_RANGE,
+} from './constants.js';
 import { extractMetricValue } from './deviceMapping.js';
 
-// Rated AC charge (input) and discharge (output) power per model, in watts.
-const MODEL_POWER_RATINGS = {
-  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_800]: { charge: 1000, discharge: 800 },
-  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_800_PRO]: { charge: 1000, discharge: 800 },
-  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_1600]: { charge: 1600, discharge: 1600 },
-  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_2400_AC]: { charge: 2400, discharge: 2400 },
-  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_2400]: { charge: 3200, discharge: 2400 },
-  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_2400_PRO]: { charge: 3200, discharge: 2400 },
-  [SUPPORTED_PRODUCT_MODELS.HYPER_2000]: { charge: 1200, discharge: 1200 },
-};
-
-// zenSDK ranges of the SoC settings, in percent.
-export const SOC_SET_RANGE = { min: 70, max: 100 };
-export const MIN_SOC_RANGE = { min: 0, max: 50 };
-
-// acMode values (zenSDK): 1 = AC input (charge from the grid), 2 = output.
-export const AC_MODES = { charge: 1, discharge: 2 };
+export { AC_MODES, MIN_SOC_RANGE, SOC_SET_RANGE };
 
 // Minimum delay between two writes of the same setting on one device.
 export const WRITE_INTERVALS_IN_MS = {
@@ -67,12 +57,11 @@ export function reportedValue(payload, property) {
  * @returns {number}
  */
 export function maxPowerFor(productModel, direction, payload) {
-  const rating =
-    MODEL_POWER_RATINGS[
-      String(productModel || '')
-        .toLowerCase()
-        .trim()
-    ]?.[direction] ?? 800;
+  const rating = (MODEL_POWER_RATINGS[
+    String(productModel || '')
+      .toLowerCase()
+      .trim()
+  ] ?? DEFAULT_POWER_RATING)[direction];
   const reported = reportedValue(
     payload,
     direction === 'discharge' ? 'inverseMaxPower' : 'chargeMaxLimit',
@@ -105,9 +94,16 @@ function toInteger(value, name) {
   return Math.round(number);
 }
 
+function clampIf(clamp, value, range) {
+  return clamp ? Math.min(range.max, Math.max(range.min, value)) : value;
+}
+
 /**
  * Turn a control command into the `properties/write` body, or null when the
  * device already runs with it (nothing to send).
+ * A `soc_limits` command with `clamp: true` brings an out-of-range level into
+ * the zenSDK range instead of refusing it (device card: the device stays the
+ * authority, the applied value is reported back).
  * @param {{ kind: 'output_limit'|'input_limit'|'ac_mode'|'soc_limits', [key: string]: unknown }} command
  * @param {{ productModel: string, payload: object }} device
  * @returns {{ setting: string, properties: Record<string, number>, applied: Record<string, number> }|null}
@@ -150,7 +146,7 @@ export function buildWriteCommand(command, { productModel, payload }) {
       const properties = {};
       const applied = {};
       if (command.max_soc !== undefined && command.max_soc !== null && command.max_soc !== '') {
-        const maxSoc = toInteger(command.max_soc, 'max_soc');
+        const maxSoc = clampIf(command.clamp, toInteger(command.max_soc, 'max_soc'), SOC_SET_RANGE);
         if (maxSoc < SOC_SET_RANGE.min || maxSoc > SOC_SET_RANGE.max) {
           throw new ControlRefusedError(
             `max_soc must be between ${SOC_SET_RANGE.min} and ${SOC_SET_RANGE.max} %`,
@@ -160,7 +156,7 @@ export function buildWriteCommand(command, { productModel, payload }) {
         applied.socSet = maxSoc;
       }
       if (command.min_soc !== undefined && command.min_soc !== null && command.min_soc !== '') {
-        const minSoc = toInteger(command.min_soc, 'min_soc');
+        const minSoc = clampIf(command.clamp, toInteger(command.min_soc, 'min_soc'), MIN_SOC_RANGE);
         if (minSoc < MIN_SOC_RANGE.min || minSoc > MIN_SOC_RANGE.max) {
           throw new ControlRefusedError(
             `min_soc must be between ${MIN_SOC_RANGE.min} and ${MIN_SOC_RANGE.max} %`,
@@ -171,6 +167,14 @@ export function buildWriteCommand(command, { productModel, payload }) {
       }
       if (Object.keys(properties).length === 0) {
         throw new ControlRefusedError('set max_soc, min_soc or both');
+      }
+      // Levels the device already runs with are not rewritten (they may reach
+      // the flash).
+      const unchanged = Object.entries(properties).every(
+        ([property, value]) => reportedValue(payload, property) === value,
+      );
+      if (unchanged) {
+        return null;
       }
       return { setting: 'soc', properties, applied };
     }

@@ -65,6 +65,10 @@ before(async () => {
     const blueprint = findBlueprintByDevice(gladys, device);
     await blueprint.onPoll(gladys, config, device);
   });
+  gladys.onSetValue(async (device, feature, value) => {
+    const blueprint = findBlueprintByDevice(gladys, device);
+    await blueprint.onSetValue(gladys, { device, feature, value, config });
+  });
   gladys.on('connected', async () => {
     config = normalizeConfig(await gladys.getConfig());
     if (await syncDiscoveredDevices(gladys, config)) {
@@ -107,10 +111,20 @@ test('discovery publishes the SolarFlow device to the core', async () => {
   // frequencies: 30 s from the config, snapped to milliseconds.
   assert.equal(discoveredDevice.should_poll, true);
   assert.equal(discoveredDevice.poll_frequency, 30000);
-  assert.equal(discoveredDevice.features.length, 10);
+  // Ten measurements, then five writable settings.
+  assert.equal(discoveredDevice.features.length, 15);
   assert.equal(discoveredDevice.selector, 'zendure-solarflow-abc123');
+  assert.deepEqual(
+    discoveredDevice.features.filter((feature) => !feature.read_only).map((f) => f.type),
+    [
+      'power-limit',
+      'grid-charge-power-limit',
+      'target-charge-limit',
+      'target-discharge-limit',
+      'mode',
+    ],
+  );
   for (const feature of discoveredDevice.features) {
-    assert.equal(feature.read_only, true);
     assert.ok(feature.external_id.startsWith(discoveredDevice.external_id));
     assert.ok(feature.selector.startsWith(discoveredDevice.selector));
   }
@@ -178,4 +192,42 @@ test('an MQTT report is pushed to the core in real time', async () => {
   const prefix = discoveredDevice.external_id;
   assert.equal(byId[`${prefix}:batteryLevel`], 81);
   assert.equal(byId[`${prefix}:homeOutputPower`], 250);
+});
+
+test('a device card command is written to the battery and acked to the core', async () => {
+  const client = await waitFor(() => mqttLibrary.clients[0]);
+  const feature = discoveredDevice.features.find((f) => f.type === 'power-limit');
+  core.state.states.length = 0;
+
+  core.send('external-integration.device.set-value', {
+    message_id: 'set-1',
+    device: discoveredDevice,
+    device_feature: feature,
+    value: 450,
+  });
+
+  const ack = await waitFor(() => core.state.commandResults.find((r) => r.message_id === 'set-1'));
+  assert.equal(ack.success, true);
+  const write = client.published.find((p) => p.topic.endsWith('/properties/write'));
+  assert.deepEqual(JSON.parse(write.payload).properties, { smartMode: 1, outputLimit: 450 });
+  // The applied value comes back as the feature state.
+  await waitFor(() => core.state.states.length >= 1, { timeout: 6000 });
+  assert.deepEqual(core.state.states.at(-1), {
+    device_feature_external_id: feature.external_id,
+    state: 450,
+  });
+
+  // A mode Zendure does not have fails the command, with its reason.
+  const mode = discoveredDevice.features.find((f) => f.type === 'mode');
+  core.send('external-integration.device.set-value', {
+    message_id: 'set-2',
+    device: discoveredDevice,
+    device_feature: mode,
+    value: 3,
+  });
+  const refused = await waitFor(() =>
+    core.state.commandResults.find((r) => r.message_id === 'set-2'),
+  );
+  assert.equal(refused.success, false);
+  assert.match(refused.error, /charge or discharge only/);
 });

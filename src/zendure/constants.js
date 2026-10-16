@@ -49,3 +49,40 @@ export const SUPPORTED_PRODUCT_MODELS = {
   // this on real hardware, so treat its telemetry mapping as best-effort.
   HYPER_2000: 'hyper 2000',
 };
+
+// Rated AC charge (input) and discharge (output) power per model, in watts.
+// They bound the control writes (src/zendure/control.js) and are the range of
+// the writable power-limit features (src/zendure/deviceMapping.js).
+// Attribution: derived from Zendure/Zendure-HA (MIT License, (c) 2024
+// peteS-UK); only the factual constants are reused.
+export const MODEL_POWER_RATINGS = {
+  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_800]: { charge: 1000, discharge: 800 },
+  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_800_PRO]: { charge: 1000, discharge: 800 },
+  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_1600]: { charge: 1600, discharge: 1600 },
+  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_2400_AC]: { charge: 2400, discharge: 2400 },
+  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_2400]: { charge: 3200, discharge: 2400 },
+  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_2400_PRO]: { charge: 3200, discharge: 2400 },
+  [SUPPORTED_PRODUCT_MODELS.HYPER_2000]: { charge: 1200, discharge: 1200 },
+};
+
+// Rating used for a model missing from the table above.
+export const DEFAULT_POWER_RATING = { charge: 800, discharge: 800 };
+
+// zenSDK ranges of the SoC settings, in percent.
+export const SOC_SET_RANGE = { min: 70, max: 100 };
+export const MIN_SOC_RANGE = { min: 0, max: 50 };
+
+// acMode values (zenSDK): 1 = AC input (charge from the grid), 2 = output.
+export const AC_MODES = { charge: 1, discharge: 2 };
+
+// Operating modes of a stationary battery, mirrored from the Gladys core
+// (BATTERY_STORAGE_MODE in server/utils/constants.js, append-only there): the
+// value of a battery-storage `mode` feature. The SDK does not export this enum.
+export const BATTERY_STORAGE_MODE = {
+  AUTO: 0,
+  CHARGE: 1,
+  DISCHARGE: 2,
+  STANDBY: 3,
+  TIME_OF_USE: 4,
+  BACKUP: 5,
+};

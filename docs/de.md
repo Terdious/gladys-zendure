@@ -5,7 +5,8 @@ Assistant. Die Integration liest die Telemetrie (Batteriestand, Lade- und
 Entladeleistung, Ausgangsleistung ins Haus und Solarproduktion) aus der
 Zendure-Cloud und — optional — direkt vom **lokalen MQTT-Broker** jedes Geräts,
 für schnelle, auch ohne Internet stabile Updates mit automatischem Rückfall auf
-die Cloud. Die Werte sind nur lesbar.
+die Cloud. Die Batterieeinstellungen (Ausgangs- und Netzladegrenze,
+Ladestände, AC-Modus) steuerst du über die Gerätekarte.
 
 ## Voraussetzungen
 
@@ -23,7 +24,9 @@ werden).
 ## Funktionen
 
 Jede Batterie wird mit zehn nur lesbaren Funktionen angelegt, in den
-Energiekategorien von Gladys (Energiediagramme, Verlauf, Dashboards):
+Energiekategorien von Gladys (Energiediagramme, Verlauf, Dashboards), dazu fünf
+Batterieeinstellungen, die du auf der Gerätekarte änderst (siehe
+[Steuerung über die Gerätekarte](#steuerung-über-die-gerätekarte)):
 
 | Funktion                     | Gladys-Kategorie         | Einheit |
 | ---------------------------- | ------------------------ | ------- |
@@ -56,7 +59,8 @@ die neue Definition übernimmst: Klicke im Tab **Entdecken** bei der Batterie
 (markiert mit **Bereits hinzugefügt**) auf **Aktualisieren**. Die Funktionen
 werden an Ort und Stelle aktualisiert, ihr Verlauf, deine Szenen und Dashboards
 bleiben erhalten. Dasselbe **Aktualisieren** fügt einer vor Version 1.5.0
-angelegten Batterie die Energie-Funktionen hinzu.
+angelegten Batterie die Energie-Funktionen hinzu, und einer Batterie, die vor
+ihrer Einführung angelegt wurde, die Batterieeinstellungen.
 
 ## Deinen Zendure-Cloud-Schlüssel erhalten
 
@@ -117,11 +121,52 @@ Jedes Gerät zeigt ein Abzeichen, das angibt, **wie es gerade erreicht wird**:
 - **Nicht erreichbar** (rot) — die Zendure-Cloud meldet das Gerät offline, oder
   es schweigt auf allen Quellen.
 
+## Steuerung über die Gerätekarte
+
+Die Batterieeinstellungen sind Funktionen der Batterie: Du änderst sie direkt
+auf ihrer Karte im Dashboard, auf der Geräteseite oder in einer Szene mit der
+Standardaktion **Gerät steuern**:
+
+| Funktion                | Gladys-Kategorie | Bereich                   | Zendure-Einstellung |
+| ----------------------- | ---------------- | ------------------------- | ------------------- |
+| Ausgangsleistungsgrenze | Hausausgang      | 0 W bis zum Modellausgang | `outputLimit`       |
+| Netzladeleistungsgrenze | Batteriespeicher | 0 W bis zum Modelleingang | `inputLimit`        |
+| Ziel-Ladestand          | Batteriespeicher | 70-100 %                  | `socSet`            |
+| Entladereserve          | Batteriespeicher | 0-50 %                    | `minSoc`            |
+| AC-Modus                | Batteriespeicher | Laden, Entladen           | `acMode`            |
+
+- Die **Ausgangsleistungsgrenze** begrenzt die Leistung, die die Batterie an
+  das Haus abgibt, Solar und Batterie zusammen. Die **Netzladeleistungsgrenze**
+  begrenzt nur, was sie aus dem Netz bezieht: Das Laden über Solar wird davon
+  nicht begrenzt. `0` heißt null (keine Abgabe, kein Laden aus dem Netz), nie
+  „unbegrenzt“.
+- Die Bereiche sind die Nennleistungen des Modells (z. B. 800 W Ausgang und
+  1000 W Eingang bei einer SolarFlow 800 Pro), erweitert, wenn die Batterie
+  selbst höhere Grenzen meldet.
+- Der **AC-Modus** bietet nur **Laden** (AC-Eingang) und **Entladen**
+  (AC-Ausgang): Er wählt die Richtung des AC-Anschlusses, die tatsächlich
+  fließende Leistung bleibt durch die beiden Grenzen und die Sonne begrenzt.
+  Zendure hat keinen Auto-, Standby-, Zeittarif- oder Notstrommodus: Gladys
+  lehnt sie ab.
+- Es gelten dieselben Schutzmechanismen wie bei den Szenenaktionen
+  (Nennleistung, Smart-Modus, eine Änderung alle 3 s bzw. 30 s, unveränderte
+  Werte werden nicht erneut gesendet). Ein Ladestand außerhalb des Bereichs
+  wird in den Bereich gebracht.
+- Die Karte zeigt den Wert, den die Batterie **meldet**: direkt nach einer
+  Änderung den angewendeten Wert, danach die Meldungen der Batterie. Eine
+  abgelehnte Änderung (zu früh, Ladestände noch nicht gemeldet, nicht
+  unterstützter Modus) schlägt mit ihrem Grund fehl, und die Karte kehrt zum
+  tatsächlichen Wert der Batterie zurück.
+
+Diese Funktionen brauchen eine Gladys-Version, die die Kategorie
+**Hausausgang** und die Einstellungen des Batteriespeichers kennt. Eine vorher
+erstellte Batterie erhält sie mit **Aktualisieren** im Tab **Entdecken**, wie
+die Energie-Funktionen der Version 1.5.0.
+
 ## Steuerung über Szenen
 
-Gladys hat noch keine Sollwert-Funktion für Batterien: Die Batterien werden
-über **Szenen** gesteuert (und über das Dashboard-Widget). Füge in einer Szene
-eine Aktion der Kategorie **Integrationen** hinzu.
+Szenen können die Batterien auch mit eigenen Aktionen steuern: Füge in einer
+Szene eine Aktion der Kategorie **Integrationen** hinzu.
 
 | Aktion                   | Wirkung                                            |
 | ------------------------ | -------------------------------------------------- |

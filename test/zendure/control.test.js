@@ -98,3 +98,26 @@ test('the write throttle is per device and per setting', () => {
   throttle.check('other', 'acMode', now + 1000);
   throttle.check('dev', 'acMode', now + WRITE_INTERVALS_IN_MS.acMode);
 });
+
+test('with clamp, an out-of-range SoC level is brought into the zenSDK range', () => {
+  const device = { productModel: SF800_PRO, payload: { properties: { socSet: 1000 } } };
+  assert.deepEqual(buildWriteCommand({ kind: 'soc_limits', max_soc: 60, clamp: true }, device), {
+    setting: 'soc',
+    properties: { socSet: 700 },
+    applied: { socSet: 70 },
+  });
+  assert.deepEqual(
+    buildWriteCommand({ kind: 'soc_limits', min_soc: 80, clamp: true }, device).applied,
+    { minSoc: 50 },
+  );
+});
+
+test('SoC levels the battery already runs with are not rewritten', () => {
+  const device = { productModel: SF800_PRO, payload: { socSet: 900, minSoc: 100 } };
+  assert.equal(buildWriteCommand({ kind: 'soc_limits', max_soc: 90 }, device), null);
+  assert.equal(buildWriteCommand({ kind: 'soc_limits', max_soc: 90, min_soc: 10 }, device), null);
+  assert.deepEqual(
+    buildWriteCommand({ kind: 'soc_limits', max_soc: 90, min_soc: 20 }, device).properties,
+    { socSet: 900, minSoc: 200 },
+  );
+});

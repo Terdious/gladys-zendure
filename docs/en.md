@@ -1,10 +1,11 @@
 # Zendure for Gladys Assistant
 
 Connect your **Zendure SolarFlow / Hyper** solar batteries to Gladys Assistant.
-Gathers read-only telemetry (battery level, charge/discharge power, home output
-and solar production) from the Zendure cloud, and — optionally — directly from
+Gathers the telemetry (battery level, charge/discharge power, home output and
+solar production) from the Zendure cloud, and — optionally — directly from
 each device's **local MQTT broker** for LAN-speed, offline-resilient updates
-with automatic cloud fallback.
+with automatic cloud fallback. The battery settings (output and grid charge
+limits, charge levels, AC mode) are controlled from the device card.
 
 ## Prerequisites
 
@@ -21,7 +22,9 @@ mapping to be confirmed by a community tester).
 ## Features
 
 Each battery is created with ten read-only features, in the Gladys energy
-categories (energy charts, history, dashboards):
+categories (energy charts, history, dashboards), plus five battery settings you
+change from the device card (see
+[Control from the device card](#control-from-the-device-card)):
 
 | Feature                   | Gladys category          | Unit |
 | ------------------------- | ------------------------ | ---- |
@@ -52,7 +55,8 @@ previous categories until you apply the new definition: in the **Discover**
 tab, click **Update** on the battery (marked **Already added**). The features
 are updated in place, so their history, scenes and dashboards are kept. The
 same **Update** adds the energy features to a battery created before version
-1.5.0.
+1.5.0, and the battery settings to a battery created before they were
+available.
 
 ## Getting your Zendure cloud key
 
@@ -106,11 +110,46 @@ Each device shows a badge telling you **how it is currently reached**:
 - **Unreachable** (red) — the Zendure cloud reports the device offline, or it is
   silent on every source.
 
+## Control from the device card
+
+The battery settings are features of the battery, so you change them straight
+from its card on the dashboard, from the device page, or from a scene with the
+standard **Control a device** action:
+
+| Feature                 | Gladys category | Range                     | Zendure setting |
+| ----------------------- | --------------- | ------------------------- | --------------- |
+| Output power limit      | Home output     | 0 W to the model's output | `outputLimit`   |
+| Grid charge power limit | Battery storage | 0 W to the model's input  | `inputLimit`    |
+| Target charge level     | Battery storage | 70-100 %                  | `socSet`        |
+| Discharge reserve       | Battery storage | 0-50 %                    | `minSoc`        |
+| AC mode                 | Battery storage | Charge, Discharge         | `acMode`        |
+
+- The **output power limit** bounds the power the battery delivers to the home,
+  solar and battery together. The **grid charge power limit** bounds only what
+  it draws from the grid: solar charging is not limited by it. `0` means zero
+  (no output, no grid charging), never "unlimited".
+- The ranges are the model's ratings (e.g. 800 W out and 1000 W in on a
+  SolarFlow 800 Pro), widened when the battery reports higher limits itself.
+- The **AC mode** offers only **Charge** (AC input) and **Discharge** (AC
+  output): it selects the direction of the AC port, the power actually flowing
+  stays bounded by the two limits and by the sun. Zendure has no auto, standby,
+  time-of-use or backup mode: Gladys refuses them.
+- The same protections as the scene actions apply (rating, smart mode, one
+  change every 3 s or 30 s, unchanged values not sent again). A charge level
+  outside the range is brought into it.
+- The card shows the value the battery **reports**: the value applied right
+  after a change, then the battery's own reports. A refused change (too soon,
+  charge levels not reported yet, unsupported mode) fails with its reason and
+  the card goes back to the battery's real value.
+
+These features need a Gladys version that knows the **Home output** category
+and the battery storage settings. A battery created before them gets them with
+**Update** in the **Discover** tab, like the energy features of version 1.5.0.
+
 ## Control from scenes
 
-Gladys has no battery setpoint feature yet, so the batteries are controlled
-from **scenes** (and from the dashboard widget): in a scene, add an action of
-the **Integrations** category.
+Scenes can also drive the batteries with dedicated actions: in a scene, add an
+action of the **Integrations** category.
 
 | Action                    | What it does                                                 |
 | ------------------------- | ------------------------------------------------------------ |

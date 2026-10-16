@@ -24,6 +24,7 @@ import {
 } from '../src/devices/solarflow.js';
 import { normalizeConfig } from '../src/config.js';
 import { createFakeGladys } from './helpers/fakeGladys.js';
+import { createFakeGladys as createSdkFakeGladys } from '@gladysassistant/integration-sdk/testing';
 import {
   createFakeZendureFetch,
   createFakeMqttLibrary,
@@ -38,6 +39,8 @@ import {
 
 const CLOUD_BROKER_URL = 'mqtt://broker.zendure.example:1883';
 const LOCAL_BROKER_URL = 'mqtt://192.168.1.50:1883';
+
+const COMMAND_KEYS = ['outputLimit', 'inputLimit', 'socSet', 'minSoc', 'acMode'];
 
 const gladys = createFakeGladys();
 const config = normalizeConfig({ cloud_key: FAKE_CLOUD_KEY, poll_frequency: 30 });
@@ -77,12 +80,14 @@ test('buildDiscoveredDevices returns one payload per supported Zendure device', 
   // frequencies: 30 s from the config, snapped to milliseconds.
   assert.equal(device.should_poll, true);
   assert.equal(device.poll_frequency, 30000);
-  assert.equal(device.features.length, 10);
+  // Ten measurements, then five writable settings.
+  assert.equal(device.features.length, 15);
   // The device carries an explicit, globally-unique selector, and every
   // feature selector is composed with it.
   assert.equal(device.selector, 'zendure-solarflow-abc123');
   for (const feature of device.features) {
-    assert.equal(feature.read_only, true);
+    assert.equal(feature.read_only, !COMMAND_KEYS.includes(feature.external_id.split(':').pop()));
+    assert.equal(feature.has_feedback, !feature.read_only);
     assert.ok(feature.external_id.startsWith(device.external_id));
     assert.ok(feature.selector.startsWith(device.selector), 'feature selector is device-scoped');
   }
@@ -119,7 +124,7 @@ test('discovers a newly-supported model (SolarFlow 2400) with the baseline featu
   );
   assert.ok(sf2400, 'the SolarFlow 2400 device is discovered');
   assert.equal(sf2400.name, 'Attic battery');
-  assert.equal(sf2400.features.length, 10);
+  assert.equal(sf2400.features.length, 15);
   assert.equal(sf2400.selector, 'zendure-solarflow-sf2400a');
   assert.equal(sf2400.features[0].selector, 'zendure-solarflow-sf2400a-battery-level');
 
@@ -887,6 +892,252 @@ test('controlDevice refuses an unknown battery and sends nothing when already ap
   });
   assert.deepEqual(result, { sent: false, applied: {} });
   assert.equal(client.published.filter((p) => p.topic.endsWith('/properties/write')).length, 0);
+});
+
+// --- Device card control (writable settings) ----------------------------------
+
+/** A discovered SolarFlow 800 Pro on the cloud broker, with command helpers. */
+async function setupBattery({ deviceList } = {}) {
+  const localGladys = createFakeGladys();
+  const mqttLibrary = createFakeMqttLibrary();
+  setSolarflowDependencies({
+    mqttLibrary,
+    ...(deviceList ? { fetchImpl: createFakeZendureFetch({ deviceList }) } : {}),
+  });
+  const [device] = await buildDiscoveredDevices(localGladys, config);
+  await solarflow.onPoll(localGladys, config, device); // connects the cloud broker
+  const client = mqttLibrary.clients[0];
+  const featureOf = (key) =>
+    device.features.find((feature) => feature.external_id === `${device.external_id}:${key}`);
+  return {
+    gladys: localGladys,
+    device,
+    featureOf,
+    report(properties) {
+      client.emit(
+        'message',
+        `iot/${FAKE_SOLARFLOW_DEVICE.productKey}/${FAKE_SOLARFLOW_DEVICE.deviceKey}/properties/report`,
+        Buffer.from(JSON.stringify({ properties })),
+      );
+    },
+    setValue(key, value, feature = featureOf(key)) {
+      return solarflow.onSetValue(localGladys, { device, feature, value, config });
+    },
+    writes() {
+      return client.published
+        .filter((p) => p.topic.endsWith('/properties/write'))
+        .map((p) => JSON.parse(p.payload).properties);
+    },
+    async publishedOf(key) {
+      await flushStatesNow(localGladys);
+      return localGladys.published
+        .filter((s) => s.featureExternalId === `${device.external_id}:${key}`)
+        .map((s) => s.state);
+    },
+  };
+}
+
+test('discovery declares the battery settings as writable features with feedback', async () => {
+  const { device, featureOf } = await setupBattery();
+
+  const outputLimit = featureOf('outputLimit');
+  assert.equal(outputLimit.category, 'home-output');
+  assert.equal(outputLimit.type, 'power-limit');
+  assert.equal(outputLimit.unit, 'watt');
+  assert.deepEqual([outputLimit.min, outputLimit.max], [0, 800]);
+  assert.equal(outputLimit.read_only, false);
+  assert.equal(outputLimit.has_feedback, true);
+  assert.equal(outputLimit.selector, 'zendure-solarflow-abc123-output-limit');
+  assert.equal(outputLimit.name, 'Output power limit');
+
+  const inputLimit = featureOf('inputLimit');
+  assert.deepEqual(
+    [inputLimit.category, inputLimit.type, inputLimit.min, inputLimit.max],
+    ['battery-storage', 'grid-charge-power-limit', 0, 1000],
+  );
+  assert.deepEqual(
+    [featureOf('socSet').type, featureOf('socSet').min, featureOf('socSet').max],
+    ['target-charge-limit', 70, 100],
+  );
+  assert.deepEqual(
+    [featureOf('minSoc').type, featureOf('minSoc').min, featureOf('minSoc').max],
+    ['target-discharge-limit', 0, 50],
+  );
+  const mode = featureOf('acMode');
+  assert.equal(mode.type, 'mode');
+  assert.equal(mode.unit, null);
+  assert.deepEqual(mode.supported_options, [
+    { value: 1, label: 'Charge', sort_order: 0 },
+    { value: 2, label: 'Discharge', sort_order: 1 },
+  ]);
+  // Only the mode carries options; the measurements stay read-only.
+  assert.equal(device.features.filter((f) => f.supported_options).length, 1);
+  assert.equal(featureOf('batteryLevel').read_only, true);
+  assert.equal(featureOf('batteryLevel').has_feedback, false);
+});
+
+test('the power limit range is widened by the maximum the battery reports', async () => {
+  const { featureOf } = await setupBattery({
+    deviceList: [{ ...FAKE_SOLARFLOW_DEVICE, inverseMaxPower: 1200, chargeMaxLimit: 600 }],
+  });
+  assert.equal(featureOf('outputLimit').max, 1200);
+  // A lower report never narrows the rating.
+  assert.equal(featureOf('inputLimit').max, 1000);
+});
+
+test('mode labels follow the feature_names option', async () => {
+  const [device] = await buildDiscoveredDevices(gladys, { ...config, feature_names: 'fr' });
+  const mode = device.features.find((f) => f.type === 'mode');
+  assert.equal(mode.name, 'Mode AC');
+  assert.deepEqual(
+    mode.supported_options.map((option) => option.label),
+    ['Charge', 'Décharge'],
+  );
+});
+
+test('the settings states come from the telemetry (SoC scale, mode)', async () => {
+  const battery = await setupBattery();
+  battery.report({ outputLimit: 600, inputLimit: 400, socSet: 1000, minSoc: 100, acMode: 2 });
+  await solarflow.onPoll(battery.gladys, config, battery.device);
+
+  assert.deepEqual(await battery.publishedOf('outputLimit'), [600]);
+  assert.deepEqual(await battery.publishedOf('inputLimit'), [400]);
+  // Tenths of a percent on this firmware: 1000 -> 100 %, 100 -> 10 %.
+  assert.deepEqual(await battery.publishedOf('socSet'), [100]);
+  assert.deepEqual(await battery.publishedOf('minSoc'), [10]);
+  assert.deepEqual(await battery.publishedOf('acMode'), [2]);
+
+  // Percent firmware, and an acMode outside the zenSDK contract.
+  battery.report({ socSet: 90, minSoc: 20, acMode: 0 });
+  await solarflow.onPoll(battery.gladys, config, battery.device);
+  assert.deepEqual(await battery.publishedOf('socSet'), [100, 90]);
+  assert.deepEqual(await battery.publishedOf('minSoc'), [10, 20]);
+  assert.deepEqual(await battery.publishedOf('acMode'), [2]);
+});
+
+test('a SoC level is not published before the battery reports its scale', async () => {
+  const battery = await setupBattery();
+  battery.report({ minSoc: 100 });
+  await solarflow.onPoll(battery.gladys, config, battery.device);
+  assert.deepEqual(await battery.publishedOf('minSoc'), []);
+});
+
+test('onSetValue clamps the output limit, writes it in smart mode and reports it back', async () => {
+  const battery = await setupBattery();
+  await battery.setValue('outputLimit', 5000);
+  assert.deepEqual(battery.writes(), [{ smartMode: 1, outputLimit: 800 }]);
+  assert.deepEqual(await battery.publishedOf('outputLimit'), [800]);
+
+  await battery.setValue('inputLimit', '350');
+  assert.deepEqual(battery.writes().at(-1), { smartMode: 1, inputLimit: 350 });
+  assert.deepEqual(await battery.publishedOf('inputLimit'), [350]);
+});
+
+test('onSetValue refuses a write within the throttle and re-publishes the real value', async () => {
+  const battery = await setupBattery();
+  battery.report({ outputLimit: 300 });
+  await battery.setValue('outputLimit', 500);
+  assert.deepEqual(await battery.publishedOf('outputLimit'), [500]);
+
+  await assert.rejects(battery.setValue('outputLimit', 600), /retry in \d+ s/);
+  assert.equal(battery.writes().length, 1);
+  // The battery still reports 300: that is what the card shows again.
+  assert.deepEqual(await battery.publishedOf('outputLimit'), [500, 300]);
+});
+
+test('onSetValue sends nothing for a value already applied, and re-publishes it', async () => {
+  const battery = await setupBattery();
+  battery.report({ outputLimit: 400 });
+  await solarflow.onPoll(battery.gladys, config, battery.device);
+  assert.deepEqual(await battery.publishedOf('outputLimit'), [400]);
+
+  await battery.setValue('outputLimit', 403); // within the 5 W tolerance
+  assert.deepEqual(battery.writes(), []);
+  // Unchanged, but sent again: the card may show the value the user tried.
+  assert.deepEqual(await battery.publishedOf('outputLimit'), [400, 400]);
+});
+
+test('onSetValue converts and clamps the SoC levels to the battery scale', async () => {
+  const battery = await setupBattery();
+  await assert.rejects(battery.setValue('socSet', 95), /not reported its SoC settings/);
+
+  battery.report({ socSet: 1000, minSoc: 100 });
+  await battery.setValue('socSet', 95);
+  assert.deepEqual(battery.writes(), [{ socSet: 950 }]);
+  assert.deepEqual(await battery.publishedOf('socSet'), [95]);
+
+  // The SoC levels share one 30 s throttle (one `soc` setting).
+  await assert.rejects(battery.setValue('minSoc', 80), /retry in \d+ s/);
+  resetSolarflowRuntime();
+  const other = await setupBattery();
+  other.report({ socSet: 1000, minSoc: 100 });
+  await other.setValue('minSoc', 80); // above the 50 % zenSDK maximum
+  assert.deepEqual(other.writes(), [{ minSoc: 500 }]);
+  assert.deepEqual(await other.publishedOf('minSoc'), [50]);
+});
+
+test('onSetValue maps the battery mode to acMode and refuses the modes Zendure lacks', async () => {
+  const battery = await setupBattery();
+  battery.report({ acMode: 2 });
+  await battery.setValue('acMode', 1); // CHARGE
+  assert.deepEqual(battery.writes(), [{ acMode: 1 }]);
+  assert.deepEqual(await battery.publishedOf('acMode'), [1]);
+
+  for (const mode of [0, 3, 4, 5, 'auto']) {
+    await assert.rejects(battery.setValue('acMode', mode), /charge or discharge only/);
+  }
+  assert.equal(battery.writes().length, 1);
+  // Each refusal re-publishes the reported mode (still 2 until the next report).
+  assert.equal((await battery.publishedOf('acMode')).at(-1), 2);
+});
+
+test('onSetValue rejects a feature that is not a Zendure setting', async () => {
+  const battery = await setupBattery();
+  await assert.rejects(battery.setValue('batteryLevel', 50), /not a writable Zendure setting/);
+  await assert.rejects(
+    battery.setValue('outputLimit', 1, { external_id: `${battery.device.external_id}:toString` }),
+    /not a writable Zendure setting/,
+  );
+  await assert.rejects(
+    battery.setValue('outputLimit', 100, {
+      external_id: 'solarflow:XyZ789:outputLimit',
+    }),
+    /not a writable Zendure setting/,
+  );
+  await assert.rejects(battery.setValue('outputLimit', 100, null), /not a writable/);
+  assert.deepEqual(battery.writes(), []);
+});
+
+test('onSetValue fails cleanly on a battery missing from the account', async () => {
+  const battery = await setupBattery();
+  await assert.rejects(
+    solarflow.onSetValue(battery.gladys, {
+      device: { external_id: 'solarflow:nope' },
+      feature: { external_id: 'solarflow:nope:outputLimit' },
+      value: 100,
+      config,
+    }),
+    /unknown Zendure battery/,
+  );
+});
+
+test('a device created or updated in Gladys gets its unchanged values again', async () => {
+  const battery = await setupBattery();
+  battery.report({ outputLimit: 400 });
+  await solarflow.onPoll(battery.gladys, config, battery.device);
+  await solarflow.onPoll(battery.gladys, config, battery.device);
+  assert.deepEqual(await battery.publishedOf('outputLimit'), [400]); // deduplicated
+
+  solarflow.forgetPublishedDevice(battery.device);
+  await solarflow.onPoll(battery.gladys, config, battery.device);
+  assert.deepEqual(await battery.publishedOf('outputLimit'), [400, 400]);
+});
+
+test('the discovered devices pass the SDK fake Gladys validation', async () => {
+  const sdkGladys = createSdkFakeGladys();
+  const devices = await buildDiscoveredDevices(sdkGladys, config);
+  const result = await sdkGladys.publishDiscoveredDevices(devices);
+  assert.equal(result.count, 1);
 });
 
 // --- Telemetry watchdog summary (pure helper) ---------------------------------
