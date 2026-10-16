@@ -426,6 +426,11 @@ function createBaseMqttRuntime({
         username: mqttConfiguration.username,
         password: mqttConfiguration.password,
         reconnectPeriod: 5000,
+        // mqtt >= 5.16 gives up for good on a refused CONNACK unless told
+        // otherwise. The Zendure cloud refuses a session another consumer of
+        // the account holds, and brokers refuse while restarting: keep
+        // retrying, telemetry resumes on its own once the broker accepts.
+        reconnectOnConnackError: true,
         connectTimeout: 10000,
         clean: true,
       });

@@ -145,6 +145,8 @@ test('connect opens the broker connection with normalized URL and credentials', 
   assert.equal(client.options.username, 'user');
   assert.equal(client.options.password, 'pass');
   assert.equal(client.options.clientId, 'test-client');
+  // A refused CONNACK must not end the reconnection loop (mqtt >= 5.16).
+  assert.equal(client.options.reconnectOnConnackError, true);
   assert.equal(runtime.connected, true);
 });
 
