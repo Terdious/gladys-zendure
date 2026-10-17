@@ -34,11 +34,23 @@ export const REPORT_INTROS = {
 };
 
 export const DEVICE_REQUIRED_MESSAGE = {
-  en: 'Type the name or the serial number of a battery.',
-  fr: "Saisissez le nom ou le numéro de série d'une batterie.",
-  de: 'Gib den Namen oder die Seriennummer einer Batterie ein.',
-  es: 'Escriba el nombre o el número de serie de una batería.',
+  en: 'Pick a battery in the list, or type the name or the serial number of a battery.',
+  fr: "Choisissez une batterie dans la liste, ou saisissez le nom ou le numéro de série d'une batterie.",
+  de: 'Wähle eine Batterie in der Liste, oder gib den Namen oder die Seriennummer einer Batterie ein.',
+  es: 'Elija una batería en la lista, o escriba el nombre o el número de serie de una batería.',
 };
+
+/**
+ * The battery an action designates: the one picked in the list (`device`,
+ * the external id of a battery created in Gladys) wins over the free text
+ * (`device_ref`: name or serial, for a battery not created in Gladys).
+ * @param {object} fields action fields
+ * @returns {string} the reference, '' when none
+ */
+export function referenceOf(fields) {
+  const picked = String(fields.device ?? '').trim();
+  return picked !== '' ? picked : String(fields.device_ref ?? '').trim();
+}
 
 /** A form boolean: true, or "true" / "1" / "yes" / "on". */
 function isChecked(value) {
@@ -65,7 +77,7 @@ function withIntro(report, includeIdentifiers) {
 export const ACTIONS = {
   async fleet_diagnostic(gladys, { fields = {}, config }) {
     const includeIdentifiers = isChecked(fields.include_identifiers);
-    const filter = String(fields.device ?? '').trim();
+    const filter = referenceOf(fields);
     logger.info(
       `Action fleet_diagnostic <- ${filter ? 'one battery filter' : 'every battery'}, ` +
         `identifiers ${includeIdentifiers ? 'shown' : 'masked'}`,
@@ -81,7 +93,7 @@ export const ACTIONS = {
   },
 
   async test_local_api(gladys, { fields = {}, config }) {
-    const reference = String(fields.device ?? '').trim();
+    const reference = referenceOf(fields);
     if (reference === '') {
       throw new Error(DEVICE_REQUIRED_MESSAGE.en);
     }

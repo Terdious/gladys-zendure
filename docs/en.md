@@ -293,8 +293,9 @@ Neither writes to a battery nor changes its transport.
   serving it and why, the age of its last data on each source, its local API
   address (from the options, the cloud or mDNS) and state, battery packs,
   solar input, the settings it reports (limits, AC mode, charge levels),
-  remaining time and energy counters. Fill **Battery** with a name or serial
-  number to report on one battery only.
+  remaining time and energy counters. Pick a battery in the **Battery** list
+  (the batteries created in Gladys) to report on it only; for a battery not
+  created in Gladys, type its name or serial number in the field below.
 - **Test the local API of a battery**: reads `GET /properties/report` once,
   right away, at the address the integration uses, and shows the answer time,
   where the address comes from and every property the battery returns — or the

@@ -319,8 +319,9 @@ registros. Ninguno escribe en una batería ni cambia su transporte.
   últimos datos en cada fuente, la dirección de su API local (de las opciones,
   de la nube o mDNS) y su estado, los packs, la entrada solar, los ajustes que
   informa (límites, modo AC, niveles de carga), el tiempo restante y los
-  contadores de energía. Rellene **Batería** con un nombre o un número de
-  serie para describir una sola batería.
+  contadores de energía. Elija una batería en la lista **Batería** (las
+  baterías creadas en Gladys) para describir solo esa; para una batería no
+  creada en Gladys, escriba su nombre o número de serie en el campo de abajo.
 - **Probar la API local de una batería**: lee una vez, ahora, `GET
 /properties/report` en la dirección que usa la integración, y muestra el
   tiempo de respuesta, el origen de la dirección y todas las propiedades que
