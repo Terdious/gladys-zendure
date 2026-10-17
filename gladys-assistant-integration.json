@@ -838,6 +838,294 @@
           }
         }
       ]
+    },
+    {
+      "key": "site",
+      "label": {
+        "en": "Zendure site",
+        "fr": "Installation Zendure",
+        "de": "Zendure-Anlage",
+        "es": "Instalación Zendure"
+      },
+      "description": {
+        "en": "The whole site: totals, single-phase or per phase (L1, L2, L3), balance and alerts.",
+        "fr": "Tout le site : totaux, en monophasé ou par phase (L1, L2, L3), équilibre et alertes.",
+        "de": "Die ganze Anlage: Summen, einphasig oder je Phase (L1, L2, L3), Balance und Warnungen.",
+        "es": "Toda la instalación: totales, monofásica o por fase (L1, L2, L3), equilibrio y alertas."
+      },
+      "icon": "grid",
+      "settings": [
+        {
+          "key": "title",
+          "type": "string",
+          "label": {
+            "en": "Title",
+            "fr": "Titre",
+            "de": "Titel",
+            "es": "Título"
+          },
+          "placeholder": {
+            "en": "My installation",
+            "fr": "Mon installation",
+            "de": "Meine Anlage",
+            "es": "Mi instalación"
+          }
+        },
+        {
+          "key": "layout",
+          "type": "select",
+          "label": {
+            "en": "Electrical layout",
+            "fr": "Installation électrique",
+            "de": "Elektrische Anlage",
+            "es": "Instalación eléctrica"
+          },
+          "required": true,
+          "default": "single_phase",
+          "display": "radio",
+          "options": [
+            {
+              "value": "single_phase",
+              "label": {
+                "en": "Single-phase",
+                "fr": "Monophasée",
+                "de": "Einphasig",
+                "es": "Monofásica"
+              }
+            },
+            {
+              "value": "three_phase",
+              "label": {
+                "en": "Three-phase (L1, L2, L3)",
+                "fr": "Triphasée (L1, L2, L3)",
+                "de": "Dreiphasig (L1, L2, L3)",
+                "es": "Trifásica (L1, L2, L3)"
+              }
+            }
+          ]
+        },
+        {
+          "key": "devices",
+          "type": "multi_select",
+          "source": "devices",
+          "label": {
+            "en": "Batteries (single-phase)",
+            "fr": "Batteries (monophasé)",
+            "de": "Batterien (einphasig)",
+            "es": "Baterías (monofásica)"
+          },
+          "description": {
+            "en": "None selected: every battery of the account.",
+            "fr": "Aucune sélectionnée : toutes les batteries du compte.",
+            "de": "Keine ausgewählt: alle Batterien des Kontos.",
+            "es": "Ninguna seleccionada: todas las baterías de la cuenta."
+          }
+        },
+        {
+          "key": "phase_l1",
+          "type": "multi_select",
+          "source": "devices",
+          "label": {
+            "en": "Phase L1 batteries (three-phase)",
+            "fr": "Batteries de la phase L1 (triphasé)",
+            "de": "Batterien der Phase L1 (dreiphasig)",
+            "es": "Baterías de la fase L1 (trifásica)"
+          },
+          "description": {
+            "en": "Three-phase only: each battery in the phase it feeds.",
+            "fr": "Triphasé uniquement : chaque batterie dans la phase qu'elle alimente.",
+            "de": "Nur dreiphasig: jede Batterie in der Phase, die sie speist.",
+            "es": "Solo trifásica: cada batería en la fase que alimenta."
+          }
+        },
+        {
+          "key": "phase_l2",
+          "type": "multi_select",
+          "source": "devices",
+          "label": {
+            "en": "Phase L2 batteries (three-phase)",
+            "fr": "Batteries de la phase L2 (triphasé)",
+            "de": "Batterien der Phase L2 (dreiphasig)",
+            "es": "Baterías de la fase L2 (trifásica)"
+          }
+        },
+        {
+          "key": "phase_l3",
+          "type": "multi_select",
+          "source": "devices",
+          "label": {
+            "en": "Phase L3 batteries (three-phase)",
+            "fr": "Batteries de la phase L3 (triphasé)",
+            "de": "Batterien der Phase L3 (dreiphasig)",
+            "es": "Baterías de la fase L3 (trifásica)"
+          }
+        },
+        {
+          "key": "imbalance_threshold",
+          "type": "number",
+          "label": {
+            "en": "Phase imbalance alert (W)",
+            "fr": "Alerte de déséquilibre (W)",
+            "de": "Schieflast-Warnung (W)",
+            "es": "Alerta de desequilibrio (W)"
+          },
+          "description": {
+            "en": "Warn when the home outputs of two phases differ by more than this.",
+            "fr": "Avertit quand les sorties de deux phases diffèrent de plus que cette valeur.",
+            "de": "Warnt, wenn die Ausgänge zweier Phasen um mehr als diesen Wert abweichen.",
+            "es": "Avisa cuando las salidas de dos fases difieren más que este valor."
+          },
+          "default": 500,
+          "min": 0,
+          "max": 20000
+        }
+      ]
+    },
+    {
+      "key": "energy_today",
+      "label": {
+        "en": "Energy today",
+        "fr": "Énergie du jour",
+        "de": "Energie heute",
+        "es": "Energía de hoy"
+      },
+      "description": {
+        "en": "Energy of the day since local midnight: charged, discharged, solar, home, per phase.",
+        "fr": "Énergie du jour depuis minuit : chargée, déchargée, solaire, maison, par phase.",
+        "de": "Energie seit lokaler Mitternacht: geladen, entladen, Solar, Haus, je Phase.",
+        "es": "Energía del día desde medianoche: cargada, descargada, solar, hogar, por fase."
+      },
+      "icon": "activity",
+      "settings": [
+        {
+          "key": "title",
+          "type": "string",
+          "label": {
+            "en": "Title",
+            "fr": "Titre",
+            "de": "Titel",
+            "es": "Título"
+          },
+          "placeholder": {
+            "en": "Energy today",
+            "fr": "Énergie du jour",
+            "de": "Energie heute",
+            "es": "Energía de hoy"
+          }
+        },
+        {
+          "key": "layout",
+          "type": "select",
+          "label": {
+            "en": "Electrical layout",
+            "fr": "Installation électrique",
+            "de": "Elektrische Anlage",
+            "es": "Instalación eléctrica"
+          },
+          "required": true,
+          "default": "single_phase",
+          "display": "radio",
+          "options": [
+            {
+              "value": "single_phase",
+              "label": {
+                "en": "Single-phase",
+                "fr": "Monophasée",
+                "de": "Einphasig",
+                "es": "Monofásica"
+              }
+            },
+            {
+              "value": "three_phase",
+              "label": {
+                "en": "Three-phase (L1, L2, L3)",
+                "fr": "Triphasée (L1, L2, L3)",
+                "de": "Dreiphasig (L1, L2, L3)",
+                "es": "Trifásica (L1, L2, L3)"
+              }
+            }
+          ]
+        },
+        {
+          "key": "devices",
+          "type": "multi_select",
+          "source": "devices",
+          "label": {
+            "en": "Batteries (single-phase)",
+            "fr": "Batteries (monophasé)",
+            "de": "Batterien (einphasig)",
+            "es": "Baterías (monofásica)"
+          },
+          "description": {
+            "en": "None selected: every battery of the account.",
+            "fr": "Aucune sélectionnée : toutes les batteries du compte.",
+            "de": "Keine ausgewählt: alle Batterien des Kontos.",
+            "es": "Ninguna seleccionada: todas las baterías de la cuenta."
+          }
+        },
+        {
+          "key": "phase_l1",
+          "type": "multi_select",
+          "source": "devices",
+          "label": {
+            "en": "Phase L1 batteries (three-phase)",
+            "fr": "Batteries de la phase L1 (triphasé)",
+            "de": "Batterien der Phase L1 (dreiphasig)",
+            "es": "Baterías de la fase L1 (trifásica)"
+          },
+          "description": {
+            "en": "Three-phase only: each battery in the phase it feeds.",
+            "fr": "Triphasé uniquement : chaque batterie dans la phase qu'elle alimente.",
+            "de": "Nur dreiphasig: jede Batterie in der Phase, die sie speist.",
+            "es": "Solo trifásica: cada batería en la fase que alimenta."
+          }
+        },
+        {
+          "key": "phase_l2",
+          "type": "multi_select",
+          "source": "devices",
+          "label": {
+            "en": "Phase L2 batteries (three-phase)",
+            "fr": "Batteries de la phase L2 (triphasé)",
+            "de": "Batterien der Phase L2 (dreiphasig)",
+            "es": "Baterías de la fase L2 (trifásica)"
+          }
+        },
+        {
+          "key": "phase_l3",
+          "type": "multi_select",
+          "source": "devices",
+          "label": {
+            "en": "Phase L3 batteries (three-phase)",
+            "fr": "Batteries de la phase L3 (triphasé)",
+            "de": "Batterien der Phase L3 (dreiphasig)",
+            "es": "Baterías de la fase L3 (trifásica)"
+          }
+        },
+        {
+          "key": "timezone",
+          "type": "string",
+          "label": {
+            "en": "Timezone (local midnight)",
+            "fr": "Fuseau horaire (minuit local)",
+            "de": "Zeitzone (lokale Mitternacht)",
+            "es": "Zona horaria (medianoche local)"
+          },
+          "description": {
+            "en": "IANA name, e.g. Europe/Paris (the default): the day starts at its midnight.",
+            "fr": "Nom IANA, par ex. Europe/Paris (par défaut) : la journée commence à son minuit.",
+            "de": "IANA-Name, z. B. Europe/Paris (Standard): Der Tag beginnt um ihre Mitternacht.",
+            "es": "Nombre IANA, p. ej. Europe/Paris (por defecto): el día empieza a su medianoche."
+          },
+          "placeholder": {
+            "en": "Europe/Paris",
+            "fr": "Europe/Paris",
+            "de": "Europe/Paris",
+            "es": "Europe/Paris"
+          },
+          "default": "Europe/Paris"
+        }
+      ]
     }
   ]
 }

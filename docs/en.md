@@ -184,7 +184,7 @@ variables give the battery name, the new state and the telemetry source.
 
 ## Dashboard widgets
 
-Two widgets are available in the dashboard editor (Gladys 5.1 or later):
+Four widgets are available in the dashboard editor (Gladys 5.1 or later):
 
 - **Zendure battery**: one battery, chosen in the widget settings. Its charge
   level and its four powers follow the battery live; below them, its source
@@ -197,11 +197,42 @@ Two widgets are available in the dashboard editor (Gladys 5.1 or later):
   average charge level (weighted by the pack capacities when they are all
   known), total powers, energy stored, and one line per battery colored by its
   source. Leave the battery list empty for every battery of the account.
+- **Zendure site**: the whole installation on one card. Choose the
+  **Electrical layout**: _Single-phase_ sums the batteries selected (none: all
+  of them); _Three-phase_ takes the batteries of the **Phase L1 batteries**,
+  **L2** and **L3** lists. The card shows the site totals (state of charge
+  weighted by the pack capacities, charging, discharging, solar, home output,
+  energy stored), then in three-phase one line per phase (`⌂` home output,
+  `↑` charge, `↓` discharge, `☀` solar, in W) and the **Phase balance**: the
+  gap between the highest and the lowest home output, in orange beyond the
+  **Phase imbalance alert** (500 W by default). Below: stored energy over the
+  known capacity, time left at the current power, how many batteries each
+  source serves (local, cloud, unreachable), and alert lines for the
+  unreachable batteries, the cloud fallbacks, and a battery put in two phases,
+  in none, or deleted. An unreachable battery keeps its level and stored
+  energy, but its last powers are left out of the sums.
+- **Energy today**: the energy of the day since local midnight, same layout
+  choice and phase lists: charged, discharged, solar and home output (kWh),
+  one line per phase in three-phase with the gap between the phases, and a
+  chart of the home output per 30 minutes (one curve per phase). The day
+  starts at the midnight of the widget's **Timezone** (an IANA name,
+  `Europe/Paris` by default: Gladys does not give its timezone to an
+  integration). The figures come from the energy counters of the integration
+  (saved under `/data` with a snapshot every 30 minutes, kept 26 hours): they
+  count from the first report of the day, which the **Counted since** line
+  shows (for example after a first install in the morning).
 
-**Three-phase installation:** add one **Battery group** per phase, named
-"Phase L1", "Phase L2", "Phase L3", each with the batteries of that phase, plus
-one more with no battery selected for the whole site. A single-phase
-installation needs just one group.
+**Three-phase example:** 17 batteries on L1, L2 and L3. Add a **Zendure
+site** widget, set **Electrical layout** to _Three-phase_, and tick in
+**Phase L1 batteries** the six batteries wired to L1 (say two 2400 AC, a 2400
+Pro, two 800 Pro and an 800 without battery), in **L2** the six of L2 and in
+**L3** the five of L3. The card shows the site totals, a line such as
+`L1 (6) · 60 %` — `⌂ 1890 · ↑ 500 · ↓ 1000 · ☀ 1400 W` per phase, and
+`Phase balance` — `Δ 1490 W · L1 highest` in orange when it exceeds the
+threshold. Add an **Energy today** widget with the same three lists for the
+kWh of the day. A single-phase installation keeps the default layout and
+leaves the lists empty. The **Battery group** widget still works for any
+other grouping.
 
 Each widget only shows what the battery has: a SolarFlow 800 running
 without a battery pack keeps its solar, home output and output limit (no
