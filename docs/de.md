@@ -321,8 +321,10 @@ musst. Keine schreibt in eine Batterie oder ändert ihren Transport.
   ihrer letzten Daten pro Quelle, die Adresse ihrer lokalen API (aus den
   Optionen, der Cloud oder mDNS) und ihr Zustand, die Packs, der
   Solareingang, die gemeldeten Einstellungen (Limits, AC-Modus, Ladestände),
-  die Restzeit und die Energiezähler. Trage unter **Batterie** einen Namen
-  oder eine Seriennummer ein, um nur eine Batterie zu beschreiben.
+  die Restzeit und die Energiezähler. Wähle eine Batterie in der Liste
+  **Batterie** (die in Gladys angelegten Batterien), um nur sie zu
+  beschreiben; für eine nicht in Gladys angelegte Batterie gib ihren Namen
+  oder ihre Seriennummer im Feld darunter ein.
 - **Lokale API einer Batterie testen**: liest einmal, sofort, `GET
 /properties/report` an der Adresse, die die Integration verwendet, und
   zeigt die Antwortzeit, die Herkunft der Adresse und alle Eigenschaften, die

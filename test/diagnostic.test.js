@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createFakeGladys as createSdkFakeGladys } from '@gladysassistant/integration-sdk/testing';
 
-import { ACTIONS, REPORT_INTROS } from '../src/actions.js';
+import { ACTIONS, REPORT_INTROS, referenceOf } from '../src/actions.js';
 import {
   buildFleetDiagnostic,
   buildLocalApiTestReport,
@@ -343,9 +343,32 @@ test('test_local_api: unknown battery, model without local API, no cloud key', a
   });
   assert.match(ack.en, /Zendure cloud device list unavailable: Zendure cloud key is missing/);
   await assert.rejects(
-    ACTIONS.test_local_api(gladys, { fields: { device: ' ' }, config }),
-    /name or the serial number/,
+    ACTIONS.test_local_api(gladys, { fields: { device: ' ', device_ref: '' }, config }),
+    /Pick a battery in the list/,
   );
+});
+
+test('the battery picked in the list wins over the free text', () => {
+  assert.equal(
+    referenceOf({ device: 'ext:zendure:solarflow:abc', device_ref: 'Shed' }),
+    'ext:zendure:solarflow:abc',
+  );
+  assert.equal(referenceOf({ device: '', device_ref: ' Shed inverter ' }), 'Shed inverter');
+  assert.equal(referenceOf({}), '');
+});
+
+test('a battery picked in the list (its external id) is found', async () => {
+  await start();
+  const picked = await ACTIONS.test_local_api(gladys, {
+    fields: { device: `ext:zendure:solarflow:${HTTP_DEVICE.deviceKey}` },
+    config,
+  });
+  assert.match(picked.en, /Battery: Shed inverter/);
+  const typed = await ACTIONS.test_local_api(gladys, {
+    fields: { device_ref: 'Shed inverter' },
+    config,
+  });
+  assert.match(typed.en, /Battery: Shed inverter/);
 });
 
 test('every manifest action has a handler, and vice versa', () => {
@@ -356,15 +379,15 @@ test('every manifest action has a handler, and vice versa', () => {
   for (const action of manifest.actions) {
     assert.ok(action.timeout_seconds >= 5 && action.timeout_seconds <= 120);
     const keys = action.fields.map((field) => field.key);
-    assert.deepEqual(keys, ['device', 'include_identifiers'], `${action.key} fields`);
+    assert.deepEqual(keys, ['device', 'device_ref', 'include_identifiers'], `${action.key} fields`);
+    const picker = action.fields[0];
+    assert.equal(picker.type, 'select');
+    assert.equal(picker.source, 'devices', 'the batteries created in Gladys, as in gladys-tuya');
+    assert.equal(action.fields[1].type, 'string');
     const identifiers = action.fields.find((field) => field.key === 'include_identifiers');
     assert.equal(identifiers.type, 'boolean');
     assert.equal(identifiers.default, false, 'identifiers are masked by default');
   }
-  assert.equal(
-    manifest.actions.find((action) => action.key === 'test_local_api').fields[0].required,
-    true,
-  );
   for (const intro of Object.values(REPORT_INTROS)) {
     assert.deepEqual(Object.keys(intro).sort(), ['de', 'en', 'es', 'fr']);
   }

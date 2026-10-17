@@ -321,8 +321,10 @@ journaux. Aucun n'écrit dans une batterie ni ne change son transport.
   données sur chaque source, l'adresse de son API locale (des options, du
   cloud ou mDNS) et son état, les packs, l'entrée solaire, les réglages
   qu'elle remonte (limites, mode AC, niveaux de charge), le temps restant et
-  les compteurs d'énergie. Renseignez **Batterie** avec un nom ou un numéro de
-  série pour ne décrire qu'une batterie.
+  les compteurs d'énergie. Choisissez une batterie dans la liste **Batterie**
+  (les batteries créées dans Gladys) pour ne décrire qu'elle ; pour une
+  batterie non créée dans Gladys, saisissez son nom ou son numéro de série
+  dans le champ en dessous.
 - **Tester l'API locale d'une batterie** : lit une fois `GET
 /properties/report`, tout de suite, à l'adresse utilisée par l'intégration,
   et affiche le temps de réponse, l'origine de l'adresse et toutes les

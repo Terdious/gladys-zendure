@@ -40,7 +40,9 @@ the notes of the version's GitHub Release.
   polling, then per battery its source and why, the age of its last data per
   source, its local API address, origin and state, packs, solar input,
   reported settings, remaining time and energy counters; optionally for one
-  battery. **Test the local API of a battery** reads its
+  battery, picked in the list of the batteries created in Gladys (or typed by
+  name or serial number for one that is not). **Test the local API of a
+  battery** reads its
   `GET /properties/report` once, now, and shows the timing, the address origin
   and the properties, or the exact error with a hint. Serial numbers are
   shortened and local addresses hidden unless **Show serial numbers and local

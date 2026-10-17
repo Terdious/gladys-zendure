@@ -33,18 +33,37 @@
       "fields": [
         {
           "key": "device",
-          "type": "string",
+          "type": "select",
+          "source": "devices",
+          "required": false,
           "label": {
-            "en": "Battery (name or serial number, optional)",
-            "fr": "Batterie (nom ou numéro de série, facultatif)",
-            "de": "Batterie (Name oder Seriennummer, optional)",
-            "es": "Batería (nombre o número de serie, opcional)"
+            "en": "Battery",
+            "fr": "Batterie",
+            "de": "Batterie",
+            "es": "Batería"
           },
           "description": {
-            "en": "Leave empty for every battery.",
-            "fr": "Laissez vide pour toutes les batteries.",
-            "de": "Leer lassen für alle Batterien.",
-            "es": "Déjelo vacío para todas las baterías."
+            "en": "Pick a battery created in Gladys, or leave both fields empty for every battery.",
+            "fr": "Choisissez une batterie créée dans Gladys, ou laissez les deux champs vides pour toutes les batteries.",
+            "de": "Wähle eine in Gladys angelegte Batterie, oder lass beide Felder leer für alle Batterien.",
+            "es": "Elija una batería creada en Gladys, o deje ambos campos vacíos para todas las baterías."
+          }
+        },
+        {
+          "key": "device_ref",
+          "type": "string",
+          "required": false,
+          "label": {
+            "en": "…or a battery not created in Gladys (name or serial number)",
+            "fr": "…ou une batterie non créée dans Gladys (nom ou numéro de série)",
+            "de": "…oder eine nicht in Gladys angelegte Batterie (Name oder Seriennummer)",
+            "es": "…o una batería no creada en Gladys (nombre o número de serie)"
+          },
+          "description": {
+            "en": "Only when the battery is not in the list above: its name in the Zendure app, or its serial number.",
+            "fr": "Seulement si la batterie n’est pas dans la liste ci-dessus : son nom dans l’application Zendure, ou son numéro de série.",
+            "de": "Nur wenn die Batterie nicht in der Liste oben steht: ihr Name in der Zendure-App oder ihre Seriennummer.",
+            "es": "Solo si la batería no está en la lista de arriba: su nombre en la app Zendure, o su número de serie."
           }
         },
         {
@@ -84,20 +103,38 @@
       "fields": [
         {
           "key": "device",
-          "type": "string",
+          "type": "select",
+          "source": "devices",
+          "required": false,
           "label": {
-            "en": "Battery (name or serial number)",
-            "fr": "Batterie (nom ou numéro de série)",
-            "de": "Batterie (Name oder Seriennummer)",
-            "es": "Batería (nombre o número de serie)"
+            "en": "Battery",
+            "fr": "Batterie",
+            "de": "Batterie",
+            "es": "Batería"
           },
           "description": {
-            "en": "The battery name as shown in Gladys, or its serial number.",
-            "fr": "Le nom de la batterie tel qu'affiché dans Gladys, ou son numéro de série.",
-            "de": "Der Batteriename wie in Gladys angezeigt, oder seine Seriennummer.",
-            "es": "El nombre de la batería tal como aparece en Gladys, o su número de serie."
+            "en": "Pick the battery in the list of batteries created in Gladys.",
+            "fr": "Choisissez la batterie dans la liste des batteries créées dans Gladys.",
+            "de": "Wähle die Batterie aus der Liste der in Gladys angelegten Batterien.",
+            "es": "Elija la batería en la lista de baterías creadas en Gladys."
+          }
+        },
+        {
+          "key": "device_ref",
+          "type": "string",
+          "required": false,
+          "label": {
+            "en": "…or a battery not created in Gladys (name or serial number)",
+            "fr": "…ou une batterie non créée dans Gladys (nom ou numéro de série)",
+            "de": "…oder eine nicht in Gladys angelegte Batterie (Name oder Seriennummer)",
+            "es": "…o una batería no creada en Gladys (nombre o número de serie)"
           },
-          "required": true
+          "description": {
+            "en": "Only when the battery is not in the list above: its name in the Zendure app, or its serial number.",
+            "fr": "Seulement si la batterie n’est pas dans la liste ci-dessus : son nom dans l’application Zendure, ou son numéro de série.",
+            "de": "Nur wenn die Batterie nicht in der Liste oben steht: ihr Name in der Zendure-App oder ihre Seriennummer.",
+            "es": "Solo si la batería no está en la lista de arriba: su nombre en la app Zendure, o su número de serie."
+          }
         },
         {
           "key": "include_identifiers",
