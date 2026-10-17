@@ -198,7 +198,7 @@ Telemetriequelle.
 
 ## Dashboard-Widgets
 
-Im Dashboard-Editor stehen zwei Widgets bereit (Gladys 5.1 oder neuer):
+Im Dashboard-Editor stehen vier Widgets bereit (Gladys 5.1 oder neuer):
 
 - **Zendure-Batterie**: eine Batterie, gewählt in den Widget-Einstellungen. Ihr
   Ladestand und ihre vier Leistungen folgen der Batterie live; darunter ihre
@@ -212,11 +212,45 @@ Im Dashboard-Editor stehen zwei Widgets bereit (Gladys 5.1 oder neuer):
   wenn alle bekannt sind), Gesamtleistungen, gespeicherte Energie und eine
   Zeile pro Batterie, gefärbt nach ihrer Quelle. Lass die Batterieliste leer,
   um alle Batterien des Kontos zu nehmen.
+- **Zendure-Anlage**: die ganze Installation auf einer Karte. Wähle die
+  **Elektrische Anlage**: _Einphasig_ summiert die gewählten Batterien (keine:
+  alle); _Dreiphasig_ nimmt die Batterien der Listen **Batterien der Phase
+  L1**, **L2** und **L3**. Die Karte zeigt die Summen der Anlage (Ladestand
+  nach Pack-Kapazität gewichtet, Laden, Entladen, Solar, Leistung zum Haus,
+  gespeicherte Energie), dreiphasig dann eine Zeile pro Phase (`⌂` zum Haus,
+  `↑` Laden, `↓` Entladen, `☀` Solar, in W) und die **Phasenbalance**: den
+  Abstand zwischen der höchsten und der niedrigsten Leistung zum Haus, orange
+  oberhalb der **Schieflast-Warnung** (standardmäßig 500 W). Darunter:
+  gespeicherte Energie über der bekannten Kapazität, Restzeit bei der
+  aktuellen Leistung, Anzahl der Batterien je Quelle (lokal, Cloud, nicht
+  erreichbar) und Warnzeilen für nicht erreichbare Batterien, Cloud-Rückfälle
+  und eine Batterie in zwei Phasen, in keiner oder gelöscht. Eine nicht
+  erreichbare Batterie behält Ladestand und gespeicherte Energie, ihre letzten
+  Leistungen fließen aber nicht in die Summen ein.
+- **Energie heute**: die Energie des Tages seit lokaler Mitternacht, mit
+  derselben Anlagenwahl und denselben Phasenlisten: geladen, entladen, Solar
+  und zum Haus (kWh), dreiphasig eine Zeile pro Phase mit dem Abstand zwischen
+  den Phasen, und ein Diagramm der Leistung zum Haus je 30 Minuten (eine Kurve
+  pro Phase). Der Tag beginnt um Mitternacht der **Zeitzone** des Widgets
+  (ein IANA-Name, standardmäßig `Europe/Paris`: Gladys gibt einer Integration
+  seine Zeitzone nicht). Die Werte stammen aus den Energiezählern der
+  Integration (unter `/data` gespeichert, mit einem Schnappschuss alle 30
+  Minuten, 26 Stunden lang aufbewahrt): Sie zählen ab der ersten Meldung des
+  Tages, die die Zeile **Gezählt seit** angibt (etwa nach einer ersten
+  Installation am Morgen).
 
-**Dreiphasige Installation:** Füge pro Phase eine **Batteriegruppe** hinzu,
-benannt „Phase L1“, „Phase L2“, „Phase L3“, jede mit den Batterien ihrer Phase,
-dazu eine ohne ausgewählte Batterie für die ganze Anlage. Eine einphasige
-Installation braucht nur eine Gruppe.
+**Dreiphasiges Beispiel:** 17 Batterien auf L1, L2 und L3. Füge ein Widget
+**Zendure-Anlage** hinzu, stelle **Elektrische Anlage** auf _Dreiphasig_ und
+hake in **Batterien der Phase L1** die sechs an L1 angeschlossenen Batterien
+an (etwa zwei 2400 AC, eine 2400 Pro, zwei 800 Pro und ein 800 ohne
+Batterie), in **L2** die sechs von L2 und in **L3** die fünf von L3. Die Karte
+zeigt die Summen der Anlage, pro Phase eine Zeile wie `L1 (6) · 60 %` —
+`⌂ 1890 · ↑ 500 · ↓ 1000 · ☀ 1400 W` und `Phasenbalance` —
+`Δ 1490 W · L1 am höchsten`, orange oberhalb der Schwelle. Füge ein Widget
+**Energie heute** mit denselben drei Listen für die kWh des Tages hinzu. Eine
+einphasige Installation behält die Standardeinstellung und lässt die Listen
+leer. Das Widget **Batteriegruppe** bleibt für jede andere Gruppierung
+verfügbar.
 
 Jedes Widget zeigt nur, was die Batterie hat: Ein SolarFlow 800 ohne
 Batteriepack behält Solar, Leistung zum Haus und Ausgangslimit (kein

@@ -198,7 +198,8 @@ de telemetría.
 
 ## Widgets del panel
 
-En el editor del panel hay dos widgets disponibles (Gladys 5.1 o posterior):
+En el editor del panel hay cuatro widgets disponibles (Gladys 5.1 o
+posterior):
 
 - **Batería Zendure**: una batería, elegida en los ajustes del widget. Su nivel
   y sus cuatro potencias siguen la batería en directo; debajo, su fuente
@@ -212,11 +213,45 @@ En el editor del panel hay dos widgets disponibles (Gladys 5.1 o posterior):
   conocidas), potencias totales, energía almacenada y una línea por batería
   coloreada según su fuente. Deje la lista de baterías vacía para tomar todas
   las baterías de la cuenta.
+- **Instalación Zendure**: toda la instalación en una tarjeta. Elija la
+  **Instalación eléctrica**: _Monofásica_ suma las baterías elegidas (ninguna:
+  todas); _Trifásica_ toma las baterías de las listas **Baterías de la fase
+  L1**, **L2** y **L3**. La tarjeta muestra los totales de la instalación
+  (nivel ponderado por la capacidad de los packs, carga, descarga, solar,
+  salida al hogar, energía almacenada), luego en trifásica una línea por fase
+  (`⌂` salida al hogar, `↑` carga, `↓` descarga, `☀` solar, en W) y el
+  **Equilibrio de fases**: la diferencia entre la salida al hogar más alta y
+  la más baja, en naranja por encima de la **Alerta de desequilibrio** (500 W
+  por defecto). Debajo: energía almacenada sobre la capacidad conocida, tiempo
+  restante a la potencia actual, número de baterías por fuente (local, nube,
+  inaccesible) y líneas de alerta para las baterías inaccesibles, los
+  respaldos en la nube y una batería puesta en dos fases, en ninguna o
+  eliminada. Una batería inaccesible conserva su nivel y su energía
+  almacenada, pero sus últimas potencias quedan fuera de las sumas.
+- **Energía de hoy**: la energía del día desde la medianoche local, con la
+  misma elección de instalación y las mismas listas de fases: cargada,
+  descargada, solar y salida al hogar (kWh), una línea por fase en trifásica
+  con la diferencia entre fases, y un gráfico de la salida al hogar cada 30
+  minutos (una curva por fase). El día empieza a la medianoche de la **Zona
+  horaria** del widget (un nombre IANA, `Europe/Paris` por defecto: Gladys no
+  da su zona horaria a una integración). Las cifras vienen de los contadores
+  de energía de la integración (guardados en `/data` con una instantánea cada
+  30 minutos, conservada 26 horas): cuentan desde el primer informe del día,
+  que indica la línea **Contado desde** (por ejemplo tras una primera
+  instalación por la mañana).
 
-**Instalación trifásica:** añada un **Grupo de baterías** por fase, llamado
-"Fase L1", "Fase L2", "Fase L3", cada uno con las baterías de su fase, más uno
-sin batería seleccionada para toda la instalación. Una instalación monofásica
-solo necesita un grupo.
+**Ejemplo trifásico:** 17 baterías en L1, L2 y L3. Añada un widget
+**Instalación Zendure**, ponga la **Instalación eléctrica** en _Trifásica_ y
+marque en **Baterías de la fase L1** las seis baterías conectadas a L1 (por
+ejemplo dos 2400 AC, una 2400 Pro, dos 800 Pro y un 800 sin batería), en
+**L2** las seis de L2 y en **L3** las cinco de L3. La tarjeta muestra los
+totales, una línea por fase como `L1 (6) · 60 %` —
+`⌂ 1890 · ↑ 500 · ↓ 1000 · ☀ 1400 W`, y `Equilibrio de fases` —
+`Δ 1490 W · L1 la más alta` en naranja por encima del umbral. Añada un widget
+**Energía de hoy** con las mismas tres listas para los kWh del día. Una
+instalación monofásica conserva el ajuste por defecto y deja las listas
+vacías. El widget **Grupo de baterías** sigue disponible para cualquier otra
+agrupación.
 
 Cada widget solo muestra lo que la batería tiene: un SolarFlow 800 usado sin
 pack de batería conserva su solar, su salida al hogar y su límite de salida

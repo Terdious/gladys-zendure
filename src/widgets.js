@@ -11,6 +11,14 @@
 //     choice. One instance per group: a three-phase installation adds one per
 //     phase (L1, L2, L3), and one more without battery selected for the whole
 //     site; a single-phase installation needs just one.
+//   - `site` (src/dashboard/site.js): the whole installation, single-phase or
+//     three-phase (batteries assigned to L1, L2, L3), with the phase balance,
+//     the sources and the alerts.
+//   - `energy_today` (src/dashboard/energyToday.js): the energy of the day
+//     since local midnight, per site or per phase.
+//
+// The manifest allows at most 5 widgets and their keys are stored in the
+// users' dashboards: think twice before spending the last slot.
 //
 // index.js registers `get` with onWidgetGet and `action` with
 // onWidgetAction. The content budget of the core (8 components, 6 tiles,
@@ -22,61 +30,38 @@ import { createLogger, WIDGET_COLORS } from '@gladysassistant/integration-sdk';
 import { controlDevice, describeBatteries } from './devices/index.js';
 import { formatRemainingTime } from './zendure/battery.js';
 import { AC_MODES, MIN_SOC_RANGE, SOC_SET_RANGE } from './zendure/control.js';
+import {
+  T,
+  UNKNOWN,
+  MAX_STATUS_ROWS,
+  NO_BATTERY,
+  REMAINING_LABELS,
+  averageLevel,
+  messageContent,
+  sourceStatus,
+  sum,
+  withPacksOf,
+  withUnit,
+} from './dashboard/common.js';
+import { SITE_WIDGET, siteWidget } from './dashboard/site.js';
+import { ENERGY_TODAY_WIDGET, energyTodayWidget } from './dashboard/energyToday.js';
 
 const logger = createLogger({ name: 'widgets' });
 
 export const BATTERY_WIDGET = 'battery';
 export const GROUP_WIDGET = 'battery_group';
+export { SITE_WIDGET, ENERGY_TODAY_WIDGET };
 
 // Keys of the button actions of the battery widget.
 export const BATTERY_ACTIONS = { POWER_LIMITS: 'power_limits', MODE_AND_LEVELS: 'mode_and_levels' };
 
-const T = (en, fr, de, es) => ({ en, fr, de, es });
-
 // Rows of a status component the core keeps (the SDK's MAX_STATUS_ITEMS).
-const GROUP_MAX_ROWS = 10;
-
-const SOURCE_STATUS = {
-  http: {
-    value: T('Local (API)', 'Local (API)', 'Lokal (API)', 'Local (API)'),
-    color: WIDGET_COLORS.SUCCESS,
-  },
-  local: { value: T('Local', 'Local', 'Lokal', 'Local'), color: WIDGET_COLORS.SUCCESS },
-  cloud: { value: T('Cloud', 'Cloud', 'Cloud', 'Nube'), color: WIDGET_COLORS.INFO },
-  degraded: {
-    value: T('Cloud (fallback)', 'Cloud (repli)', 'Cloud (Rückfall)', 'Nube (respaldo)'),
-    color: WIDGET_COLORS.WARNING,
-  },
-  unreachable: {
-    value: T('Unreachable', 'Injoignable', 'Nicht erreichbar', 'Inaccesible'),
-    color: WIDGET_COLORS.DANGER,
-  },
-};
+const GROUP_MAX_ROWS = MAX_STATUS_ROWS;
 
 const AC_MODE_TEXT = {
   [AC_MODES.charge]: T('Charge', 'Charge', 'Laden', 'Carga'),
   [AC_MODES.discharge]: T('Discharge', 'Décharge', 'Entladen', 'Descarga'),
 };
-
-const UNKNOWN = '—';
-
-function sourceStatus(battery) {
-  return SOURCE_STATUS[battery.degraded ? 'degraded' : battery.source];
-}
-
-function withUnit(value, unit) {
-  return value === null || value === undefined ? UNKNOWN : `${value} ${unit}`;
-}
-
-function sum(batteries, pick) {
-  const values = batteries.map(pick).filter((value) => value !== null && value !== undefined);
-  return values.length === 0 ? null : values.reduce((total, value) => total + value, 0);
-}
-
-/** Text-only content, when the widget cannot show a battery. */
-function messageContent(text) {
-  return { ttl_seconds: 60, components: [{ type: 'text', variant: 'body', text }] };
-}
 
 const CHOOSE_BATTERY = T(
   'Choose a battery in the settings of this widget.',
@@ -84,18 +69,6 @@ const CHOOSE_BATTERY = T(
   'Wähle in den Einstellungen dieses Widgets eine Batterie.',
   'Elija una batería en los ajustes de este widget.',
 );
-
-const NO_BATTERY = T(
-  'No Zendure battery found: check the Configuration tab of the integration.',
-  "Aucune batterie Zendure trouvée : vérifiez l'onglet Configuration de l'intégration.",
-  'Keine Zendure-Batterie gefunden: Prüfe den Tab Konfiguration der Integration.',
-  'No se encontró ninguna batería Zendure: revise la pestaña Configuración de la integración.',
-);
-
-const REMAINING_LABELS = {
-  discharge: T('Empty in', 'Vide dans', 'Leer in', 'Vacía en'),
-  charge: T('Full in', 'Pleine dans', 'Voll in', 'Llena en'),
-};
 
 /** The state of charge gauge, with its unit (a value gauge when known). */
 function levelGauge(battery) {
@@ -338,22 +311,10 @@ function groupRowValue(battery) {
 function groupContent(title, batteries) {
   // Devices known to have no pack (micro-inverter mode) count for the powers
   // only, never in the state of charge nor in the stored energy.
-  const withPacks = batteries.filter((battery) => battery.hasBattery !== false);
+  const withPacks = withPacksOf(batteries);
   // Capacity-weighted state of charge when every pack is known, plain
   // average otherwise.
-  const withLevel = withPacks.filter((battery) => battery.values.batteryLevel !== null);
-  const weighted = withLevel.every((battery) => battery.capacityKwh !== null);
-  const weight = (battery) => (weighted ? battery.capacityKwh : 1);
-  const totalWeight = withLevel.reduce((total, battery) => total + weight(battery), 0);
-  const level =
-    totalWeight > 0
-      ? Math.round(
-          withLevel.reduce(
-            (total, battery) => total + battery.values.batteryLevel * weight(battery),
-            0,
-          ) / totalWeight,
-        )
-      : null;
+  const level = averageLevel(batteries);
   const power = (key, members = batteries) => sum(members, (battery) => battery.values[key]);
   const tile = (key, label, icon, members) => ({
     type: 'value',
@@ -501,4 +462,7 @@ export const WIDGETS = {
       return groupContent(title, batteries);
     },
   },
+
+  [SITE_WIDGET]: siteWidget,
+  [ENERGY_TODAY_WIDGET]: energyTodayWidget,
 };

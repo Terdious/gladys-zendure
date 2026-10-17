@@ -1487,6 +1487,12 @@ export async function describeBatteries(gladys, config) {
               minSoc: settings.minSoc,
             }),
       settings,
+      // Energy meters (src/zendure/energy.js): `energyReady` false until the
+      // saved totals are loaded (the first push start), `energySince(ms)`
+      // the energy since a moment, null when nothing was integrated since.
+      energyReady: energyLoaded,
+      energySince: (since) =>
+        energyLoaded ? getEnergyMeters().energySince(deviceKey, since) : null,
     };
   });
 }

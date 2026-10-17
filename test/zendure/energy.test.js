@@ -8,6 +8,9 @@ import {
   deviceCapacityKwh,
   packCapacityKwh,
   MAX_INTEGRATION_GAP_IN_MS,
+  ENERGY_SLOT_IN_MS,
+  SLOT_RETENTION_IN_MS,
+  slotStartOf,
 } from '../../src/zendure/energy.js';
 import { createTestEnergyMeters } from '../helpers/fakeZendure.js';
 
@@ -105,4 +108,79 @@ test('concurrent saves are serialized, each with its own temporary file', async 
     /could not save/.test(call.arguments.join(' ')),
   );
   assert.deepEqual(failures, [], 'no save failed');
+});
+
+// --- Slot snapshots (the "Energy today" widget) ---------------------------------
+
+const SLOT0 = slotStartOf(T0) + ENERGY_SLOT_IN_MS; // a slot boundary after T0
+
+test('the energy since a moment: the totals minus the first slot snapshot after it', () => {
+  const { meters } = createTestEnergyMeters();
+  // 1200 W from 30 min before the boundary to 1 h after it, 5-minute steps.
+  for (let at = SLOT0 - 30 * MINUTE; at <= SLOT0 + 60 * MINUTE; at += 5 * MINUTE) {
+    meters.update('dev', { homeOutputPower: 1200 }, at);
+  }
+  const energy = meters.energySince('dev', SLOT0);
+  assert.equal(energy.countingSince, SLOT0);
+  assert.equal(energy.kwh.homeOutputEnergy, 1.2); // the hour after the boundary only
+  assert.deepEqual(
+    energy.slots.map((slot) => [slot.at - SLOT0, slot.kwh.homeOutputEnergy]),
+    [
+      [0, 0.6],
+      [ENERGY_SLOT_IN_MS, 0.6],
+      [2 * ENERGY_SLOT_IN_MS, 0],
+    ],
+  );
+  assert.equal(meters.energySince('other', SLOT0), null, 'never seen');
+  assert.equal(meters.energySince('dev', SLOT0 + 3 * ENERGY_SLOT_IN_MS), null, 'nothing since');
+});
+
+test('an interval crossing a slot boundary is split at the boundary', () => {
+  const { meters } = createTestEnergyMeters();
+  meters.update('dev', { solarInputPower: 600 }, SLOT0 - 2 * MINUTE);
+  meters.update('dev', {}, SLOT0 + 3 * MINUTE); // 2 min before, 3 min after
+  const energy = meters.energySince('dev', SLOT0);
+  assert.equal(energy.kwh.solarEnergy, 0.03); // 600 W x 3 min
+  assert.equal(meters.totals('dev').solarEnergy, 0.05);
+});
+
+test('the slot snapshots survive a restart, and age out after the retention', async () => {
+  const { meters, dataDir } = createTestEnergyMeters();
+  for (let at = SLOT0; at <= SLOT0 + 30 * MINUTE; at += 5 * MINUTE) {
+    meters.update('dev', { batteryInputPower: 2000 }, at);
+  }
+  await meters.save();
+  const saved = JSON.parse(await readFile(join(dataDir, 'energy.json'), 'utf8'));
+  assert.equal(saved.version, 1);
+  assert.deepEqual(saved.slot_fields, [
+    'batteryChargeEnergy',
+    'batteryDischargeEnergy',
+    'solarEnergy',
+    'homeOutputEnergy',
+  ]);
+  assert.deepEqual(saved.devices.dev.slots, [
+    [SLOT0, 0, 0, 0, 0],
+    [SLOT0 + ENERGY_SLOT_IN_MS, 0, 1, 0, 0],
+  ]);
+
+  const restarted = createEnergyMeters({ dataDir });
+  await restarted.load();
+  assert.equal(restarted.energySince('dev', SLOT0).kwh.batteryDischargeEnergy, 1);
+  // A day later the old snapshots are dropped.
+  restarted.update('dev', {}, SLOT0 + SLOT_RETENTION_IN_MS + ENERGY_SLOT_IN_MS + 1);
+  assert.equal(restarted.energySince('dev', 0).countingSince > SLOT0 + ENERGY_SLOT_IN_MS, true);
+});
+
+test('a save file of 1.6.0 (totals only) loads, with no snapshot yet', async () => {
+  const { dataDir } = createTestEnergyMeters();
+  await writeFile(
+    join(dataDir, 'energy.json'),
+    JSON.stringify({ version: 1, devices: { dev: { kwh: { solarEnergy: 3 } } } }),
+  );
+  const meters = createEnergyMeters({ dataDir });
+  await meters.load();
+  assert.equal(meters.totals('dev').solarEnergy, 3);
+  assert.equal(meters.energySince('dev', 0), null);
+  meters.update('dev', {}, SLOT0);
+  assert.equal(meters.energySince('dev', 0).kwh.solarEnergy, 0);
 });

@@ -200,8 +200,8 @@ source de télémétrie.
 
 ## Widgets du tableau de bord
 
-Deux widgets sont disponibles dans l'éditeur de tableau de bord (Gladys 5.1 ou
-plus récent) :
+Quatre widgets sont disponibles dans l'éditeur de tableau de bord (Gladys 5.1
+ou plus récent) :
 
 - **Batterie Zendure** : une batterie, choisie dans les réglages du widget. Son
   niveau et ses quatre puissances suivent la batterie en direct ; en dessous,
@@ -215,11 +215,45 @@ plus récent) :
   toutes connues), puissances totales, énergie stockée, et une ligne par
   batterie colorée selon sa source. Laissez la liste des batteries vide pour
   prendre toutes les batteries du compte.
+- **Installation Zendure** : toute l'installation sur une carte. Choisissez
+  l'**Installation électrique** : _Monophasée_ cumule les batteries choisies
+  (aucune : toutes) ; _Triphasée_ prend les batteries des listes **Batteries de
+  la phase L1**, **L2** et **L3**. La carte affiche les totaux du site (niveau
+  pondéré par la capacité des packs, charge, décharge, solaire, sortie maison,
+  énergie stockée), puis en triphasé une ligne par phase (`⌂` sortie maison,
+  `↑` charge, `↓` décharge, `☀` solaire, en W) et l'**Équilibre des phases** :
+  l'écart entre la sortie maison la plus haute et la plus basse, en orange
+  au-delà de l'**Alerte de déséquilibre** (500 W par défaut). En dessous :
+  énergie stockée sur la capacité connue, temps restant à la puissance
+  actuelle, nombre de batteries par source (locale, cloud, injoignable), et des
+  lignes d'alerte pour les batteries injoignables, les replis cloud, et une
+  batterie mise dans deux phases, dans aucune, ou supprimée. Une batterie
+  injoignable garde son niveau et son énergie stockée, mais ses dernières
+  puissances sont exclues des sommes.
+- **Énergie du jour** : l'énergie de la journée depuis minuit, avec le même
+  choix d'installation et les mêmes listes de phases : chargée, déchargée,
+  solaire et sortie maison (kWh), une ligne par phase en triphasé avec l'écart
+  entre les phases, et un graphique de la sortie maison par 30 minutes (une
+  courbe par phase). La journée commence au minuit du **Fuseau horaire** du
+  widget (un nom IANA, `Europe/Paris` par défaut : Gladys ne donne pas son
+  fuseau à une intégration). Les chiffres viennent des compteurs d'énergie de
+  l'intégration (enregistrés sous `/data` avec un instantané toutes les 30
+  minutes, gardé 26 heures) : ils comptent depuis la première remontée du
+  jour, qu'indique la ligne **Compté depuis** (par exemple après une première
+  installation le matin).
 
-**Installation triphasée :** ajoutez un **Groupe de batteries** par phase,
-nommé « Phase L1 », « Phase L2 », « Phase L3 », chacun avec les batteries de sa
-phase, plus un dernier sans batterie sélectionnée pour l'ensemble du site. Une
-installation monophasée n'a besoin que d'un groupe.
+**Exemple triphasé :** 17 batteries sur L1, L2 et L3. Ajoutez un widget
+**Installation Zendure**, réglez l'**Installation électrique** sur
+_Triphasée_, et cochez dans **Batteries de la phase L1** les six batteries
+raccordées à L1 (par exemple deux 2400 AC, une 2400 Pro, deux 800 Pro et un
+800 sans batterie), dans **L2** les six de L2 et dans **L3** les cinq de L3.
+La carte affiche les totaux du site, une ligne comme `L1 (6) · 60 %` —
+`⌂ 1890 · ↑ 500 · ↓ 1000 · ☀ 1400 W` par phase, et `Équilibre des phases` —
+`Δ 1490 W · L1 la plus haute` en orange au-delà du seuil. Ajoutez un widget
+**Énergie du jour** avec les trois mêmes listes pour les kWh de la journée.
+Une installation monophasée garde le réglage par défaut et laisse les listes
+vides. Le widget **Groupe de batteries** reste disponible pour tout autre
+regroupement.
 
 Chaque widget n'affiche que ce que la batterie possède : un SolarFlow 800
 utilisé sans pack de batterie garde son solaire, sa sortie maison et sa limite

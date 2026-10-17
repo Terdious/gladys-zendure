@@ -10,6 +10,31 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Added
+
+- **Zendure site** widget: the whole installation on one card, with an
+  **Electrical layout** setting. Single-phase sums the selected batteries
+  (none: all); three-phase takes the batteries ticked in the **Phase L1**,
+  **L2** and **L3** lists and adds one line per phase (home output, charge,
+  discharge, solar) and a **Phase balance** line (gap between the highest and
+  the lowest home output, in warning past the **Phase imbalance alert**
+  setting, 500 W by default). Both show the site totals (capacity-weighted
+  state of charge, powers, stored energy), stored energy over the known
+  capacity, the site's time left at the current power, the batteries per
+  source (local, cloud, unreachable) and alert lines (unreachable, cloud
+  fallback, a battery in two phases, in none, or deleted). Batteries without a
+  pack and AC-coupled models follow the 1.6.0 rules; an unreachable battery's
+  stale powers are left out of the sums.
+- **Energy today** widget: charged, discharged, solar and home output energy
+  since local midnight, per site or per phase (same layout and phase
+  settings), the gap between the phases, and a chart of the home output per
+  30 minutes. The day starts at the midnight of the widget's **Timezone**
+  setting (IANA name, `Europe/Paris` by default; Gladys gives no timezone to
+  an integration), DST-aware. The energy counters now keep a snapshot of their
+  totals every 30 minutes for 26 hours, saved atomically in
+  `/data/energy.json` with the totals (additive: 1.6.0 reads the file as
+  before); an interval crossing a slot boundary is split there.
+
 ## [1.6.0] - 2026-10-17
 
 ### Added
