@@ -19,6 +19,7 @@ import { GladysIntegration, logger } from '@gladysassistant/integration-sdk';
 import { normalizeConfig } from './src/config.js';
 import { SCENE_ACTIONS } from './src/scenes.js';
 import { WIDGETS } from './src/widgets.js';
+import { ACTIONS } from './src/actions.js';
 import {
   DEVICE_BLUEPRINTS,
   syncDiscoveredDevices,
@@ -79,6 +80,13 @@ gladys.onConfigUpdated(async (newConfig) => {
     startPushSubscriptions();
   }
 });
+
+// --- Configuration screen actions ---------------------------------------------
+// One handler per manifest `actions` key (src/actions.js): the read-only
+// diagnostics a user runs before opening an issue.
+for (const [actionKey, handler] of Object.entries(ACTIONS)) {
+  gladys.onAction(actionKey, (fields) => handler(gladys, { fields, config }));
+}
 
 // --- Scene actions (Gladys 5.1+) ----------------------------------------------
 // One handler per manifest `scene_actions` key (src/scenes.js). The scene

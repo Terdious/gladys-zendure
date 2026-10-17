@@ -17,7 +17,13 @@ import { createLogger } from '@gladysassistant/integration-sdk';
 
 import { solarflow } from './solarflow.js';
 
-export { saveEnergyMeters, controlDevice, describeBatteries } from './solarflow.js';
+export {
+  saveEnergyMeters,
+  controlDevice,
+  describeBatteries,
+  describeDiagnostics,
+  testLocalApi,
+} from './solarflow.js';
 
 const logger = createLogger({ name: 'discovery' });
 

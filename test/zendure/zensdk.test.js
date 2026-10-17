@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import {
   createZendureZenSdk,
   parseAddressOverrides,
+  probeZenSdkReport,
+  zenSdkErrorCode,
   parseAddressOverridesDetailed,
   zenSdkAddressOf,
   zenSdkMdnsName,
@@ -260,4 +262,85 @@ test('stop() ends the loops and keeps the caches; start() resumes once', async (
   const resumed = fetchImpl.calls.length - stoppedAt;
   assert.ok(resumed >= 2 && resumed <= 8, `${resumed} requests in 110 ms`);
   runtime.disconnect();
+});
+
+test('probeZenSdkReport reads the report once, with its timing', async () => {
+  const fetchImpl = createFakeZenSdkFetch({ reports: { [DEVICE.ip]: REPORT } });
+  const result = await probeZenSdkReport({ host: DEVICE.ip, fetchImpl });
+  assert.equal(result.ok, true);
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body, REPORT);
+  assert.equal(result.errorCode, null);
+  assert.ok(result.durationMs >= 0);
+  assert.deepEqual(
+    fetchImpl.calls.map((call) => `${call.method} ${call.path}`),
+    ['GET /properties/report'],
+  );
+});
+
+test('probeZenSdkReport never throws: system errors, timeouts, HTTP and bad bodies', async () => {
+  const unreachable = createFakeZenSdkFetch();
+  assert.equal(
+    (await probeZenSdkReport({ host: DEVICE.ip, fetchImpl: unreachable })).errorCode,
+    'EHOSTUNREACH',
+  );
+
+  const hanging = createFakeZenSdkFetch();
+  hanging.hang(DEVICE.ip);
+  const timedOut = await probeZenSdkReport({ host: DEVICE.ip, fetchImpl: hanging, timeoutMs: 20 });
+  assert.equal(timedOut.errorCode, 'TIMEOUT');
+  assert.match(timedOut.error, /no answer within/);
+
+  const notFound = async () => ({ status: 404, text: async () => '' });
+  assert.deepEqual(
+    (({ ok, status, errorCode }) => ({ ok, status, errorCode }))(
+      await probeZenSdkReport({ host: DEVICE.ip, fetchImpl: notFound }),
+    ),
+    { ok: false, status: 404, errorCode: 'HTTP_404' },
+  );
+
+  const html = async () => ({ status: 200, text: async () => '<html></html>' });
+  assert.equal(
+    (await probeZenSdkReport({ host: DEVICE.ip, fetchImpl: html })).errorCode,
+    'INVALID_JSON',
+  );
+  const empty = async () => ({ status: 200, text: async () => '{"ok":true}' });
+  assert.equal(
+    (await probeZenSdkReport({ host: DEVICE.ip, fetchImpl: empty })).errorCode,
+    'NO_PROPERTIES',
+  );
+  assert.equal(
+    (await probeZenSdkReport({ host: 'bad/host', fetchImpl: empty })).errorCode,
+    'INVALID_ADDRESS',
+  );
+  assert.equal(zenSdkErrorCode(new Error('boom')), 'ERROR');
+});
+
+test('probeDevice waits for the poll in flight and leaves the cache and health alone', async () => {
+  let release;
+  const order = [];
+  const fetchImpl = async () => {
+    order.push('request');
+    if (order.length === 1) {
+      await new Promise((resolve) => {
+        release = resolve;
+      });
+    }
+    return { status: 200, text: async () => JSON.stringify(REPORT) };
+  };
+  const runtime = runtimeFor(fetchImpl);
+  const poll = runtime.pollAll();
+  const probe = runtime.probeDevice(DEVICE.snNumber);
+  await new Promise((resolve) => setImmediate(resolve));
+  // The probe has not sent its own request while the poll is in flight.
+  assert.equal(order.length, 1);
+  release();
+  await poll;
+  const result = await probe;
+  assert.equal(result.ok, true);
+  assert.equal(order.length, 2);
+  const health = runtime.getDeviceHealth(DEVICE.snNumber);
+  assert.equal(health.failures, 0);
+  assert.equal(runtime.getStats().requests, 1, 'the probe is not a polling request');
+  assert.equal(await runtime.probeDevice('unknown'), null);
 });

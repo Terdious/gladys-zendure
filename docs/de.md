@@ -305,3 +305,37 @@ not answering at 192.168.1.42 (from the cloud): EHOSTUNREACH`. `ENOTFOUND`
   Batterie nicht erreicht (anderes Netz, VLAN, Firewall) oder ihre Firmware
   noch keine lokale API hat. Alle 5 Minuten fasst eine Zeile
   `telemetry(local http):` zusammen, welche Batterien antworten.
+
+### Diagnose
+
+Zwei rein lesende Schaltflächen im Tab **Konfiguration** der Integration
+liefern das Gesamtbild auf Abruf, ohne dass du die Protokolle durchsuchen
+musst. Keine schreibt in eine Batterie oder ändert ihren Transport.
+
+- **Diagnose der Batterien**: ein Textbericht der Installation — die Version
+  der Integration, die Konfiguration (nie der Cloud-Schlüssel), die API der
+  Zendure-Cloud, jeder Broker (verbunden oder nicht, Neuverbindungen der
+  letzten 5 Minuten, Cloud-Broker im Ruhezustand, weil jede Batterie lokal
+  läuft, Warnungen bei Sitzungsübernahme), die Abfrage der lokalen API, dann
+  ein Block pro Batterie: die Quelle, die sie bedient, und warum, das Alter
+  ihrer letzten Daten pro Quelle, die Adresse ihrer lokalen API (aus den
+  Optionen, der Cloud oder mDNS) und ihr Zustand, die Packs, der
+  Solareingang, die gemeldeten Einstellungen (Limits, AC-Modus, Ladestände),
+  die Restzeit und die Energiezähler. Trage unter **Batterie** einen Namen
+  oder eine Seriennummer ein, um nur eine Batterie zu beschreiben.
+- **Lokale API einer Batterie testen**: liest einmal, sofort, `GET
+/properties/report` an der Adresse, die die Integration verwendet, und
+  zeigt die Antwortzeit, die Herkunft der Adresse und alle Eigenschaften, die
+  die Batterie liefert — oder den genauen Fehler mit einem Hinweis
+  (`ENOTFOUND` bei einem `.local`-Namen: **Adressen der lokalen API**
+  ausfüllen; `EHOSTUNREACH`, `ECONNREFUSED` oder eine Zeitüberschreitung:
+  Netzwerk oder Firmware).
+
+Standardmäßig werden Seriennummern gekürzt (`WOB1…0159`) und lokale Adressen
+durch `<local-ip>` ersetzt: Füge den Bericht unverändert in ein
+[GitHub-Issue](https://github.com/Terdious/gladys-zendure/issues) ein,
+zwischen zwei Zeilen mit drei Backticks. **Seriennummern und lokale Adressen
+anzeigen** zeigt sie vollständig, nur für deine eigenen Prüfungen: Diese
+Fassung nicht öffentlich posten. Kein Bericht enthält jemals den
+Cloud-Schlüssel oder ein Passwort. Beide Berichte werden auch maskiert in die
+Protokolle der Integration geschrieben.

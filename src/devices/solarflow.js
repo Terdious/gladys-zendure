@@ -20,13 +20,14 @@
 import { createLogger, DEVICE_TRANSPORTS } from '@gladysassistant/integration-sdk';
 
 import { toGladysPollFrequency } from '../config.js';
-import { fetchCloudData } from '../zendure/client.js';
+import { decodeCloudKey, fetchCloudData } from '../zendure/client.js';
 import { batteryPresenceOf, hasSolarInput, remainingTimeOf } from '../zendure/battery.js';
 import { modelCapabilitiesOf } from '../zendure/constants.js';
 import {
   createZendureZenSdk,
   parseAddressOverrides,
   parseAddressOverridesDetailed,
+  probeZenSdkReport,
   zenSdkAddressOf,
   ZENSDK_FAILURES_BEFORE_DOWN,
 } from '../zendure/zensdk.js';
@@ -45,6 +46,7 @@ import {
 import {
   createEnergyMeters,
   deviceCapacityKwh,
+  packCapacityKwh,
   ENERGY_FLOWS,
   ENERGY_SAVE_INTERVAL_IN_MS,
 } from '../zendure/energy.js';
@@ -74,6 +76,8 @@ const MQTT_STALE_TIMEOUT_IN_MS = 90 * 1000;
 
 let dependencies = {};
 let cloudData = null;
+// Outcome of the last cloud deviceList request, for the diagnostic action.
+let lastCloudFetch = null;
 // The cloud broker is shared by every device; a locally-reachable device is
 // served by a runtime connected to the local broker it publishes to.
 let cloudMqttRuntime = null;
@@ -499,6 +503,7 @@ export function resetSolarflowRuntime() {
   }
   dynamicUnsubscribes = [];
   cloudData = null;
+  lastCloudFetch = null;
 }
 
 function deviceKeyOf(rawCloudDevice) {
@@ -548,7 +553,15 @@ function supportedDevices(data) {
 
 async function ensureCloudData(config, { refresh = false } = {}) {
   if (!cloudData || refresh) {
-    cloudData = await fetchCloudData(config.cloud_key, { fetchImpl: dependencies.fetchImpl });
+    try {
+      cloudData = await fetchCloudData(config.cloud_key, { fetchImpl: dependencies.fetchImpl });
+      lastCloudFetch = { at: Date.now(), error: null };
+    } catch (e) {
+      // Kept for the diagnostic action: the messages of fetchCloudData never
+      // carry the key (and the report scrubs it anyway).
+      lastCloudFetch = { at: Date.now(), error: e.message || String(e) };
+      throw e;
+    }
     if (refresh) {
       refreshLocalHttpDevices(config);
     }
@@ -1382,6 +1395,30 @@ function buildEnergyStates(gladys, rawCloudDevice, payload, { integrate, at = Da
 }
 
 /**
+ * The source serving a device right now and the payload to read its values
+ * from, out of the runtimes already running (never opens a connection).
+ * @param {object} config normalized configuration
+ * @param {object} rawCloudDevice device from the cloud deviceList
+ * @param {string|undefined} effective source tracked by the evaluator
+ * @returns {{ source: string, payload: object }}
+ */
+function currentPayloadOf(config, rawCloudDevice, effective) {
+  const source =
+    rawCloudDevice.online === false
+      ? 'unreachable'
+      : (effective ?? staticSourceOf(config, rawCloudDevice));
+  // The runtime whose cache to read ('unreachable' reads the cloud one).
+  const readSource = isLocalSource(source) ? source : 'cloud';
+  const runtimes = {
+    http: zenSdkRuntime,
+    local: localMqttRuntimes.get(buildLocalBrokerConfig(rawCloudDevice)?.url),
+    cloud: cloudMqttRuntime,
+  };
+  const cached = runtimes[readSource]?.getLatestPayload(telemetryKeyOf(readSource, rawCloudDevice));
+  return { source, payload: payloadFor(readSource, rawCloudDevice, cached) };
+}
+
+/**
  * Snapshot of every supported battery for the dashboard widgets: names, the
  * source serving each one, the latest telemetry and the reported control
  * settings. Read-only: it uses the runtimes already running and never opens
@@ -1398,21 +1435,7 @@ export async function describeBatteries(gladys, config) {
     const effective = hasLocalCandidate(config, rawCloudDevice)
       ? effectiveSourceByDeviceKey.get(deviceKey)?.source
       : undefined;
-    const source =
-      rawCloudDevice.online === false
-        ? 'unreachable'
-        : (effective ?? staticSourceOf(config, rawCloudDevice));
-    // The runtime whose cache to read ('unreachable' reads the cloud one).
-    const readSource = isLocalSource(source) ? source : 'cloud';
-    const runtimes = {
-      http: zenSdkRuntime,
-      local: localMqttRuntimes.get(buildLocalBrokerConfig(rawCloudDevice)?.url),
-      cloud: cloudMqttRuntime,
-    };
-    const cached = runtimes[readSource]?.getLatestPayload(
-      telemetryKeyOf(readSource, rawCloudDevice),
-    );
-    const payload = payloadFor(readSource, rawCloudDevice, cached);
+    const { source, payload } = currentPayloadOf(config, rawCloudDevice, effective);
 
     const values = {};
     for (const featureMapping of getFeaturesForModel(modelOf(rawCloudDevice))) {
@@ -1466,6 +1489,404 @@ export async function describeBatteries(gladys, config) {
       settings,
     };
   });
+}
+
+// --- Diagnostic (manifest actions fleet_diagnostic / test_local_api) ---------
+// Read-only snapshots of the runtimes for src/diagnostic.js, which formats and
+// redacts them. Nothing here opens a broker connection or changes a source:
+// a diagnostic must observe the installation, not disturb it.
+
+// Window of the "(re)connections" count of the brokers in the diagnostic.
+export const DIAGNOSTIC_RECONNECT_WINDOW_IN_MS = 5 * 60 * 1000;
+
+/**
+ * Whether a raw cloud device matches what the user typed: its name, serial
+ * number, device key or Gladys external id (case-insensitive).
+ * @param {object} rawCloudDevice device from the cloud deviceList
+ * @param {string} reference typed reference
+ * @returns {boolean}
+ */
+function matchesReference(rawCloudDevice, reference) {
+  const ref = String(reference || '')
+    .trim()
+    .toLowerCase();
+  if (ref === '') {
+    return false;
+  }
+  const candidates = [
+    rawCloudDevice.deviceName,
+    rawCloudDevice.snNumber,
+    deviceKeyOf(rawCloudDevice),
+  ].map((value) => String(value || '').toLowerCase());
+  return (
+    candidates.includes(ref) ||
+    ref.endsWith(`:${String(deviceKeyOf(rawCloudDevice)).toLowerCase()}`)
+  );
+}
+
+/**
+ * The supported devices a reference designates: exact matches (name, serial,
+ * device key, external id), else the devices whose name contains it.
+ * @param {Array<object>} devices supported raw cloud devices
+ * @param {string} reference typed reference
+ * @returns {Array<object>}
+ */
+export function findDevicesByReference(devices, reference) {
+  const exact = devices.filter((rawCloudDevice) => matchesReference(rawCloudDevice, reference));
+  if (exact.length > 0) {
+    return exact;
+  }
+  const ref = String(reference || '')
+    .trim()
+    .toLowerCase();
+  return ref === ''
+    ? []
+    : devices.filter((rawCloudDevice) =>
+        String(rawCloudDevice.deviceName || '')
+          .toLowerCase()
+          .includes(ref),
+      );
+}
+
+/**
+ * Every secret the diagnostic text must never contain, whatever the options:
+ * the cloud key and its app key, the cloud and local broker credentials.
+ * @param {object} config normalized configuration
+ * @returns {Array<string>}
+ */
+function diagnosticSecretsOf(config) {
+  const secrets = [config.cloud_key];
+  try {
+    secrets.push(decodeCloudKey(config.cloud_key).appKey);
+  } catch {
+    // No usable key: nothing more to hide.
+  }
+  secrets.push(cloudData?.mqtt?.username, cloudData?.mqtt?.password);
+  for (const rawCloudDevice of cloudData?.deviceList || []) {
+    secrets.push(rawCloudDevice.username, rawCloudDevice.password);
+  }
+  return secrets.filter((secret) => typeof secret === 'string' && secret.trim() !== '');
+}
+
+/** Diagnostic view of one MQTT runtime (no credential: url and counters only). */
+function brokerDiagnosticOf(runtime, url, now) {
+  const stats = runtime.getStats();
+  return {
+    url,
+    connected: stats.connected,
+    connectCount: stats.connectCount,
+    reconnectsInWindow:
+      typeof runtime.connectionsSince === 'function'
+        ? runtime.connectionsSince(now - DIAGNOSTIC_RECONNECT_WINDOW_IN_MS)
+        : null,
+    takeOverWarned: stats.takeOverWarned === true,
+    trackedDevices: stats.trackedDevices,
+    messagesReceived: stats.messagesReceived,
+  };
+}
+
+/**
+ * State of the local HTTP API of a device for the diagnostic: why it is not
+ * used, or its health.
+ * @param {object} config normalized configuration
+ * @param {object} rawCloudDevice device from the cloud deviceList
+ * @param {number} now current time (ms)
+ * @returns {object}
+ */
+function localHttpDiagnosticOf(config, rawCloudDevice, now) {
+  const model = modelOf(rawCloudDevice);
+  const overrides = parseAddressOverrides(config.local_http_addresses);
+  const address = zenSdkAddressOf(rawCloudDevice, overrides);
+  if (!modelCapabilitiesOf(model).zenSdk) {
+    return { status: 'unsupported-model', address: null };
+  }
+  if (address === null) {
+    return { status: 'no-serial', address: null };
+  }
+  if (config.enable_local_http !== true) {
+    return { status: 'off', address };
+  }
+  const health = zenSdkRuntime?.getDeviceHealth(rawCloudDevice.snNumber) || null;
+  if (!zenSdkRuntime || !health) {
+    return { status: zenSdkRuntime ? 'not-polled' : 'not-started', address };
+  }
+  return {
+    status: localHttpStateOf(config, rawCloudDevice, now) || 'down',
+    address: { host: health.host, origin: health.origin },
+    failures: health.failures,
+    lastError: health.lastError,
+    lastSuccessAt: health.lastSuccessAt,
+  };
+}
+
+/** Pack list of a payload (flat local MQTT or `properties` + `packData`). */
+function packsOf(payload) {
+  const packs = payload?.packData ?? payload?.properties?.packData;
+  return Array.isArray(packs) ? packs : null;
+}
+
+/**
+ * Snapshot of the whole installation for the fleet diagnostic action: the
+ * configuration (no secret), the cloud API, every broker, the local HTTP
+ * runtime, and one entry per battery (optionally filtered). RAW values:
+ * src/diagnostic.js redacts them. `secrets` lists what must never be shown.
+ * @param {object} gladys Gladys SDK instance
+ * @param {object} config normalized configuration
+ * @param {{ filter?: string, now?: number }} [options]
+ * @returns {Promise<object>}
+ */
+export async function describeDiagnostics(gladys, config, { filter = '', now = Date.now() } = {}) {
+  if (!cloudData && config.cloud_key) {
+    // A first diagnostic before any discovery: try once, the outcome is
+    // part of the report.
+    await ensureCloudData(config).catch(() => {});
+  }
+  const allDevices = cloudData?.deviceList || [];
+  const supported = supportedDevices(cloudData);
+  const { overrides, invalid } = parseAddressOverridesDetailed(config.local_http_addresses);
+  const knownSerials = new Set(supported.map((d) => String(d.snNumber || '').toUpperCase()));
+
+  const filterText = String(filter || '').trim();
+  const selected = filterText === '' ? supported : findDevicesByReference(supported, filterText);
+
+  const brokers = [];
+  if (cloudMqttRuntime) {
+    brokers.push({
+      kind: 'cloud',
+      ...brokerDiagnosticOf(cloudMqttRuntime, cloudData?.mqtt?.url || 'cloud', now),
+    });
+  }
+  for (const [url, runtime] of localMqttRuntimes) {
+    brokers.push({ kind: 'local', ...brokerDiagnosticOf(runtime, url, now) });
+  }
+
+  const devices = selected.map((rawCloudDevice) => {
+    const deviceKey = deviceKeyOf(rawCloudDevice);
+    const model = modelOf(rawCloudDevice);
+    const tracked = hasLocalCandidate(config, rawCloudDevice)
+      ? effectiveSourceByDeviceKey.get(deviceKey)
+      : undefined;
+    const { source, payload } = currentPayloadOf(config, rawCloudDevice, tracked?.source);
+    const degraded = source === 'cloud' && expectsLocal(config, rawCloudDevice);
+    const brokerUrl = isDeviceLocallyReachable(config, rawCloudDevice)
+      ? buildLocalBrokerConfig(rawCloudDevice).url
+      : null;
+    const localRuntime = brokerUrl ? localMqttRuntimes.get(brokerUrl) || null : null;
+
+    const values = {};
+    for (const featureMapping of getFeaturesForModel(model)) {
+      if (!featureMapping.computed) {
+        const value = extractMetricValue(payload, featureMapping.metricPaths);
+        values[featureMapping.key] =
+          value === null ? null : normalizeMetricValue(featureMapping.key, value);
+      }
+    }
+    const scale = socScaleOf(payload);
+    const settings = {
+      outputLimit: reportedValue(payload, 'outputLimit'),
+      inputLimit: reportedValue(payload, 'inputLimit'),
+      acMode: reportedValue(payload, 'acMode'),
+      socSet: reportedValue(payload, 'socSet'),
+      minSoc: reportedValue(payload, 'minSoc'),
+      socScale: scale,
+      smartMode: reportedValue(payload, 'smartMode'),
+    };
+    const capacityKwh = deviceCapacityKwh(payload);
+    const packs = packsOf(payload);
+    const hasBattery = batteryPresenceOf(model, payload);
+    const scaled = (value) => (value === null || scale === null ? null : Math.round(value / scale));
+    return {
+      name: rawCloudDevice.deviceName || model,
+      model,
+      serial: rawCloudDevice.snNumber || null,
+      deviceKey,
+      externalId: gladys.externalIds(DEVICE_TYPE, deviceKey).device,
+      online: rawCloudDevice.online,
+      source,
+      sourceSince: tracked?.since ?? null,
+      sourceTracked: tracked !== undefined,
+      degraded,
+      degradedReason: degraded
+        ? (hasLocalHttpAnswered(config, rawCloudDevice)
+            ? LOCAL_HTTP_SILENT_MESSAGE
+            : LOCAL_SILENT_MESSAGE
+          ).en
+        : null,
+      lastDataAt: {
+        http: zenSdkRuntime?.getLastPayloadAt(rawCloudDevice.snNumber) ?? null,
+        local: localRuntime?.getLastPayloadAt(rawCloudDevice.snNumber) ?? null,
+        cloud: cloudMqttRuntime?.getLastPayloadAt(deviceKey) ?? null,
+      },
+      localHttp: localHttpDiagnosticOf(config, rawCloudDevice, now),
+      localMqtt: {
+        configured: brokerUrl !== null,
+        advertised: buildLocalBrokerConfig(rawCloudDevice) !== null,
+        brokerUrl,
+        connected: localRuntime ? localRuntime.connected === true : null,
+      },
+      battery: {
+        presence: hasBattery,
+        level: values.batteryLevel ?? null,
+        packNum: reportedValue(payload, 'packNum'),
+        packs: packs
+          ? packs.map((pack) => ({
+              sn: typeof pack?.sn === 'string' ? pack.sn : null,
+              capacityKwh: packCapacityKwh(pack),
+              socLevel: typeof pack?.socLevel === 'number' ? pack.socLevel : null,
+            }))
+          : null,
+        capacityKwh,
+      },
+      solar: {
+        modelHasInput: modelCapabilitiesOf(model).solarInput,
+        power: values.solarInputPower ?? null,
+        hasSolar: hasSolarInput(model, values.solarInputPower),
+      },
+      powers: values,
+      settings,
+      remaining: {
+        remainOutTime: reportedValue(payload, 'remainOutTime'),
+        remainInputTime: reportedValue(payload, 'remainInputTime'),
+        computed:
+          hasBattery === false
+            ? null
+            : remainingTimeOf(payload, {
+                level: values.batteryLevel ?? null,
+                chargePower: values.batteryOutputPower ?? null,
+                dischargePower: values.batteryInputPower ?? null,
+                capacityKwh,
+                socSet: scaled(settings.socSet),
+                minSoc: scaled(settings.minSoc),
+              }),
+      },
+      energy: energyLoaded ? getEnergyMeters().totals(deviceKey) : null,
+    };
+  });
+
+  const currentSources = supported.map((rawCloudDevice) => {
+    const tracked = hasLocalCandidate(config, rawCloudDevice)
+      ? effectiveSourceByDeviceKey.get(deviceKeyOf(rawCloudDevice))?.source
+      : undefined;
+    return { rawCloudDevice, source: currentPayloadOf(config, rawCloudDevice, tracked).source };
+  });
+  const zenSdkStats = zenSdkRuntime ? zenSdkRuntime.getStats() : null;
+
+  return {
+    generatedAt: now,
+    config: {
+      cloudKeySet: config.cloud_key !== '',
+      pollFrequency: config.poll_frequency,
+      gladysPollFrequencyMs: toGladysPollFrequency(config.poll_frequency),
+      enableLocalHttp: config.enable_local_http === true,
+      enableLocalMqtt: config.enable_local_mqtt === true,
+      featureNames: config.feature_names,
+      addressOverrides: {
+        count: overrides.size,
+        invalid: invalid.length,
+        unmatched: [...overrides.keys()].filter((serial) => !knownSerials.has(serial)),
+      },
+    },
+    cloud: {
+      loaded: cloudData !== null,
+      lastFetchAt: lastCloudFetch?.at ?? null,
+      lastFetchError: lastCloudFetch?.error ?? null,
+      deviceCount: allDevices.length,
+      supportedCount: supported.length,
+      unsupportedModels: allDevices
+        .filter((rawCloudDevice) => !supported.includes(rawCloudDevice))
+        .map((rawCloudDevice) => modelOf(rawCloudDevice)),
+      brokerUrl: cloudData?.mqtt?.url || null,
+    },
+    cloudBroker: {
+      connected: cloudMqttRuntime !== null,
+      needing: currentSources
+        .filter(({ source }) => !isLocalSource(source))
+        .map(({ rawCloudDevice }) => rawCloudDevice.deviceName || modelOf(rawCloudDevice)),
+      allLocal:
+        currentSources.length > 0 && currentSources.every(({ source }) => isLocalSource(source)),
+      lastNeededAt: cloudLastNeededAt || null,
+      holdMs: CLOUD_HOLD_TIME_IN_MS,
+    },
+    brokers,
+    localHttp: zenSdkStats
+      ? {
+          running: zenSdkStats.connected,
+          startedAt: zenSdkStartedAt || null,
+          trackedDevices: zenSdkStats.trackedDevices,
+          devicesUp: zenSdkStats.devicesUp,
+          requests: zenSdkStats.requests,
+          failures: zenSdkStats.failures,
+        }
+      : null,
+    filter: filterText,
+    availableNames: supported.map((d) => d.deviceName || modelOf(d)),
+    devices,
+    secrets: diagnosticSecretsOf(config),
+  };
+}
+
+/**
+ * Test the local API of ONE battery now (test_local_api action): resolve its
+ * address like the polling does and read `GET /properties/report` once,
+ * through the running runtime when it polls the device (one request in
+ * flight per device), directly otherwise. Never writes to the device.
+ * @param {object} gladys Gladys SDK instance
+ * @param {object} config normalized configuration
+ * @param {string} reference name, serial number, device key or external id
+ * @returns {Promise<object>} raw outcome, formatted by src/diagnostic.js
+ */
+export async function testLocalApi(gladys, config, reference) {
+  const data = await ensureCloudData(config);
+  const supported = supportedDevices(data);
+  const matches = findDevicesByReference(supported, reference);
+  const base = {
+    reference: String(reference || '').trim(),
+    availableNames: supported.map((d) => d.deviceName || modelOf(d)),
+    secrets: diagnosticSecretsOf(config),
+  };
+  if (matches.length !== 1) {
+    return {
+      ...base,
+      found: false,
+      ambiguous: matches.map((d) => d.deviceName || modelOf(d)),
+    };
+  }
+  const [rawCloudDevice] = matches;
+  const model = modelOf(rawCloudDevice);
+  const overrides = parseAddressOverrides(config.local_http_addresses);
+  const address = zenSdkAddressOf(rawCloudDevice, overrides);
+  const outcome = {
+    ...base,
+    found: true,
+    device: {
+      name: rawCloudDevice.deviceName || model,
+      model,
+      serial: rawCloudDevice.snNumber || null,
+      deviceKey: deviceKeyOf(rawCloudDevice),
+    },
+    optionEnabled: config.enable_local_http === true,
+    modelHasZenSdk: modelCapabilitiesOf(model).zenSdk,
+    address,
+    viaRuntime: false,
+    result: null,
+  };
+  if (!outcome.modelHasZenSdk || address === null) {
+    return outcome;
+  }
+  const polled =
+    zenSdkRuntime?.getDeviceHealth(rawCloudDevice.snNumber)?.host === address.host
+      ? zenSdkRuntime
+      : null;
+  if (polled) {
+    outcome.viaRuntime = true;
+    outcome.result = await polled.probeDevice(rawCloudDevice.snNumber);
+  } else {
+    outcome.result = await probeZenSdkReport({
+      host: address.host,
+      fetchImpl: dependencies.localFetchImpl,
+    });
+  }
+  return outcome;
 }
 
 /**

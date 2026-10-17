@@ -32,6 +32,21 @@ the notes of the version's GitHub Release.
   from its capacity and charge levels like Zendure-HA does. The battery group
   shows it on each battery line.
 
+- Two read-only diagnostic buttons on the Configuration screen, to paste into
+  a GitHub issue. **Diagnostic of the batteries** reports the whole
+  installation: version, configuration (never the cloud key), Zendure cloud
+  API, each broker (connected, reconnections over the last 5 minutes, cloud
+  idle because everything is local, take-over warnings), the local API
+  polling, then per battery its source and why, the age of its last data per
+  source, its local API address, origin and state, packs, solar input,
+  reported settings, remaining time and energy counters; optionally for one
+  battery. **Test the local API of a battery** reads its
+  `GET /properties/report` once, now, and shows the timing, the address origin
+  and the properties, or the exact error with a hint. Serial numbers are
+  shortened and local addresses hidden unless **Show serial numbers and local
+  addresses** is checked; keys and passwords never appear. Both reports are
+  also logged, masked.
+
 ### Changed
 
 - The Zendure cloud MQTT broker is only connected while a device needs it:

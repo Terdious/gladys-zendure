@@ -165,6 +165,87 @@ function describeError(error, timeoutMs) {
 const isPlainObject = (value) =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
+// Timeout of an on-demand test of the local API (diagnostic action): longer
+// than the polling one, so a slow device reads as slow rather than dead.
+export const ZENSDK_PROBE_TIMEOUT_IN_MS = 5 * 1000;
+
+/**
+ * Machine-readable code of a failed request, for the diagnostic hints:
+ * the system error code (ENOTFOUND, ECONNREFUSED...), TIMEOUT, or ERROR.
+ * @param {Error} error
+ * @returns {string}
+ */
+export function zenSdkErrorCode(error) {
+  if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+    return 'TIMEOUT';
+  }
+  const code = error?.cause?.code || error?.code;
+  return typeof code === 'string' && /^[A-Z0-9_]+$/.test(code) ? code : 'ERROR';
+}
+
+/**
+ * One `GET /properties/report` with its timing, for the diagnostic action.
+ * Read-only, never throws, and touches no runtime state: the outcome is
+ * returned whatever happened.
+ * @param {object} options
+ * @param {string} options.host address of the device
+ * @param {typeof fetch} [options.fetchImpl] injectable fetch (tests)
+ * @param {number} [options.timeoutMs]
+ * @param {() => number} [options.clock] injectable clock (tests)
+ * @returns {Promise<{ ok: boolean, status: number|null, durationMs: number,
+ *   body: object|null, errorCode: string|null, error: string|null }>}
+ */
+export async function probeZenSdkReport({
+  host,
+  fetchImpl = globalThis.fetch,
+  timeoutMs = ZENSDK_PROBE_TIMEOUT_IN_MS,
+  clock = () => Date.now(),
+}) {
+  const startedAt = clock();
+  const result = (fields) => ({
+    ok: false,
+    status: null,
+    body: null,
+    errorCode: null,
+    error: null,
+    ...fields,
+    durationMs: Math.max(0, clock() - startedAt),
+  });
+  if (!HOST_PATTERN.test(String(host || ''))) {
+    return result({ errorCode: 'INVALID_ADDRESS', error: 'invalid address' });
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(new DOMException('request timed out', 'TimeoutError')),
+    timeoutMs,
+  );
+  try {
+    const response = await fetchImpl(`http://${host}/properties/report`, {
+      headers: HEADERS,
+      signal: controller.signal,
+    });
+    const status = response?.status ?? null;
+    if (status === null || status >= 400) {
+      return result({ status, errorCode: `HTTP_${status}`, error: `HTTP ${status}` });
+    }
+    const text = await response.text();
+    let body;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      return result({ status, errorCode: 'INVALID_JSON', error: 'the answer is not JSON' });
+    }
+    if (!isPlainObject(body) || !isPlainObject(body.properties)) {
+      return result({ status, errorCode: 'NO_PROPERTIES', error: 'no properties in the answer' });
+    }
+    return result({ ok: true, status, body });
+  } catch (e) {
+    return result({ errorCode: zenSdkErrorCode(e), error: describeError(e, timeoutMs) });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Create the zenSDK local HTTP runtime.
  * @param {object} [options]
@@ -489,6 +570,31 @@ export function createZendureZenSdk({
         lastSuccessAt: entry.lastSuccessAt,
         everAnswered: entry.lastSuccessAt !== null,
       };
+    },
+
+    /**
+     * Test the local API of one polled device now (diagnostic action): waits
+     * for its poll in flight (one request per device at a time) and takes a
+     * slot of the global cap, then reads the report without touching the
+     * cache nor the health. Null when the device is not polled.
+     * @param {string} serial device serial number
+     * @param {object} [options] `{ timeoutMs }`
+     * @returns {Promise<object|null>} see probeZenSdkReport
+     */
+    async probeDevice(serial, { timeoutMs: probeTimeoutMs = ZENSDK_PROBE_TIMEOUT_IN_MS } = {}) {
+      const entry = devices.get(serial);
+      if (!entry) {
+        return null;
+      }
+      if (entry.inFlight) {
+        await entry.inFlight.catch(() => {});
+      }
+      await acquireSlot();
+      try {
+        return await probeZenSdkReport({ host: entry.host, fetchImpl, timeoutMs: probeTimeoutMs });
+      } finally {
+        releaseSlot();
+      }
     },
 
     getLatestPayload(serial) {

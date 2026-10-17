@@ -392,6 +392,20 @@ test('reconnections increment connectCount in getStats (watchdog reconnect delta
   assert.equal(runtime.getStats().connected, true);
 });
 
+test('connectionsSince counts the recent (re)connections for the diagnostic', async () => {
+  const { runtime, client } = await createConnectedRuntime();
+  // Strictly after the first connection (same millisecond otherwise).
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const before = Date.now();
+  client.emit('close');
+  client.emit('connect');
+
+  assert.equal(runtime.connectionsSince(0), 2);
+  assert.equal(runtime.connectionsSince(before), 1);
+  assert.equal(runtime.connectionsSince(Date.now() + 1000), 0);
+  assert.equal(runtime.getStats().takeOverWarned, false);
+});
+
 test('getStats reports honest connection, subscription and message counters', async () => {
   const { runtime, client } = await createConnectedRuntime();
   runtime.subscribeDevice(DEVICE);
