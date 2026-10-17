@@ -303,3 +303,36 @@ answering at 192.168.1.42 (from the cloud): EHOSTUNREACH`. `ENOTFOUND` en un
   alcanza la batería (otra red, VLAN, cortafuegos) o que su firmware aún no
   tiene API local. Cada 5 minutos, una línea `telemetry(local http):` resume
   qué baterías responden.
+
+### Diagnóstico
+
+Dos botones de solo lectura, en la pestaña **Configuración** de la
+integración, reconstruyen todo el panorama a petición, sin rebuscar en los
+registros. Ninguno escribe en una batería ni cambia su transporte.
+
+- **Diagnóstico de las baterías**: un informe de texto de la instalación — la
+  versión de la integración, la configuración (nunca la clave de la nube), la
+  API de la nube de Zendure, cada broker (conectado o no, reconexiones de los
+  últimos 5 minutos, broker de la nube en reposo porque todas las baterías son
+  locales, avisos de toma de sesión), el sondeo de la API local, y luego un
+  bloque por batería: la fuente que la sirve y por qué, la antigüedad de sus
+  últimos datos en cada fuente, la dirección de su API local (de las opciones,
+  de la nube o mDNS) y su estado, los packs, la entrada solar, los ajustes que
+  informa (límites, modo AC, niveles de carga), el tiempo restante y los
+  contadores de energía. Rellene **Batería** con un nombre o un número de
+  serie para describir una sola batería.
+- **Probar la API local de una batería**: lee una vez, ahora, `GET
+/properties/report` en la dirección que usa la integración, y muestra el
+  tiempo de respuesta, el origen de la dirección y todas las propiedades que
+  devuelve la batería — o el error exacto con una pista (`ENOTFOUND` en un
+  nombre `.local`: rellene **Direcciones de la API local**; `EHOSTUNREACH`,
+  `ECONNREFUSED` o un tiempo agotado: red o firmware).
+
+Por defecto, los números de serie se acortan (`WOB1…0159`) y las direcciones
+locales se sustituyen por `<local-ip>`: pegue el informe tal cual en una
+[issue de GitHub](https://github.com/Terdious/gladys-zendure/issues), entre dos
+líneas de tres comillas invertidas. **Mostrar los números de serie y
+direcciones locales** los muestra completos, solo para sus propias
+comprobaciones: no publique esa versión. Ningún informe contiene nunca la clave
+de la nube ni una contraseña. Ambos informes se escriben también, ocultados,
+en los registros de la integración.

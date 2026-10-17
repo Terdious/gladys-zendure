@@ -278,3 +278,34 @@ Zendure model skipped: productModel "..."` gives the exact model string the
 within 2 s` mean the container cannot reach the battery (other network,
   VLAN, firewall) or its firmware has no local API yet. Every 5 minutes a
   `telemetry(local http):` line sums up which batteries answer.
+
+### Diagnostic
+
+Two read-only buttons in the **Configuration** tab of the integration rebuild
+the whole picture on demand, so you do not have to dig through the logs.
+Neither writes to a battery nor changes its transport.
+
+- **Diagnostic of the batteries**: a text report of the installation — the
+  integration version, the configuration (never the cloud key), the Zendure
+  cloud API, each broker (connected or not, reconnections over the last
+  5 minutes, cloud broker idle because every battery is local, take-over
+  warnings), the local API polling, then one block per battery: the source
+  serving it and why, the age of its last data on each source, its local API
+  address (from the options, the cloud or mDNS) and state, battery packs,
+  solar input, the settings it reports (limits, AC mode, charge levels),
+  remaining time and energy counters. Fill **Battery** with a name or serial
+  number to report on one battery only.
+- **Test the local API of a battery**: reads `GET /properties/report` once,
+  right away, at the address the integration uses, and shows the answer time,
+  where the address comes from and every property the battery returns — or the
+  exact error with a hint (`ENOTFOUND` on a `.local` name: fill **Local API
+  addresses**; `EHOSTUNREACH`, `ECONNREFUSED` or a timeout: network or
+  firmware).
+
+By default serial numbers are shortened (`WOB1…0159`) and local addresses
+replaced by `<local-ip>`: paste the report as is into a
+[GitHub issue](https://github.com/Terdious/gladys-zendure/issues), between two
+lines of three backticks. **Show serial numbers and local addresses** prints
+them in full, for your own checks only: do not post that version publicly.
+No report ever contains the cloud key or a password. Both reports are also
+written, masked, to the integration logs.

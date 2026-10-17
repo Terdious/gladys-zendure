@@ -14,6 +14,111 @@
   "cover_image": "https://raw.githubusercontent.com/Terdious/gladys-zendure/master/cover.png",
   "transports": ["local", "cloud"],
   "categories": ["energy"],
+  "actions": [
+    {
+      "key": "fleet_diagnostic",
+      "label": {
+        "en": "Diagnostic of the batteries",
+        "fr": "Diagnostic des batteries",
+        "de": "Diagnose der Batterien",
+        "es": "Diagnóstico de las baterías"
+      },
+      "description": {
+        "en": "A text report of the whole installation: configuration (without the key), Zendure cloud, brokers, local API, then each battery (source, last data, address, settings, packs). Copy it into a GitHub issue. Read-only.",
+        "fr": "Un rapport texte de toute l'installation : configuration (sans la clé), cloud Zendure, brokers, API locale, puis chaque batterie (source, dernières données, adresse, réglages, packs). Copiez-le dans une issue GitHub. Lecture seule.",
+        "de": "Ein Textbericht der gesamten Installation: Konfiguration (ohne Schlüssel), Zendure-Cloud, Broker, lokale API, dann jede Batterie (Quelle, letzte Daten, Adresse, Einstellungen, Packs). Kopiere ihn in ein GitHub-Issue. Nur lesend.",
+        "es": "Un informe de texto de toda la instalación: configuración (sin la clave), nube de Zendure, brokers, API local y luego cada batería (fuente, últimos datos, dirección, ajustes, packs). Cópielo en una issue de GitHub. Solo lectura."
+      },
+      "timeout_seconds": 30,
+      "fields": [
+        {
+          "key": "device",
+          "type": "string",
+          "label": {
+            "en": "Battery (name or serial number, optional)",
+            "fr": "Batterie (nom ou numéro de série, facultatif)",
+            "de": "Batterie (Name oder Seriennummer, optional)",
+            "es": "Batería (nombre o número de serie, opcional)"
+          },
+          "description": {
+            "en": "Leave empty for every battery.",
+            "fr": "Laissez vide pour toutes les batteries.",
+            "de": "Leer lassen für alle Batterien.",
+            "es": "Déjelo vacío para todas las baterías."
+          }
+        },
+        {
+          "key": "include_identifiers",
+          "type": "boolean",
+          "default": false,
+          "label": {
+            "en": "Show serial numbers and local addresses",
+            "fr": "Afficher les numéros de série et adresses locales",
+            "de": "Seriennummern und lokale Adressen anzeigen",
+            "es": "Mostrar los números de serie y direcciones locales"
+          },
+          "description": {
+            "en": "Off: serial numbers are shortened and local IP addresses hidden, so the report can be posted publicly. On: shown in full, keep the report private.",
+            "fr": "Désactivé : les numéros de série sont raccourcis et les adresses IP locales masquées, le rapport peut être publié. Activé : affichés en entier, gardez le rapport privé.",
+            "de": "Aus: Seriennummern werden gekürzt und lokale IP-Adressen verborgen, der Bericht kann öffentlich gepostet werden. An: vollständig angezeigt, Bericht privat halten.",
+            "es": "Desactivado: los números de serie se acortan y las direcciones IP locales se ocultan, el informe puede publicarse. Activado: se muestran completos, mantenga el informe privado."
+          }
+        }
+      ]
+    },
+    {
+      "key": "test_local_api",
+      "label": {
+        "en": "Test the local API of a battery",
+        "fr": "Tester l'API locale d'une batterie",
+        "de": "Lokale API einer Batterie testen",
+        "es": "Probar la API local de una batería"
+      },
+      "description": {
+        "en": "Reads the battery's local API once, now, at the address the integration uses: answer time, address origin and reported properties, or the precise error with a hint. Never writes to the battery.",
+        "fr": "Lit une fois, tout de suite, l'API locale de la batterie à l'adresse utilisée par l'intégration : temps de réponse, origine de l'adresse et propriétés remontées, ou l'erreur précise avec une piste. N'écrit jamais dans la batterie.",
+        "de": "Liest die lokale API der Batterie einmal, sofort, an der Adresse, die die Integration verwendet: Antwortzeit, Herkunft der Adresse und gemeldete Eigenschaften, oder der genaue Fehler mit einem Hinweis. Schreibt nie in die Batterie.",
+        "es": "Lee una vez, ahora, la API local de la batería en la dirección que usa la integración: tiempo de respuesta, origen de la dirección y propiedades devueltas, o el error preciso con una pista. Nunca escribe en la batería."
+      },
+      "timeout_seconds": 30,
+      "fields": [
+        {
+          "key": "device",
+          "type": "string",
+          "label": {
+            "en": "Battery (name or serial number)",
+            "fr": "Batterie (nom ou numéro de série)",
+            "de": "Batterie (Name oder Seriennummer)",
+            "es": "Batería (nombre o número de serie)"
+          },
+          "description": {
+            "en": "The battery name as shown in Gladys, or its serial number.",
+            "fr": "Le nom de la batterie tel qu'affiché dans Gladys, ou son numéro de série.",
+            "de": "Der Batteriename wie in Gladys angezeigt, oder seine Seriennummer.",
+            "es": "El nombre de la batería tal como aparece en Gladys, o su número de serie."
+          },
+          "required": true
+        },
+        {
+          "key": "include_identifiers",
+          "type": "boolean",
+          "default": false,
+          "label": {
+            "en": "Show serial numbers and local addresses",
+            "fr": "Afficher les numéros de série et adresses locales",
+            "de": "Seriennummern und lokale Adressen anzeigen",
+            "es": "Mostrar los números de serie y direcciones locales"
+          },
+          "description": {
+            "en": "Off: serial numbers are shortened and local IP addresses hidden, so the report can be posted publicly. On: shown in full, keep the report private.",
+            "fr": "Désactivé : les numéros de série sont raccourcis et les adresses IP locales masquées, le rapport peut être publié. Activé : affichés en entier, gardez le rapport privé.",
+            "de": "Aus: Seriennummern werden gekürzt und lokale IP-Adressen verborgen, der Bericht kann öffentlich gepostet werden. An: vollständig angezeigt, Bericht privat halten.",
+            "es": "Desactivado: los números de serie se acortan y las direcciones IP locales se ocultan, el informe puede publicarse. Activado: se muestran completos, mantenga el informe privado."
+          }
+        }
+      ]
+    }
+  ],
   "config_schema": [
     {
       "key": "intro",

@@ -305,3 +305,37 @@ collé — recollez le manifest à jour pour récupérer les nouveaux champs.
   conteneur ne joint pas la batterie (autre réseau, VLAN, pare-feu) ou que son
   firmware n'a pas encore d'API locale. Toutes les 5 minutes, une ligne
   `telemetry(local http):` résume quelles batteries répondent.
+
+### Diagnostic
+
+Deux boutons en lecture seule, dans l'onglet **Configuration** de
+l'intégration, reconstituent tout le tableau à la demande, sans fouiller les
+journaux. Aucun n'écrit dans une batterie ni ne change son transport.
+
+- **Diagnostic des batteries** : un rapport texte de l'installation — la
+  version de l'intégration, la configuration (jamais la clé cloud), l'API du
+  cloud Zendure, chaque broker (connecté ou non, reconnexions des 5 dernières
+  minutes, broker cloud au repos parce que toutes les batteries sont en local,
+  alertes de prise de session), l'interrogation de l'API locale, puis un bloc
+  par batterie : la source qui la sert et pourquoi, l'âge de ses dernières
+  données sur chaque source, l'adresse de son API locale (des options, du
+  cloud ou mDNS) et son état, les packs, l'entrée solaire, les réglages
+  qu'elle remonte (limites, mode AC, niveaux de charge), le temps restant et
+  les compteurs d'énergie. Renseignez **Batterie** avec un nom ou un numéro de
+  série pour ne décrire qu'une batterie.
+- **Tester l'API locale d'une batterie** : lit une fois `GET
+/properties/report`, tout de suite, à l'adresse utilisée par l'intégration,
+  et affiche le temps de réponse, l'origine de l'adresse et toutes les
+  propriétés renvoyées par la batterie — ou l'erreur exacte avec une piste
+  (`ENOTFOUND` sur un nom en `.local` : renseignez **Adresses de l'API
+  locale** ; `EHOSTUNREACH`, `ECONNREFUSED` ou un délai dépassé : réseau ou
+  firmware).
+
+Par défaut, les numéros de série sont raccourcis (`WOB1…0159`) et les adresses
+locales remplacées par `<local-ip>` : collez le rapport tel quel dans une
+[issue GitHub](https://github.com/Terdious/gladys-zendure/issues), entre deux
+lignes de trois accents graves. **Afficher les numéros de série et adresses
+locales** les affiche en entier, pour vos propres vérifications seulement : ne
+publiez pas cette version. Aucun rapport ne contient jamais la clé cloud ni un
+mot de passe. Les deux rapports sont aussi écrits, masqués, dans les journaux
+de l'intégration.

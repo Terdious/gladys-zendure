@@ -29,6 +29,8 @@ import { createLogger } from '@gladysassistant/integration-sdk';
 const logger = createLogger({ name: 'zendure-mqtt' });
 
 const DEFAULT_CONNECT_TIMEOUT_IN_MS = 12000;
+// How many recent connection times a runtime keeps for the diagnostic.
+const MAX_RECENT_CONNECT_TIMES = 100;
 
 /**
  * Normalize an MQTT URL to a format supported by mqtt.js.
@@ -314,6 +316,9 @@ function createBaseMqttRuntime({
   let lastConnectAt = 0;
   let rapidReconnects = 0;
   let takeOverWarned = false;
+  // Recent connection times (bounded), for the on-demand diagnostic: how many
+  // (re)connections happened in the last few minutes.
+  const recentConnectTimes = [];
 
   function subscribeDevice(rawCloudDevice) {
     if (!rawCloudDevice) {
@@ -512,6 +517,10 @@ function createBaseMqttRuntime({
         refreshSubscriptions();
         connectCount += 1;
         const now = Date.now();
+        recentConnectTimes.push(now);
+        if (recentConnectTimes.length > MAX_RECENT_CONNECT_TIMES) {
+          recentConnectTimes.shift();
+        }
         const isRapid = lastConnectAt !== 0 && now - lastConnectAt < 60 * 1000;
         rapidReconnects = isRapid ? rapidReconnects + 1 : 0;
         lastConnectAt = now;
@@ -610,7 +619,7 @@ function createBaseMqttRuntime({
      * counts of what is actually subscribed/tracked/received right now.
      * @returns {{ connected: boolean, subscribedTopics: number,
      * trackedDevices: number, messagesReceived: number, keysWithPayload: number,
-     * connectCount: number }}
+     * connectCount: number, takeOverWarned: boolean }}
      */
     getStats() {
       return {
@@ -620,7 +629,18 @@ function createBaseMqttRuntime({
         messagesReceived,
         keysWithPayload: latestPayloadByKey.size,
         connectCount,
+        takeOverWarned,
       };
+    },
+
+    /**
+     * Number of (re)connections since a time (diagnostic), counted from the
+     * last MAX_RECENT_CONNECT_TIMES connections.
+     * @param {number} since timestamp (ms)
+     * @returns {number}
+     */
+    connectionsSince(since) {
+      return recentConnectTimes.filter((at) => at >= since).length;
     },
 
     /**
