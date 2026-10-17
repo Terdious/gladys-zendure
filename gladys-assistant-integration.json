@@ -8,8 +8,8 @@
     "de": "Verbinde deine Zendure-Solarbatterien (SolarFlow) über die Zendure-Cloud mit Gladys Assistant.",
     "es": "Conecte sus baterías solares Zendure (SolarFlow) a Gladys Assistant a través de la nube de Zendure."
   },
-  "version": "1.6.0",
-  "docker_image": "ghcr.io/terdious/gladys-zendure:1.6.0",
+  "version": "1.7.0",
+  "docker_image": "ghcr.io/terdious/gladys-zendure:1.7.0",
   "gladys_version": ">=5.1.0",
   "cover_image": "https://raw.githubusercontent.com/Terdious/gladys-zendure/master/cover.png",
   "transports": ["local", "cloud"],
