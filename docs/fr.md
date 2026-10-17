@@ -23,9 +23,20 @@ SolarFlow 800, SolarFlow 800 Pro, SolarFlow 1600, SolarFlow 2400,
 SolarFlow 2400 AC, SolarFlow 2400 Pro et Hyper 2000 (expérimental — mapping de
 télémétrie à confirmer par un testeur de la communauté).
 
+**Matériel non testé** : les SolarFlow 800 Plus, SolarFlow 800 Pro 2 et
+SolarFlow 4000 AC+ sont pris en charge à partir des caractéristiques de
+l'intégration Home Assistant officielle (Zendure-HA), sans qu'un appareil réel
+ait encore été vu. Si vous en possédez un, merci de signaler son comportement
+(un rapport **Diagnostic des batteries** est idéal) dans les
+[issues](https://github.com/Terdious/gladys-zendure/issues).
+
+Le nom de modèle renvoyé par le cloud Zendure est reconnu sans tenir compte de
+la casse ni des espaces (`SolarFlow 800 Pro`, `SolarFlow800Pro`), comme le fait
+Zendure-HA.
+
 ## Fonctionnalités
 
-Chaque batterie est créée avec dix fonctionnalités en lecture seule, dans les
+Chaque batterie est créée avec dix fonctionnalités en lecture seule (plus celles qui dépendent du modèle, plus bas), dans les
 catégories énergie de Gladys (graphiques énergie, historique, tableaux de
 bord) :
 
@@ -63,6 +74,47 @@ fonctionnalités sont mises à jour sur place : leur historique, les scènes et
 les tableaux de bord sont conservés. Ce même **Mettre à jour** ajoute les
 fonctionnalités d'énergie à une batterie créée avant la version 1.5.0.
 
+### Sortie hors réseau, charge depuis le réseau et températures
+
+Selon le modèle, une batterie reçoit aussi ces fonctionnalités :
+
+| Fonctionnalité                       | Catégorie Gladys                  | Unité | Modèles                                                             |
+| ------------------------------------ | --------------------------------- | ----- | ------------------------------------------------------------------- |
+| Puissance de la sortie hors réseau   | Capteur de sortie maison          | W     | 800 Pro, 800 Pro 2, 1600 AC+, 2400 AC, 2400 AC+, 2400 Pro, 4000 AC+ |
+| Énergie de la sortie hors réseau     | Capteur de sortie maison          | kWh   | les mêmes                                                           |
+| Puissance de charge depuis le réseau | Capteur réseau                    | W     | tous les modèles (charge AC)                                        |
+| Énergie chargée depuis le réseau     | Capteur réseau                    | kWh   | tous les modèles                                                    |
+| Température de l'appareil            | Capteur de température d'appareil | °C    | tous les modèles, si remontée                                       |
+| Température du pack le plus chaud    | Capteur de température d'appareil | °C    | tous les modèles, si remontée                                       |
+
+- **Sortie hors réseau** : la puissance de la prise hors réseau (secours) de la
+  batterie (`gridOffPower`). Une valeur négative signifie que la prise injecte
+  de la puissance (un panneau solaire branché dessus, comme le note
+  Zendure-HA) : elle affiche 0 et n'est pas comptée.
+- **Charge depuis le réseau** : la puissance que la batterie prélève sur le
+  réseau pour se charger (`gridInputPower`), sur tous les modèles capables de
+  charger en AC.
+- Les deux fonctionnalités d'**énergie** sont calculées comme les autres
+  (puissance cumulée dans le temps, sauvegardée dans le volume de données de
+  l'intégration, silences de plus de 5 minutes écartés).
+- **Températures** : la température de l'appareil (`hyperTmp`) et la plus
+  haute température des packs (`maxTemp`), remontées par Zendure en dixièmes
+  de kelvin et converties en °C. Une batterie qui ne les remonte pas les
+  laisse vides ; une valeur impossible (sous −40 °C ou au-dessus de 120 °C)
+  est ignorée.
+
+**Hiérarchie énergie — éviter le double comptage.** La puissance de charge
+depuis le réseau est un **capteur réseau** : si votre logement a déjà un
+compteur principal (Linky, compteur P1 ou Shelly EM...) dans Gladys, la charge
+de la batterie depuis le réseau est déjà incluse dans ce qu'il mesure. Dans les
+réglages énergie de Gladys, placez la batterie **sous le compteur principal**
+(comme enfant), pas à côté, sinon l'énergie qu'elle prélève serait comptée deux
+fois.
+
+Une batterie créée avec une version précédente reçoit ces fonctionnalités avec
+le même **Mettre à jour** de l'onglet **Découverte** : les fonctionnalités
+existantes, leur historique, les scènes et les tableaux de bord sont conservés.
+
 ## Obtenir votre clé cloud Zendure
 
 L'intégration s'authentifie auprès du cloud Zendure avec une **clé
@@ -93,7 +145,8 @@ l'application mobile Zendure :
 
 ### API locale (zenSDK, activée par défaut)
 
-Les batteries SolarFlow (800, 800 Pro, 1600 AC+, 2400 AC, 2400 AC+, 2400 Pro
+Les batteries SolarFlow (800, 800 Plus, 800 Pro, 800 Pro 2, 1600 AC+, 2400 AC,
+2400 AC+, 2400 Pro, 4000 AC+
 — tous les modèles pris en charge sauf l'Hyper 2000) exposent une petite **API HTTP sur votre réseau
 local**, appelée zenSDK. C'est ce qu'utilise l'intégration officielle Home
 Assistant pour ces modèles : ni MQTT, ni le cloud. Avec **Utiliser l'API locale
@@ -355,7 +408,12 @@ journaux. Aucun n'écrit dans une batterie ni ne change son transport.
   données sur chaque source, l'adresse de son API locale (des options, du
   cloud ou mDNS) et son état, les packs, l'entrée solaire, les réglages
   qu'elle remonte (limites, mode AC, niveaux de charge), le temps restant et
-  les compteurs d'énergie. Choisissez une batterie dans la liste **Batterie**
+  les compteurs d'énergie, puis les versions de firmware (appareil, maître,
+  DSP, packs), le signal Wi-Fi (`rssi`, avec une indication sous −75 dBm) et
+  les états de connexion, les codes d'état bruts (chauffage, basse
+  température, calibration et limite de SoC, bypass, HEMS, niveau de défaut)
+  et, par pack, son niveau, la température de sa cellule la plus chaude, sa
+  tension, son courant et son état de santé. Choisissez une batterie dans la liste **Batterie**
   (les batteries créées dans Gladys) pour ne décrire qu'elle ; pour une
   batterie non créée dans Gladys, saisissez son nom ou son numéro de série
   dans le champ en dessous.

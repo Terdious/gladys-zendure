@@ -45,6 +45,12 @@ export const ENERGY_FLOWS = {
   batteryInputPower: 'batteryDischargeEnergy',
   solarInputPower: 'solarEnergy',
   homeOutputPower: 'homeOutputEnergy',
+  // Only on the models with the matching feature (deviceMapping.js): a device
+  // never reporting the power keeps the index at 0, and buildEnergyStates
+  // publishes the indexes of the device's own features only. Added after the
+  // first four: a saved file without them loads them at 0 (additive format).
+  offGridPower: 'offGridEnergy',
+  gridInputPower: 'gridInputEnergy',
 };
 
 // A longer silence between two payloads is a gap (device offline, broker
@@ -61,8 +67,15 @@ export const ENERGY_SLOT_IN_MS = 30 * 60 * 1000;
 export const SLOT_RETENTION_IN_MS = 26 * 60 * 60 * 1000;
 // Order of the kWh values of a saved slot (`[slotStart, ...kWh]`, compact:
 // 17 devices x 52 slots). Written in the file, so a later order change still
-// reads an older file right.
-const SLOT_FIELDS = Object.values(ENERGY_FLOWS);
+// reads an older file right. Only the flows of the "Energy today" widget are
+// snapshotted (the off-grid and grid charging indexes keep their totals only),
+// which keeps the file the size and shape it had.
+const SLOT_FIELDS = [
+  'batteryChargeEnergy',
+  'batteryDischargeEnergy',
+  'solarEnergy',
+  'homeOutputEnergy',
+];
 
 /**
  * Start (ms) of the 30-minute UTC slot holding a timestamp.

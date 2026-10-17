@@ -184,3 +184,73 @@ test('a save file of 1.6.0 (totals only) loads, with no snapshot yet', async () 
   meters.update('dev', {}, SLOT0);
   assert.equal(meters.energySince('dev', 0).kwh.solarEnergy, 0);
 });
+
+test('the off-grid and grid charging flows are integrated and saved with the totals', async () => {
+  const { meters, dataDir } = createTestEnergyMeters();
+  meters.update('dev', { offGridPower: 600, gridInputPower: 1200 }, T0);
+  meters.update('dev', { offGridPower: -50 }, T0 + 5 * MINUTE); // negative: nothing after
+  const totals = meters.update('dev', {}, T0 + 10 * MINUTE);
+  assert.equal(totals.offGridEnergy, 0.05); // 600 W x 5 min
+  assert.equal(totals.gridInputEnergy, 0.2); // 1200 W x 10 min
+  await meters.save();
+  const saved = JSON.parse(await readFile(join(dataDir, 'energy.json'), 'utf8'));
+  // The slots keep the four flows of the "Energy today" widget only.
+  assert.deepEqual(saved.slot_fields, [
+    'batteryChargeEnergy',
+    'batteryDischargeEnergy',
+    'solarEnergy',
+    'homeOutputEnergy',
+  ]);
+  assert.equal(saved.devices.dev.slots[0].length, 5);
+  const restarted = createEnergyMeters({ dataDir });
+  await restarted.load();
+  assert.equal(restarted.totals('dev').offGridEnergy, 0.05);
+  assert.equal(restarted.totals('dev').gridInputEnergy, 0.2);
+});
+
+test('a save file of 1.7.0 loads: its totals and slots kept, the new flows start at 0', async () => {
+  const { dataDir } = createTestEnergyMeters();
+  await writeFile(
+    join(dataDir, 'energy.json'),
+    JSON.stringify({
+      version: 1,
+      slot_fields: [
+        'batteryChargeEnergy',
+        'batteryDischargeEnergy',
+        'solarEnergy',
+        'homeOutputEnergy',
+      ],
+      devices: {
+        dev: {
+          kwh: { batteryChargeEnergy: 4, solarEnergy: 3, homeOutputEnergy: 2 },
+          slots: [[SLOT0, 3.5, 0, 2.5, 1.5]],
+        },
+      },
+    }),
+  );
+  const meters = createEnergyMeters({ dataDir });
+  await meters.load();
+  assert.deepEqual(meters.totals('dev'), {
+    batteryChargeEnergy: 4,
+    batteryDischargeEnergy: 0,
+    solarEnergy: 3,
+    homeOutputEnergy: 2,
+    offGridEnergy: 0,
+    gridInputEnergy: 0,
+  });
+  assert.deepEqual(meters.energySince('dev', SLOT0).kwh, {
+    batteryChargeEnergy: 0.5,
+    batteryDischargeEnergy: 0,
+    solarEnergy: 0.5,
+    homeOutputEnergy: 0.5,
+  });
+  meters.update('dev', { gridInputPower: 600 }, SLOT0 + MINUTE);
+  meters.update('dev', {}, SLOT0 + 6 * MINUTE);
+  assert.equal(meters.totals('dev').gridInputEnergy, 0.05);
+  await meters.save();
+  // Still readable by 1.7.0: same version, same slot layout, totals additive.
+  const saved = JSON.parse(await readFile(join(dataDir, 'energy.json'), 'utf8'));
+  assert.equal(saved.version, 1);
+  assert.equal(saved.devices.dev.kwh.batteryChargeEnergy, 4);
+  assert.equal(saved.devices.dev.slots[0].length, 5);
+});

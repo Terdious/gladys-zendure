@@ -10,6 +10,43 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Added
+
+- New models, **untested hardware** (ratings from Zendure-HA, reports
+  welcome): SolarFlow 800 Plus (charge 1000 W / discharge 800 W, solar input),
+  SolarFlow 800 Pro 2 (800 Pro class, built-in battery, off-grid output) and
+  SolarFlow 4000 AC+ (charge 3200 W / discharge 2400 W, AC-coupled, internal
+  8 kWh pack, off-grid output).
+- **Off-grid output power** (`home-output-sensor` / `off-grid-power`, W,
+  `gridOffPower`, negative values shown as 0) and its computed **Off-grid
+  output energy** index (`off-grid-index`, kWh) on the models with an
+  off-grid socket: 800 Pro, 800 Pro 2, 1600 AC+, 2400 AC, 2400 AC+, 2400 Pro,
+  4000 AC+.
+- **Grid charging power** (`grid-sensor` / `input-power`, W,
+  `gridInputPower`) and its computed **Grid charging energy** index
+  (`input-index`, kWh) on every model. The documentation explains where to
+  place the battery in the Gladys energy hierarchy (under the main meter) to
+  avoid counting that energy twice.
+- **Device temperature** (`hyperTmp`) and **Hottest pack temperature** (the
+  highest pack `maxTemp`), `device-temperature-sensor`, °C, converted from
+  decikelvin, published only when reported, impossible values ignored.
+- The new indexes are saved in `/data/energy.json` with the others (additive:
+  a 1.7.0 file loads as is, its "Energy today" snapshots unchanged).
+- Batteries created before get the new features with **Update** in the
+  Discover tab; the existing features and their ids are unchanged.
+- **Diagnostic of the batteries**: firmware versions (device, master, DSP,
+  packs), Wi-Fi signal (`rssi`, hint below -75 dBm), `wifiState` /
+  `localState`, the raw status codes (`heatState`, `lowTemperature`,
+  `socStatus`, `socLimit`, `pass`, `hemsState`, `faultLevel`, `hyperTmp`)
+  with their meaning, and per pack its level, hottest temperature, voltage,
+  current and state of health. Serial numbers stay masked.
+
+### Changed
+
+- The cloud model name is matched ignoring case and every space, like
+  Zendure-HA (`SolarFlow800Pro` = `SolarFlow 800 Pro`); every name matched
+  before still matches.
+
 ## [1.7.0] - 2026-10-17
 
 ### Added

@@ -19,6 +19,7 @@
 import { readFileSync } from 'node:fs';
 
 import { formatRemainingTime, REMAINING_TIME_UNKNOWN_IN_MIN } from './zendure/battery.js';
+import { decikelvinToCelsius } from './zendure/deviceMapping.js';
 import { ZENSDK_REQUEST_TIMEOUT_IN_MS } from './zendure/zensdk.js';
 
 // Bound of a report, in characters: the result is shown under the action
@@ -317,6 +318,143 @@ function describeBattery(battery, redactor) {
   return parts.join(', ');
 }
 
+// Below this Wi-Fi signal (dBm) the local API and MQTT start to drop answers.
+export const WEAK_RSSI_DBM = -75;
+// Longest raw text value printed in the device details.
+const MAX_DETAIL_LENGTH = 40;
+
+// Labels of the state codes (Zendure-HA translations), printed after the raw
+// value: unknown codes show raw only.
+const ON_OFF = { 0: 'off', 1: 'on' };
+const STATE_LABELS = {
+  heatState: ON_OFF,
+  hemsState: ON_OFF,
+  wifiState: { 0: 'disconnected', 1: 'connected' },
+  localState: ON_OFF,
+  lowTemperature: { 0: 'no', 1: 'yes' },
+  socStatus: { 0: 'operation', 1: 'calibrating' },
+  socLimit: { 0: 'normal', 1: 'limiting', 2: 'full' },
+  pass: { 0: 'off', 1: 'on', 2: 'on', 3: 'grid direct supply' },
+};
+
+/** A raw detail value, bounded. */
+function rawText(value) {
+  const text = String(value);
+  return text.length > MAX_DETAIL_LENGTH ? `${text.slice(0, MAX_DETAIL_LENGTH)}…` : text;
+}
+
+/**
+ * A firmware version as Zendure-HA shows it: the integer packs
+ * major.minor.patch in 4/4/8 bits (`4101` -> `v1.0.5`), kept raw otherwise.
+ * @param {number|string} value reported version
+ * @returns {string}
+ */
+export function formatFirmwareVersion(value) {
+  const number = Number(value);
+  if (typeof value === 'string' && !/^\d+$/.test(value.trim())) {
+    return rawText(value);
+  }
+  if (!Number.isInteger(number)) {
+    return rawText(value);
+  }
+  if (number <= 0) {
+    return `${number} (not provided)`;
+  }
+  if (number <= 10) {
+    return String(number);
+  }
+  return `v${(number & 0xf000) >> 12}.${(number & 0x0f00) >> 8}.${number & 0x00ff} (${number})`;
+}
+
+/** `raw (label)` for a state code. */
+function describeState(key, value) {
+  const label = STATE_LABELS[key]?.[value];
+  return `${key} ${rawText(value)}${label ? ` (${label})` : ''}`;
+}
+
+/** A Celsius line part from a decikelvin value: `28.2 °C (3013)`, raw if absurd. */
+function describeTemperature(raw) {
+  const celsius = decikelvinToCelsius(Number(raw));
+  return celsius === null ? `${rawText(raw)} (out of range)` : `${celsius} °C (${raw})`;
+}
+
+/** Signed int16 battery current, tenths of an ampere -> A. */
+export function packCurrentAmperes(raw) {
+  const number = Number(raw);
+  if (!Number.isInteger(number)) {
+    return null;
+  }
+  const signed = number >= 0x8000 && number <= 0xffff ? number - 0x10000 : number;
+  return signed / 10;
+}
+
+function firmwareLine(firmware) {
+  const parts = Object.entries(firmware || {}).map(
+    ([key, value]) => `${key} ${formatFirmwareVersion(value)}`,
+  );
+  return `Firmware: ${parts.length ? parts.join(', ') : 'not reported'}`;
+}
+
+function networkLine(network) {
+  const parts = [];
+  for (const [key, value] of Object.entries(network || {})) {
+    if (key === 'rssi') {
+      const weak = Number(value) < WEAK_RSSI_DBM;
+      parts.push(
+        `rssi ${rawText(value)} dBm${weak ? ` (WEAK signal, below ${WEAK_RSSI_DBM} dBm: bring the Wi-Fi access point closer)` : ''}`,
+      );
+    } else {
+      parts.push(describeState(key, value));
+    }
+  }
+  return `Network: ${parts.length ? parts.join(', ') : 'not reported'}`;
+}
+
+function statesLine(states) {
+  const parts = Object.entries(states || {}).map(([key, value]) =>
+    key === 'hyperTmp' ? `hyperTmp ${describeTemperature(value)}` : describeState(key, value),
+  );
+  return `States: ${parts.length ? parts.join(', ') : 'not reported'}`;
+}
+
+function packDetailLines(packs, redactor) {
+  const lines = [];
+  (packs || []).slice(0, 10).forEach((pack, index) => {
+    const details = pack.details || {};
+    const parts = [];
+    if (details.socLevel !== undefined) {
+      parts.push(`socLevel ${rawText(details.socLevel)} %`);
+    }
+    if (details.maxTemp !== undefined) {
+      parts.push(`maxTemp ${describeTemperature(details.maxTemp)}`);
+    }
+    if (details.totalVol !== undefined) {
+      const volts = Number(details.totalVol);
+      parts.push(
+        `totalVol ${Number.isFinite(volts) ? `${Math.round(volts) / 100} V` : rawText(details.totalVol)}`,
+      );
+    }
+    if (details.batcur !== undefined) {
+      const amperes = packCurrentAmperes(details.batcur);
+      parts.push(`batcur ${amperes === null ? rawText(details.batcur) : `${amperes} A`}`);
+    }
+    if (details.soh !== undefined) {
+      const soh = Number(details.soh);
+      parts.push(`soh ${Number.isFinite(soh) ? `${soh / 10} %` : rawText(details.soh)}`);
+    }
+    if (details.softVersion !== undefined) {
+      parts.push(`softVersion ${formatFirmwareVersion(details.softVersion)}`);
+    }
+    if (parts.length) {
+      lines.push(`  Pack #${index + 1} ${redactor.id(pack.sn)}: ${parts.join(', ')}`);
+    }
+  });
+  if ((packs || []).length > 10) {
+    lines.push(`  ... ${packs.length - 10} more pack(s)`);
+  }
+  return lines;
+}
+
 function deviceLines(device, snapshot, redactor) {
   const now = snapshot.generatedAt;
   const lines = [`--- ${device.name} ---`];
@@ -349,6 +487,10 @@ function deviceLines(device, snapshot, redactor) {
     }`,
   );
   lines.push(`Battery: ${describeBattery(device.battery, redactor)}`);
+  lines.push(...packDetailLines(device.battery.packs, redactor));
+  lines.push(firmwareLine(device.firmware));
+  lines.push(networkLine(device.network));
+  lines.push(statesLine(device.states));
   lines.push(
     `Solar input: model ${device.solar.modelHasInput ? 'has one' : 'has none (AC-coupled)'}, ` +
       `current ${show(device.solar.power, ' W')}${device.solar.hasSolar ? '' : ' (hidden in the widgets)'}`,

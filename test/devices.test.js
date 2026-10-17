@@ -38,6 +38,27 @@ import {
   createFakeZenSdkFetch,
 } from './helpers/fakeZendure.js';
 
+const BASELINE_FEATURE_KEYS = [
+  'batteryLevel',
+  'batteryInputPower',
+  'batteryOutputPower',
+  'homeOutputPower',
+  'solarInputPower',
+  'batteryChargeEnergy',
+  'batteryDischargeEnergy',
+  'homeOutputEnergy',
+  'solarEnergy',
+  'batteryEnergyRemaining',
+];
+const EXTRA_FEATURE_KEYS = [
+  'offGridPower',
+  'offGridEnergy',
+  'gridInputPower',
+  'gridInputEnergy',
+  'deviceTemperature',
+  'batteryMaxTemperature',
+];
+
 const CLOUD_BROKER_URL = 'mqtt://broker.zendure.example:1883';
 const LOCAL_BROKER_URL = 'mqtt://192.168.1.50:1883';
 
@@ -82,7 +103,13 @@ test('buildDiscoveredDevices returns one payload per supported Zendure device', 
   // frequencies: 30 s from the config, snapped to milliseconds.
   assert.equal(device.should_poll, true);
   assert.equal(device.poll_frequency, 30000);
-  assert.equal(device.features.length, 10);
+  // The ten features of the earlier releases first, in their order (their
+  // external ids never change), then the off-grid, grid charging and
+  // temperature ones an "Update" adds to an existing device.
+  assert.deepEqual(
+    device.features.map((f) => f.external_id.split(':').pop()),
+    [...BASELINE_FEATURE_KEYS, ...EXTRA_FEATURE_KEYS],
+  );
   // The device carries an explicit, globally-unique selector, and every
   // feature selector is composed with it.
   assert.equal(device.selector, 'zendure-solarflow-abc123');
@@ -124,7 +151,7 @@ test('discovers a newly-supported model (SolarFlow 2400) with the baseline featu
   );
   assert.ok(sf2400, 'the SolarFlow 2400 device is discovered');
   assert.equal(sf2400.name, 'Attic battery');
-  assert.equal(sf2400.features.length, 10);
+  assert.equal(sf2400.features.length, 16);
   assert.equal(sf2400.selector, 'zendure-solarflow-sf2400a');
   assert.equal(sf2400.features[0].selector, 'zendure-solarflow-sf2400a-battery-level');
 
@@ -542,6 +569,75 @@ test('pushed reports feed the energy indexes and the energy remaining', async (t
   assert.equal(byId[`${device.external_id}:solarEnergy`], 0.01);
   assert.equal(byId[`${device.external_id}:batteryDischargeEnergy`], 0);
   assert.equal(byId[`${device.external_id}:batteryEnergyRemaining`], 1.96); // 51 % of 3.84
+  stopPush();
+});
+
+test('off-grid, grid charging and temperatures are published and integrated per model', async (t) => {
+  const localGladys = createFakeGladys();
+  const mqttLibrary = createFakeMqttLibrary();
+  // A SolarFlow 800 (no off-grid port), spelled without spaces.
+  const sf800 = {
+    deviceKey: 'Sf800X',
+    productKey: 'prodY',
+    productModel: 'SolarFlow800',
+    deviceName: 'Shed battery',
+  };
+  setSolarflowDependencies({
+    mqttLibrary,
+    fetchImpl: createFakeZendureFetch({ deviceList: [FAKE_SOLARFLOW_DEVICE, sf800] }),
+  });
+  t.mock.timers.enable({ apis: ['Date'], now: 1_700_000_000_000 });
+
+  const devices = await buildDiscoveredDevices(localGladys, config);
+  const pro = devices.find((d) => d.external_id.endsWith(FAKE_SOLARFLOW_DEVICE.deviceKey));
+  const plain = devices.find((d) => d.external_id.endsWith(sf800.deviceKey));
+  assert.ok(plain, 'the spacing variant is discovered');
+  assert.ok(!plain.features.some((f) => f.external_id.endsWith(':offGridPower')));
+  assert.ok(plain.features.some((f) => f.external_id.endsWith(':gridInputEnergy')));
+  const temperature = pro.features.find((f) => f.external_id.endsWith(':deviceTemperature'));
+  assert.equal(temperature.category, 'device-temperature-sensor');
+  assert.equal(temperature.type, 'decimal');
+  assert.equal(temperature.unit, 'celsius');
+  assert.equal(temperature.selector, 'zendure-solarflow-abc123-device-temperature');
+
+  const stopPush = solarflow.startPush(localGladys, config);
+  const client = await waitFor(() => mqttLibrary.clients[0]);
+  await delay(20);
+  const report = (device, properties, extra = {}) =>
+    client.emit(
+      'message',
+      `iot/${device.productKey}/${device.deviceKey}/properties/report`,
+      Buffer.from(JSON.stringify({ properties, ...extra })),
+    );
+
+  report(
+    FAKE_SOLARFLOW_DEVICE,
+    { gridOffPower: 300, gridInputPower: 900, hyperTmp: 3051 },
+    {
+      packData: [
+        { sn: 'C0A1', maxTemp: 2981 },
+        { sn: 'C0A2', maxTemp: 3011 },
+      ],
+    },
+  );
+  report(sf800, { gridOffPower: 500, gridInputPower: 600 });
+  t.mock.timers.tick(60 * 1000);
+  report(FAKE_SOLARFLOW_DEVICE, { gridOffPower: -100 });
+  report(sf800, { gridInputPower: 0 });
+  await flushStatesNow(localGladys);
+
+  const byId = Object.fromEntries(localGladys.published.map((s) => [s.featureExternalId, s.state]));
+  assert.equal(byId[`${pro.external_id}:offGridPower`], 0, 'negative: clamped');
+  assert.equal(byId[`${pro.external_id}:offGridEnergy`], 0.005); // 300 W x 1 min
+  assert.equal(byId[`${pro.external_id}:gridInputPower`], 900);
+  assert.equal(byId[`${pro.external_id}:gridInputEnergy`], 0.015); // 900 W x 1 min
+  assert.equal(byId[`${pro.external_id}:deviceTemperature`], 32);
+  assert.equal(byId[`${pro.external_id}:batteryMaxTemperature`], 28);
+  assert.equal(byId[`${plain.external_id}:gridInputEnergy`], 0.01);
+  // No feature, no state: the off-grid power of a model without the port is ignored.
+  assert.equal(`${plain.external_id}:offGridPower` in byId, false);
+  assert.equal(`${plain.external_id}:offGridEnergy` in byId, false);
+  assert.equal(`${plain.external_id}:deviceTemperature` in byId, false, 'not reported');
   stopPush();
 });
 

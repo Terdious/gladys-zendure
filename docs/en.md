@@ -22,9 +22,18 @@ SolarFlow 800, SolarFlow 800 Pro, SolarFlow 1600, SolarFlow 2400,
 SolarFlow 2400 AC, SolarFlow 2400 Pro, and Hyper 2000 (experimental — telemetry
 mapping to be confirmed by a community tester).
 
+**Untested hardware**: SolarFlow 800 Plus, SolarFlow 800 Pro 2 and
+SolarFlow 4000 AC+ are supported from the ratings of the official Home
+Assistant integration (Zendure-HA), without a real device seen yet. If you own
+one, please report how it behaves (a **Diagnostic of the batteries** report is
+ideal) on the [issues](https://github.com/Terdious/gladys-zendure/issues).
+
+The model name the Zendure cloud reports is matched ignoring case and spaces
+(`SolarFlow 800 Pro`, `SolarFlow800Pro`), like Zendure-HA does.
+
 ## Features
 
-Each battery is created with ten read-only features, in the Gladys energy
+Each battery is created with ten read-only features (plus the model-dependent ones below), in the Gladys energy
 categories (energy charts, history, dashboards):
 
 | Feature                   | Gladys category          | Unit |
@@ -58,6 +67,42 @@ are updated in place, so their history, scenes and dashboards are kept. The
 same **Update** adds the energy features to a battery created before version
 1.5.0.
 
+### Off-grid output, grid charging and temperatures
+
+Depending on the model, a battery also gets these features:
+
+| Feature                  | Gladys category           | Unit | Models                                                              |
+| ------------------------ | ------------------------- | ---- | ------------------------------------------------------------------- |
+| Off-grid output power    | Home output sensor        | W    | 800 Pro, 800 Pro 2, 1600 AC+, 2400 AC, 2400 AC+, 2400 Pro, 4000 AC+ |
+| Off-grid output energy   | Home output sensor        | kWh  | same                                                                |
+| Grid charging power      | Grid sensor               | W    | every model (AC charging)                                           |
+| Grid charging energy     | Grid sensor               | kWh  | every model                                                         |
+| Device temperature       | Device temperature sensor | °C   | every model, when reported                                          |
+| Hottest pack temperature | Device temperature sensor | °C   | every model, when reported                                          |
+
+- **Off-grid output**: the power on the battery's off-grid (backup) socket
+  (`gridOffPower`). A negative value means the socket feeds power in (a solar
+  panel plugged there, as Zendure-HA notes): it shows 0 and is not counted.
+- **Grid charging**: the power the battery draws from the grid to charge
+  (`gridInputPower`), on every model able to charge from AC.
+- The two **energy** features are computed like the others (power over time,
+  saved in the integration's data volume, silences over 5 minutes left out).
+- **Temperatures**: the device temperature (`hyperTmp`) and the highest
+  temperature of the packs (`maxTemp`), reported by Zendure in tenths of a
+  kelvin and converted to °C. A battery that does not report them leaves them
+  empty; an impossible value (below −40 °C or above 120 °C) is ignored.
+
+**Energy hierarchy — avoid double counting.** The grid charging power is a
+**grid sensor**: if your home already has a main meter (Linky, a P1 or
+Shelly EM meter...) in Gladys, the battery's grid charging is already inside
+what that meter measures. In the energy settings of Gladys, place the battery
+**under the main meter** (as a child of it), not beside it, or the energy it
+draws would be counted twice.
+
+A battery created with an earlier version gets these features with the same
+**Update** in the **Discover** tab: the existing features, their history,
+scenes and dashboards are kept.
+
 ## Getting your Zendure cloud key
 
 The integration authenticates against the Zendure cloud with an **authorization
@@ -85,7 +130,8 @@ key** (a base64 token) that you generate once from the Zendure mobile app:
 
 ### Local API (zenSDK, on by default)
 
-The SolarFlow batteries (800, 800 Pro, 1600 AC+, 2400 AC, 2400 AC+, 2400 Pro
+The SolarFlow batteries (800, 800 Plus, 800 Pro, 800 Pro 2, 1600 AC+, 2400 AC,
+2400 AC+, 2400 Pro, 4000 AC+
 — every supported model but the Hyper 2000) serve a small **HTTP API on your
 home network**, called zenSDK. It is what the official Home Assistant integration uses for
 these models: neither MQTT nor the cloud. With **Use the local API of the
@@ -324,7 +370,11 @@ Neither writes to a battery nor changes its transport.
   serving it and why, the age of its last data on each source, its local API
   address (from the options, the cloud or mDNS) and state, battery packs,
   solar input, the settings it reports (limits, AC mode, charge levels),
-  remaining time and energy counters. Pick a battery in the **Battery** list
+  remaining time and energy counters, then the firmware versions (device,
+  master, DSP, packs), the Wi-Fi signal (`rssi`, with a hint below −75 dBm)
+  and connection states, the raw status codes (heating, low temperature, SoC
+  calibration and limit, bypass, HEMS, fault level) and per pack its level,
+  hottest cell temperature, voltage, current and state of health. Pick a battery in the **Battery** list
   (the batteries created in Gladys) to report on it only; for a battery not
   created in Gladys, type its name or serial number in the field below.
 - **Test the local API of a battery**: reads `GET /properties/report` once,

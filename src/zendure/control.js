@@ -20,7 +20,7 @@
 // peteS-UK). Only those factual constants are reused; the code is our own.
 // -----------------------------------------------------------------------------
 
-import { SUPPORTED_PRODUCT_MODELS } from './constants.js';
+import { canonicalProductModelOf, SUPPORTED_PRODUCT_MODELS } from './constants.js';
 import { extractMetricValue } from './deviceMapping.js';
 
 // Rated AC charge (input) and discharge (output) power per model, in watts.
@@ -32,6 +32,12 @@ const MODEL_POWER_RATINGS = {
   [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_2400]: { charge: 3200, discharge: 2400 },
   [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_2400_PRO]: { charge: 3200, discharge: 2400 },
   [SUPPORTED_PRODUCT_MODELS.HYPER_2000]: { charge: 1200, discharge: 1200 },
+  // Untested hardware, Zendure-HA setLimits(): SolarFlow800Plus (-1000, 800),
+  // SolarFlow800Pro used for the 800 Pro 2 (-1000, 800), SolarFlow4000AC_Plus
+  // (-3200, 2400).
+  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_800_PLUS]: { charge: 1000, discharge: 800 },
+  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_800_PRO_2]: { charge: 1000, discharge: 800 },
+  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_4000]: { charge: 3200, discharge: 2400 },
 };
 
 // zenSDK ranges of the SoC settings, in percent.
@@ -67,12 +73,7 @@ export function reportedValue(payload, property) {
  * @returns {number}
  */
 export function maxPowerFor(productModel, direction, payload) {
-  const rating =
-    MODEL_POWER_RATINGS[
-      String(productModel || '')
-        .toLowerCase()
-        .trim()
-    ]?.[direction] ?? 800;
+  const rating = MODEL_POWER_RATINGS[canonicalProductModelOf(productModel)]?.[direction] ?? 800;
   const reported = reportedValue(
     payload,
     direction === 'discharge' ? 'inverseMaxPower' : 'chargeMaxLimit',
