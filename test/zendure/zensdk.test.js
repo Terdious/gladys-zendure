@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   createZendureZenSdk,
   parseAddressOverrides,
+  parseAddressOverridesDetailed,
   zenSdkAddressOf,
   zenSdkMdnsName,
   zenSdkRetryDelay,
@@ -53,6 +54,27 @@ test('the address comes from the override, else the cloud ip, else the mDNS name
     host: 'zendure-SolarFlow800Pro-SN-HTTP-1.local',
     origin: 'mdns',
   });
+  // Spaces around "=" and the case of the serial number do not matter.
+  const loose = parseAddressOverridesDetailed('sn-http-1 = 10.0.0.7,\nSN-3 =10.0.0.8; oops, x=a/b');
+  assert.deepEqual(
+    [...loose.overrides],
+    [
+      ['SN-HTTP-1', '10.0.0.7'],
+      ['SN-3', '10.0.0.8'],
+    ],
+  );
+  assert.deepEqual(loose.invalid, ['oops', 'x=a/b']);
+  assert.deepEqual(zenSdkAddressOf(DEVICE, loose.overrides), {
+    host: '10.0.0.7',
+    origin: 'override',
+  });
+  assert.deepEqual(
+    zenSdkAddressOf(
+      { ...DEVICE, snNumber: 'Sn-Http-1' },
+      parseAddressOverrides('SN-HTTP-1=10.0.0.9'),
+    ),
+    { host: '10.0.0.9', origin: 'override' },
+  );
   // No serial number: no mDNS name and no write possible.
   assert.equal(zenSdkAddressOf({ ...DEVICE, snNumber: undefined }), null);
 });
@@ -193,4 +215,49 @@ test('an answer without properties is a failure, and nothing survives disconnect
   runtime.disconnect();
   assert.equal(runtime.getLatestPayload('SN-HTTP-1'), null);
   assert.equal(runtime.isDeviceUp('SN-HTTP-1'), false);
+});
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const callsTo = (fetchImpl, host) => fetchImpl.calls.filter((call) => call.host === host).length;
+
+test('a moved device is polled at its new address by a single loop', async () => {
+  const fetchImpl = createFakeZenSdkFetch({
+    reports: { '192.168.1.60': REPORT, '192.168.1.99': REPORT },
+  });
+  const runtime = runtimeFor(fetchImpl, [DEVICE], { pollIntervalMs: 20 });
+  runtime.start();
+  await delay(50);
+  // Same address again: nothing restarted.
+  runtime.setDevices([{ rawCloudDevice: DEVICE, ...zenSdkAddressOf(DEVICE) }]);
+  const moved = { ...DEVICE, ip: '192.168.1.99' };
+  runtime.setDevices([{ rawCloudDevice: moved, ...zenSdkAddressOf(moved) }]);
+  const oldCalls = callsTo(fetchImpl, '192.168.1.60');
+  await delay(110);
+  assert.equal(callsTo(fetchImpl, '192.168.1.60'), oldCalls, 'the old address is left');
+  const newCalls = callsTo(fetchImpl, '192.168.1.99');
+  // One loop: about one request per 20 ms (two loops would make ~11).
+  assert.ok(newCalls >= 2 && newCalls <= 8, `${newCalls} requests in 110 ms`);
+  assert.equal(runtime.getDeviceHealth('SN-HTTP-1').host, '192.168.1.99');
+  runtime.disconnect();
+});
+
+test('stop() ends the loops and keeps the caches; start() resumes once', async () => {
+  const fetchImpl = createFakeZenSdkFetch({ reports: { '192.168.1.60': REPORT } });
+  const runtime = runtimeFor(fetchImpl, [DEVICE], { pollIntervalMs: 20 });
+  runtime.start();
+  await delay(50);
+  runtime.stop();
+  assert.equal(runtime.connected, false);
+  const stoppedAt = fetchImpl.calls.length;
+  await delay(80);
+  assert.equal(fetchImpl.calls.length, stoppedAt, 'no request after stop()');
+  assert.deepEqual(runtime.getLatestPayload('SN-HTTP-1'), REPORT);
+  assert.notEqual(runtime.getDeviceHealth('SN-HTTP-1').lastSuccessAt, null);
+
+  runtime.start();
+  runtime.start();
+  await delay(110);
+  const resumed = fetchImpl.calls.length - stoppedAt;
+  assert.ok(resumed >= 2 && resumed <= 8, `${resumed} requests in 110 ms`);
+  runtime.disconnect();
 });

@@ -107,8 +107,11 @@ every 5 seconds, and sends the scene and widget commands through it too.
   `HOA1NAH4N123456=192.168.1.42`). Giving your batteries a fixed IP address
   in your router helps.
 - **Automatic fallback**: a battery that misses three requests in a row goes
-  to its local MQTT broker if you enabled it, otherwise to the Zendure cloud,
-  and comes back as soon as its local API answers again. A battery that never
+  to its local MQTT broker if you enabled it, at once; it only goes to the
+  Zendure cloud after 90 seconds without an answer (a Wi-Fi blip does not
+  take the cloud connection), and comes back as soon as its local API answers
+  again. At startup, a battery gets the same 90 seconds to give its first
+  answer. A battery that never
   answered simply stays on the cloud, without any warning badge.
 - **The cloud stays idle**: when every battery answers locally, the
   integration does not connect to the Zendure cloud broker at all, so Home
@@ -219,8 +222,8 @@ broker has no such limit. The integration warns once in its logs when it detects
 this take-over pattern.
 
 With the **local API** on (the default), the integration only connects to the
-Zendure cloud broker while a battery needs it, and disconnects again a minute
-after every battery is back on a local source: if your batteries answer
+Zendure cloud broker while a battery needs it, and disconnects again 5 minutes
+after the last battery that needed it is back on a local source: if your batteries answer
 locally, Home Assistant and Gladys no longer fight over the cloud connection.
 
 ## Updating the integration

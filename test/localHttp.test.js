@@ -16,7 +16,10 @@ import {
   evaluateTelemetrySources,
   controlDevice,
   pollLocalHttpNow,
+  getLocalHttpStats,
   LOCAL_HTTP_SILENT_MESSAGE,
+  LOCAL_SILENCE_TIMEOUT_IN_MS,
+  CLOUD_HOLD_TIME_IN_MS,
 } from '../src/devices/solarflow.js';
 import { ZENSDK_FAILURES_BEFORE_DOWN } from '../src/zendure/zensdk.js';
 import { normalizeConfig } from '../src/config.js';
@@ -132,14 +135,42 @@ test('a device answering on its local API is served by it, and the cloud broker 
   assert.deepEqual(battery.remainingTime, { direction: 'discharge', minutes: 135 });
 });
 
-test('a device whose local API stops answering falls back to the cloud, then returns', async () => {
-  const [device] = await startWith();
-  await pollLocalHttpNow();
-
-  zenSdk.fail(IP);
+/** Fail the local API of a host until the runtime counts it as down. */
+async function failLocalApi(host = IP) {
+  zenSdk.fail(host);
   for (let i = 0; i < ZENSDK_FAILURES_BEFORE_DOWN; i += 1) {
     await pollLocalHttpNow();
   }
+}
+
+test('a device whose local API stops answering falls back to the cloud, then returns', async (t) => {
+  // Only the clock is mocked (timers stay real): the silence and hold
+  // windows are crossed with tick().
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  const [device] = await startWith();
+  await pollLocalHttpNow();
+
+  await failLocalApi();
+  await evaluateTelemetrySources(gladys, config);
+  // A blip is not an outage: still served locally (pending), no cloud, and
+  // onPoll does not open it either nor republish the blind cache.
+  assert.equal(mqttLibrary.clients.length, 0);
+  assert.equal((await describeBatteries(gladys, config))[0].source, 'http');
+  await flushStatesNow(gladys);
+  gladys.published.length = 0;
+  await solarflow.onPoll(gladys, config, device);
+  await flushStatesNow(gladys);
+  assert.equal(gladys.published.length, 0, 'blind cache not republished');
+  // A command meanwhile is tried on the local API (it may be back), never
+  // through a cloud connection opened for it.
+  await assert.rejects(
+    controlDevice(gladys, config, device.external_id, { kind: 'output_limit', watts: 300 }),
+    /local HTTP write failed/,
+  );
+  assert.equal(mqttLibrary.clients.length, 0);
+
+  // Silent past the local-silence window: now the cloud takes over.
+  t.mock.timers.tick(LOCAL_SILENCE_TIMEOUT_IN_MS + 1000);
   await evaluateTelemetrySources(gladys, config);
 
   // Lazy cloud connection, degraded badge with the local-API reason.
@@ -166,8 +197,8 @@ test('a device whose local API stops answering falls back to the cloud, then ret
   await flushStatesNow(gladys);
   assert.equal(publishedById()[`${device.external_id}:batteryLevel`], 41);
 
-  // The API answers again: back on local at once, cloud released after two
-  // all-local evaluations.
+  // The API answers again: back on local at once, but the cloud broker is
+  // held for CLOUD_HOLD_TIME_IN_MS after the last device needed it.
   zenSdk.recover(IP);
   await pollLocalHttpNow();
   await waitFor(() => gladys.transports.at(-1)?.[0]?.transport === 'local');
@@ -176,7 +207,89 @@ test('a device whose local API stops answering falls back to the cloud, then ret
   ]);
   await evaluateTelemetrySources(gladys, config);
   await evaluateTelemetrySources(gladys, config);
+  assert.equal(cloudClient.ended, false, 'held after the recovery');
+
+  // Past the hold time, every device still local: released.
+  t.mock.timers.tick(CLOUD_HOLD_TIME_IN_MS);
+  await pollLocalHttpNow();
+  await evaluateTelemetrySources(gladys, config);
   assert.equal(cloudClient.ended, true);
+});
+
+test('a new blip within the hold time reuses the held cloud broker', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  const [device] = await startWith();
+  await pollLocalHttpNow();
+  await failLocalApi();
+  t.mock.timers.tick(LOCAL_SILENCE_TIMEOUT_IN_MS + 1000);
+  await evaluateTelemetrySources(gladys, config);
+  assert.equal(mqttLibrary.clients.length, 1);
+
+  zenSdk.recover(IP);
+  await pollLocalHttpNow();
+  t.mock.timers.tick(CLOUD_HOLD_TIME_IN_MS - 60 * 1000);
+  await pollLocalHttpNow();
+  await evaluateTelemetrySources(gladys, config);
+  await evaluateTelemetrySources(gladys, config);
+  assert.equal(mqttLibrary.clients[0].ended, false);
+
+  // Down again for good within the hold: the same connection serves it.
+  await failLocalApi();
+  t.mock.timers.tick(LOCAL_SILENCE_TIMEOUT_IN_MS + 1000);
+  mqttLibrary.clients[0].emit(
+    'message',
+    `iot/${FAKE_HTTP_SOLARFLOW_DEVICE.productKey}/${FAKE_HTTP_SOLARFLOW_DEVICE.deviceKey}/properties/report`,
+    Buffer.from(JSON.stringify({ properties: { electricLevel: 41 } })),
+  );
+  await evaluateTelemetrySources(gladys, config);
+  assert.equal(mqttLibrary.clients.length, 1, 'no reconnection');
+  assert.equal(gladys.transports.at(-1)[0].transport, 'cloud');
+  assert.equal(gladys.transports.at(-1)[0].external_id, device.external_id);
+});
+
+test('startup grace: a device missing the probe is pending, not served by the cloud', async () => {
+  // The first answers are lost (Wi-Fi blip at startup), the next ones arrive.
+  setup({ reports: {} });
+  const [device] = await startWith();
+  assert.equal(mqttLibrary.clients.length, 0);
+  assert.equal((await describeBatteries(gladys, config))[0].source, 'http');
+  assert.deepEqual(await solarflow.buildTransports(gladys, config), [
+    { external_id: device.external_id, transport: 'local' },
+  ]);
+  await evaluateTelemetrySources(gladys, config);
+  assert.equal(mqttLibrary.clients.length, 0);
+
+  // onPoll during the grace stays local: its fresh-properties request is the
+  // one that gets the first answer.
+  zenSdk.setReport(IP, FAKE_HTTP_REPORT);
+  await solarflow.onPoll(gladys, config, device);
+  await pollLocalHttpNow(); // joins the request in flight
+  const result = await controlDevice(gladys, config, device.external_id, {
+    kind: 'output_limit',
+    watts: 300,
+  });
+  assert.equal(result.source, 'http');
+  await evaluateTelemetrySources(gladys, config);
+  assert.equal(mqttLibrary.clients.length, 0, 'the cloud was never connected');
+});
+
+test('control falls through to the next source when the local API is down', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  const [device] = await startWith();
+  await pollLocalHttpNow();
+  await failLocalApi();
+  t.mock.timers.tick(LOCAL_SILENCE_TIMEOUT_IN_MS + 1000);
+
+  // The evaluator still says 'http' (it has not run): the write goes to the
+  // cloud broker, not to the dead host.
+  const posts = () => zenSdk.calls.filter((call) => call.method === 'POST').length;
+  const result = await controlDevice(gladys, config, device.external_id, {
+    kind: 'output_limit',
+    watts: 300,
+  });
+  assert.equal(result.source, 'cloud');
+  assert.equal(posts(), 0);
+  assert.equal(mqttLibrary.clients.length, 1);
 });
 
 test('control goes through POST /properties/write with every guard kept', async () => {
@@ -215,6 +328,44 @@ test('control goes through POST /properties/write with every guard kept', async 
   assert.equal(mqttLibrary.clients.length, 0, 'no broker involved');
 });
 
+test('a new IP address from a refreshed device list is polled from then on', async () => {
+  await startWith();
+  const newIp = '192.168.1.123';
+  zenSdk.setReport(newIp, FAKE_HTTP_REPORT);
+  const moved = { ...FAKE_HTTP_SOLARFLOW_DEVICE, ip: newIp };
+  setSolarflowDependencies({ fetchImpl: createFakeZendureFetch({ deviceList: [moved] }) });
+
+  // A new scan refreshes the cloud device list.
+  await buildDiscoveredDevices(gladys, config);
+  const before = zenSdk.calls.length;
+  await pollLocalHttpNow();
+  assert.deepEqual(
+    zenSdk.calls.slice(before).map((call) => call.host),
+    [newIp],
+  );
+  assert.equal(getLocalHttpStats().trackedDevices, 1);
+  assert.equal((await describeBatteries(gladys, config))[0].source, 'http');
+});
+
+test('the push cleanup stops the local API polling, and a new start resumes it', async () => {
+  const [device] = await startWith();
+  assert.equal(getLocalHttpStats().connected, true);
+  stopPush();
+  stopPush = null;
+  assert.equal(getLocalHttpStats().connected, false);
+  // The cache survives the stop.
+  assert.equal((await describeBatteries(gladys, config))[0].values.batteryLevel, 64);
+
+  const before = zenSdk.calls.length;
+  stopPush = solarflow.startPush(gladys, config);
+  await waitFor(() => getLocalHttpStats().connected === true);
+  assert.ok(zenSdk.calls.length > before, 'probed again');
+  assert.equal(mqttLibrary.clients.length, 0);
+  assert.deepEqual(await solarflow.buildTransports(gladys, config), [
+    { external_id: device.external_id, transport: 'local' },
+  ]);
+});
+
 test('without an ip the mDNS name is tried, and an address override wins', async () => {
   const withoutIp = { ...FAKE_HTTP_SOLARFLOW_DEVICE, ip: '' };
   setup({ deviceList: [withoutIp], reports: {} });
@@ -229,7 +380,9 @@ test('without an ip the mDNS name is tried, and an address override wins', async
   setup({ deviceList: [withoutIp], reports: { '10.1.1.1': FAKE_HTTP_REPORT } });
   const withOverride = normalizeConfig({
     cloud_key: FAKE_CLOUD_KEY,
-    local_http_addresses: 'SN-HTTP-800=10.1.1.1',
+    // Spaces around "=" and a lower-case serial are fine; the unknown serial
+    // and the malformed pair are logged and ignored.
+    local_http_addresses: 'sn-http-800 = 10.1.1.1, SN-UNKNOWN=10.9.9.9, junk',
   });
   await startWith(withOverride);
   assert.equal(zenSdk.calls[0].url, 'http://10.1.1.1/properties/report');
@@ -241,8 +394,14 @@ test('a device whose local API never answered stays a plain cloud device', async
   setup({ reports: {} });
   const [device] = await startWith();
 
-  // Served by the cloud from the start, and not flagged degraded: local
-  // access is on by default and may simply not exist on this network.
+  // Pending until it missed ZENSDK_FAILURES_BEFORE_DOWN requests (startup
+  // grace), then served by the cloud, and not flagged degraded: local access
+  // is on by default and may simply not exist on this network.
+  assert.equal(mqttLibrary.clients.length, 0);
+  for (let i = 0; i < ZENSDK_FAILURES_BEFORE_DOWN; i += 1) {
+    await pollLocalHttpNow();
+  }
+  await evaluateTelemetrySources(gladys, config);
   await waitFor(() => mqttLibrary.clients.length === 1);
   assert.equal(mqttLibrary.clients[0].url, CLOUD_BROKER_URL);
   assert.deepEqual(await solarflow.buildTransports(gladys, config), [

@@ -33,6 +33,9 @@ export const BATTERY_ACTIONS = { POWER_LIMITS: 'power_limits', MODE_AND_LEVELS: 
 
 const T = (en, fr, de, es) => ({ en, fr, de, es });
 
+// Rows of a status component the core keeps (the SDK's MAX_STATUS_ITEMS).
+const GROUP_MAX_ROWS = 10;
+
 const SOURCE_STATUS = {
   http: {
     value: T('Local (API)', 'Local (API)', 'Lokal (API)', 'Local (API)'),
@@ -403,15 +406,23 @@ function groupContent(title, batteries) {
       icon: 'battery',
     });
   }
-  components.push({
-    type: 'status',
-    items: batteries.slice(0, 10).map((battery) => ({
-      label: battery.name.slice(0, 40),
-      icon: battery.hasBattery === false ? 'sun' : 'battery',
-      value: groupRowValue(battery),
-      color: sourceStatus(battery).color,
-    })),
-  });
+  const rows = batteries.map((battery) => ({
+    label: battery.name.slice(0, 40),
+    icon: battery.hasBattery === false ? 'sun' : 'battery',
+    value: groupRowValue(battery),
+    color: sourceStatus(battery).color,
+  }));
+  // The core keeps GROUP_MAX_ROWS rows: past that, the last one tells how
+  // many batteries are not listed instead of dropping them silently.
+  if (rows.length > GROUP_MAX_ROWS) {
+    const hidden = rows.length - (GROUP_MAX_ROWS - 1);
+    rows.splice(GROUP_MAX_ROWS - 1, rows.length, {
+      label: T(`+${hidden} more`, `+${hidden} autres`, `+${hidden} weitere`, `+${hidden} más`),
+      icon: 'more-horizontal',
+      value: T('not listed', 'non listées', 'nicht aufgeführt', 'no listadas'),
+    });
+  }
+  components.push({ type: 'status', items: rows });
 
   // Computed sums: refreshed by the TTL.
   return { ttl_seconds: 30, components };

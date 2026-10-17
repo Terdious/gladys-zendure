@@ -116,8 +116,11 @@ des widgets.
   `HOA1NAH4N123456=192.168.1.42`). Donner une adresse IP fixe à vos batteries
   dans votre box aide.
 - **Repli automatique** : une batterie qui manque trois requêtes de suite
-  passe sur son broker MQTT local si vous l'avez activé, sinon sur le cloud
-  Zendure, et revient dès que son API locale répond à nouveau. Une batterie
+  passe aussitôt sur son broker MQTT local si vous l'avez activé ; elle ne
+  passe sur le cloud Zendure qu'après 90 secondes sans réponse (une coupure
+  Wi-Fi passagère ne prend pas la connexion cloud), et revient dès que son API
+  locale répond à nouveau. Au démarrage, une batterie a les mêmes 90 secondes
+  pour donner sa première réponse. Une batterie
   qui n'a jamais répondu reste simplement sur le cloud, sans macaron
   d'alerte.
 - **Le cloud reste au repos** : quand toutes les batteries répondent en local,
@@ -238,8 +241,9 @@ consommateur — le broker local n'a pas cette limite. L'intégration avertit un
 fois dans ses journaux quand elle détecte ce phénomène de reprise de connexion.
 
 Avec l'**API locale** activée (par défaut), l'intégration ne se connecte au
-broker cloud Zendure que lorsqu'une batterie en a besoin, et s'en déconnecte une
-minute après que toutes les batteries sont revenues sur une source locale : si
+broker cloud Zendure que lorsqu'une batterie en a besoin, et s'en déconnecte
+5 minutes après que la dernière batterie qui en avait besoin est revenue sur une
+source locale : si
 vos batteries répondent en local, Home Assistant et Gladys ne se disputent plus
 la connexion cloud.
 

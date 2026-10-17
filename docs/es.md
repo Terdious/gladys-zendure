@@ -115,8 +115,11 @@ los widgets.
   `HOA1NAH4N123456=192.168.1.42`). Dar una IP fija a sus baterías en el router
   ayuda.
 - **Respaldo automático**: una batería que falla tres peticiones seguidas pasa
-  a su broker MQTT local si lo activó, si no a la nube de Zendure, y vuelve en
-  cuanto su API local responde de nuevo. Una batería que nunca respondió
+  enseguida a su broker MQTT local si lo activó; a la nube de Zendure solo
+  pasa tras 90 segundos sin respuesta (un corte breve del Wi-Fi no ocupa la
+  conexión a la nube), y vuelve en cuanto su API local responde de nuevo. Al
+  arrancar, una batería tiene los mismos 90 segundos para dar su primera
+  respuesta. Una batería que nunca respondió
   simplemente sigue en la nube, sin insignia de aviso.
 - **La nube queda en reposo**: cuando todas las baterías responden en local, la
   integración no se conecta en absoluto al broker de la nube de Zendure, y Home
@@ -236,7 +239,8 @@ sus registros cuando detecta este fenómeno de toma de la conexión.
 
 Con la **API local** activada (por defecto), la integración solo se conecta al
 broker de la nube de Zendure mientras una batería lo necesita, y se desconecta
-un minuto después de que todas las baterías vuelvan a una fuente local: si sus
+5 minutos después de que la última batería que lo necesitaba vuelva a una
+fuente local: si sus
 baterías responden en local, Home Assistant y Gladys ya no se disputan la
 conexión a la nube.
 

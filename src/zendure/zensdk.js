@@ -62,25 +62,42 @@ const HEADERS = { 'content-type': 'application/json; charset=UTF-8' };
 const HOST_PATTERN = /^(\[[0-9a-fA-F:.]+\]|[A-Za-z0-9.-]+)(:\d{1,5})?$/;
 
 /**
- * Parse the `local_http_addresses` option: `SERIAL=ADDRESS` pairs separated
- * by commas, semicolons, spaces or line breaks. Invalid pairs are ignored.
+ * Parse the `local_http_addresses` option and keep what was ignored:
+ * `SERIAL=ADDRESS` pairs separated by commas, semicolons, spaces or line
+ * breaks (spaces around `=` allowed). Serial numbers are compared
+ * case-insensitively: the keys are upper-cased.
  * @param {string} text raw option value
- * @returns {Map<string, string>} serial number -> host
+ * @returns {{ overrides: Map<string, string>, invalid: Array<string> }}
+ *   serial number (upper case) -> host, and the pairs that were not usable
  */
-export function parseAddressOverrides(text) {
+export function parseAddressOverridesDetailed(text) {
   const overrides = new Map();
-  for (const pair of String(text || '').split(/[\s,;]+/)) {
-    const separator = pair.indexOf('=');
-    if (separator <= 0) {
+  const invalid = [];
+  const normalized = String(text || '').replace(/\s*=\s*/g, '=');
+  for (const pair of normalized.split(/[\s,;]+/)) {
+    if (pair === '') {
       continue;
     }
-    const serial = pair.slice(0, separator).trim();
-    const host = pair.slice(separator + 1).trim();
+    const separator = pair.indexOf('=');
+    const serial = separator > 0 ? pair.slice(0, separator).trim() : '';
+    const host = separator > 0 ? pair.slice(separator + 1).trim() : '';
     if (serial !== '' && HOST_PATTERN.test(host)) {
-      overrides.set(serial, host);
+      overrides.set(serial.toUpperCase(), host);
+    } else {
+      invalid.push(pair);
     }
   }
-  return overrides;
+  return { overrides, invalid };
+}
+
+/**
+ * Parse the `local_http_addresses` option (see parseAddressOverridesDetailed):
+ * invalid pairs are ignored.
+ * @param {string} text raw option value
+ * @returns {Map<string, string>} serial number (upper case) -> host
+ */
+export function parseAddressOverrides(text) {
+  return parseAddressOverridesDetailed(text).overrides;
 }
 
 /**
@@ -106,8 +123,9 @@ export function zenSdkAddressOf(rawCloudDevice, overrides = new Map()) {
   if (!serial || typeof serial !== 'string' || serial.trim() === '') {
     return null;
   }
-  if (overrides.has(serial)) {
-    return { host: overrides.get(serial), origin: 'override' };
+  const override = overrides.get(serial.trim().toUpperCase());
+  if (override) {
+    return { host: override, origin: 'override' };
   }
   const ip = typeof rawCloudDevice.ip === 'string' ? rawCloudDevice.ip.trim() : '';
   if (ip !== '' && HOST_PATTERN.test(ip)) {
@@ -315,6 +333,20 @@ export function createZendureZenSdk({
     return entry.inFlight;
   }
 
+  /**
+   * Start a loop for every device without one yet (start() again after a
+   * configuration change, setDevices() with a new or moved device while
+   * running): never two loops for one device.
+   */
+  function startLoops() {
+    const entries = [...devices.values()].filter((entry) => !entry.looping);
+    entries.forEach((entry, index) => {
+      entry.looping = true;
+      const offset = Math.round((pollIntervalMs * index) / Math.max(1, entries.length));
+      schedule(entry, entry.failures >= ZENSDK_FAILURES_BEFORE_DOWN ? nextDelayOf(entry) : offset);
+    });
+  }
+
   return {
     /** Running = polling; the per-device health is `isDeviceUp`. */
     get connected() {
@@ -323,7 +355,8 @@ export function createZendureZenSdk({
 
     /**
      * Set the devices to poll (replaces the previous set). A device whose
-     * address did not change keeps its cache and health.
+     * address did not change keeps its cache and health; one whose address
+     * changed starts afresh at the new one.
      * @param {Array<{ rawCloudDevice: object, host: string, origin: string }>} entries
      */
     setDevices(entries) {
@@ -368,6 +401,12 @@ export function createZendureZenSdk({
       for (const [serial, entry] of next) {
         devices.set(serial, entry);
       }
+      // A device added or moved to a new address while polling gets its loop
+      // now (its previous loop, if any, stops by itself: it is not in the
+      // map any more).
+      if (running) {
+        startLoops();
+      }
     },
 
     /**
@@ -384,17 +423,7 @@ export function createZendureZenSdk({
      */
     start() {
       running = true;
-      // Only the devices without a loop yet (start() runs again after a
-      // configuration change that added devices).
-      const entries = [...devices.values()].filter((entry) => !entry.looping);
-      entries.forEach((entry, index) => {
-        entry.looping = true;
-        const offset = Math.round((pollIntervalMs * index) / Math.max(1, entries.length));
-        schedule(
-          entry,
-          entry.failures >= ZENSDK_FAILURES_BEFORE_DOWN ? nextDelayOf(entry) : offset,
-        );
-      });
+      startLoops();
     },
 
     /** Same role as the MQTT runtimes: no topics here, devices come from setDevices. */
@@ -486,6 +515,19 @@ export function createZendureZenSdk({
     onPayload(listener) {
       payloadListeners.add(listener);
       return () => payloadListeners.delete(listener);
+    },
+
+    /**
+     * Stop the polling loops (push cleanup), keeping the devices, their
+     * health and the caches: start() resumes them.
+     */
+    stop() {
+      running = false;
+      for (const entry of devices.values()) {
+        clearTimeout(entry.timer);
+        entry.timer = null;
+        entry.looping = false;
+      }
     },
 
     /** Stop polling and clear every cache. */

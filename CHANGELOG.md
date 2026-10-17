@@ -17,8 +17,13 @@ the notes of the version's GitHub Release.
   driven through `POST /properties/write`, on by default (**Use the local API
   of the batteries**). The address comes from the Zendure cloud, else the mDNS
   name `zendure-<model>-<serial>.local`, else the new **Local API addresses**
-  option (`SERIAL=IP` pairs). Per device the best source wins: local API, then
-  local MQTT, then the Zendure cloud, with automatic fallback and return.
+  option (`SERIAL=IP` pairs, spaces around `=` and the case of the serial
+  ignored, unused pairs logged). An address the cloud changes is picked up
+  by the next scan. Per device the best source wins: local API, then local
+  MQTT, then the Zendure cloud, with automatic fallback and return; the cloud
+  only takes over after 90 s without an answer, and at startup a battery has
+  the same 90 s for its first answer (unless it already missed three
+  requests), so a Wi-Fi blip or a slow first answer stays local.
   The full report brings the settings (limits, AC mode, charge levels) and the
   pack list (stored energy) that the local MQTT feed lacked.
 - Battery widget: remaining time of the current charge or discharge ("Full
@@ -31,7 +36,10 @@ the notes of the version's GitHub Release.
 
 - The Zendure cloud MQTT broker is only connected while a device needs it:
   when every battery answers on its local API, it stays disconnected and no
-  longer fights Home Assistant over the account's single cloud session.
+  longer fights Home Assistant over the account's single cloud session. Once
+  connected for a fallback, it is kept 5 minutes after the last battery that
+  needed it (instead of about a minute), so a battery that blinks does not
+  take the session and give it back each time.
 - Scene and widget commands go through the local API when it serves the
   battery, with the same guards (clamping, smart mode, rate limit, unchanged
   values not re-sent, SoC scale).
@@ -52,6 +60,8 @@ the notes of the version's GitHub Release.
 
 ### Fixed
 
+- Battery group widget: past 10 batteries, the last row tells how many are
+  not listed ("+3 more") instead of the extra ones being silently dropped.
 - Energy totals: two saves at once (the periodic save, the push cleanup and
   the shutdown hook) shared one temporary file, so the second failed with
   `could not save /data/energy.json (ENOENT ... rename ...)`. Saves are now

@@ -115,9 +115,11 @@ darüber und sendet auch die Befehle der Szenen und Widgets darüber.
   (z. B. `HOA1NAH4N123456=192.168.1.42`). Feste IP-Adressen für die Batterien
   im Router helfen.
 - **Automatischer Rückfall**: Eine Batterie, die drei Anfragen in Folge
-  verpasst, wechselt auf ihren lokalen MQTT-Broker, falls aktiviert, sonst auf
-  die Zendure-Cloud, und kehrt zurück, sobald ihre lokale API wieder
-  antwortet. Eine Batterie, die nie geantwortet hat, bleibt einfach bei der
+  verpasst, wechselt sofort auf ihren lokalen MQTT-Broker, falls aktiviert;
+  auf die Zendure-Cloud wechselt sie erst nach 90 Sekunden ohne Antwort (ein
+  kurzer WLAN-Aussetzer belegt die Cloud-Verbindung nicht), und sie kehrt
+  zurück, sobald ihre lokale API wieder antwortet. Beim Start hat eine
+  Batterie dieselben 90 Sekunden für ihre erste Antwort. Eine Batterie, die nie geantwortet hat, bleibt einfach bei der
   Cloud, ohne Warn-Abzeichen.
 - **Die Cloud bleibt ungenutzt**: Antworten alle Batterien lokal, verbindet
   sich die Integration gar nicht mit dem Zendure-Cloud-Broker; Home Assistant
@@ -237,8 +239,9 @@ warnt einmal in ihren Protokollen, wenn sie dieses gegenseitige Verdrängen
 erkennt.
 
 Mit der **lokalen API** (Standard) verbindet sich die Integration nur dann mit
-dem Zendure-Cloud-Broker, wenn eine Batterie ihn braucht, und trennt sich eine
-Minute, nachdem alle Batterien wieder auf einer lokalen Quelle sind: Antworten
+dem Zendure-Cloud-Broker, wenn eine Batterie ihn braucht, und trennt sich
+5 Minuten, nachdem die letzte Batterie, die ihn brauchte, wieder auf einer
+lokalen Quelle ist: Antworten
 deine Batterien lokal, streiten Home Assistant und Gladys nicht mehr um die
 Cloud-Verbindung.
 

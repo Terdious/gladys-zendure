@@ -150,6 +150,39 @@ test('the group widget sums the selected batteries, every battery when none is s
   assert.equal(one.components.find((c) => c.type === 'gauge').value, 62);
 });
 
+test('the group widget lists 9 batteries and a "+N more" row past 10', async () => {
+  const many = Array.from({ length: 12 }, (_, i) => ({
+    ...FAKE_SOLARFLOW_DEVICE,
+    id: `many-${i}`,
+    deviceKey: `Many${i}`,
+    snNumber: `SN-MANY-${i}`,
+    deviceName: `Battery ${i + 1}`,
+  }));
+  setSolarflowDependencies({ fetchImpl: createFakeZendureFetch({ deviceList: many }) });
+  const content = await WIDGETS[GROUP_WIDGET].get(gladys, { settings: {}, config });
+  // Nothing dropped by the core (no warning about extra rows).
+  assert.deepEqual(validateWidgetContent(content), []);
+  const { items } = content.components.find((c) => c.type === 'status');
+  assert.equal(items.length, 10);
+  assert.equal(items[8].label, 'Battery 9');
+  assert.deepEqual(items[9].label, {
+    en: '+3 more',
+    fr: '+3 autres',
+    de: '+3 weitere',
+    es: '+3 más',
+  });
+
+  // Exactly 10: every battery listed, no summary row.
+  setSolarflowDependencies({
+    fetchImpl: createFakeZendureFetch({ deviceList: many.slice(0, 10) }),
+  });
+  resetSolarflowRuntime();
+  const ten = await WIDGETS[GROUP_WIDGET].get(gladys, { settings: {}, config });
+  const tenItems = ten.components.find((c) => c.type === 'status').items;
+  assert.equal(tenItems.length, 10);
+  assert.equal(tenItems[9].label, 'Battery 10');
+});
+
 // --- Battery-less devices, AC-only models, remaining time ---------------------
 
 /** A device served by its local API, answering `report`. */
