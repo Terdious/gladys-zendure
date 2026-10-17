@@ -69,3 +69,19 @@ test('normalizeConfig keeps a supported feature_names language, English otherwis
   assert.equal(normalizeConfig({ feature_names: 'it' }).feature_names, 'en');
   assert.equal(normalizeConfig({}).feature_names, 'en');
 });
+
+test('normalizeConfig enables the local HTTP API by default and coerces the toggle', () => {
+  assert.equal(normalizeConfig().enable_local_http, true);
+  assert.equal(normalizeConfig({ enable_local_http: 'false' }).enable_local_http, false);
+  assert.equal(normalizeConfig({ enable_local_http: false }).enable_local_http, false);
+  assert.equal(normalizeConfig({ enable_local_http: 'on' }).enable_local_http, true);
+});
+
+test('normalizeConfig keeps the local API address overrides as a trimmed string', () => {
+  assert.equal(normalizeConfig().local_http_addresses, '');
+  assert.equal(
+    normalizeConfig({ local_http_addresses: '  SN1=10.0.0.2, SN2=10.0.0.3 ' }).local_http_addresses,
+    'SN1=10.0.0.2, SN2=10.0.0.3',
+  );
+  assert.equal(normalizeConfig({ local_http_addresses: null }).local_http_addresses, '');
+});

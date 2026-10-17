@@ -18,7 +18,7 @@
 // peteS-UK). Only those factual constants are reused; the code is our own.
 // -----------------------------------------------------------------------------
 
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { createLogger } from '@gladysassistant/integration-sdk';
@@ -97,6 +97,39 @@ export function createEnergyMeters({ dataDir = process.env.ZENDURE_DATA_DIR || '
   let meters = new Map();
   let dirty = false;
   let saveFailureLogged = false;
+  // Saves run one after the other (the periodic timer, the push cleanup and
+  // the shutdown hook can all ask at once), each with its own temporary file:
+  // two concurrent saves sharing one temp file made the second rename fail
+  // with ENOENT (the first had already moved it).
+  let saveQueue = Promise.resolve();
+  let saveCount = 0;
+
+  async function writeNow() {
+    if (!dirty) {
+      return;
+    }
+    // Cleared BEFORE the snapshot: an update landing during the write marks
+    // the meters dirty again for the next save instead of being forgotten.
+    dirty = false;
+    const devices = Object.fromEntries(
+      [...meters].map(([deviceKey, meter]) => [deviceKey, { kwh: { ...meter.kwh } }]),
+    );
+    saveCount += 1;
+    const temporaryPath = `${filePath}.${process.pid}.${saveCount}.tmp`;
+    try {
+      await mkdir(dataDir, { recursive: true });
+      await writeFile(temporaryPath, JSON.stringify({ version: 1, devices }));
+      await rename(temporaryPath, filePath);
+      saveFailureLogged = false;
+    } catch (e) {
+      dirty = true;
+      await rm(temporaryPath, { force: true }).catch(() => {});
+      if (!saveFailureLogged) {
+        saveFailureLogged = true;
+        logger.warn(`energy: could not save ${filePath} (${e.message}), retrying later`);
+      }
+    }
+  }
 
   function meterOf(deviceKey) {
     if (!meters.has(deviceKey)) {
@@ -168,27 +201,15 @@ export function createEnergyMeters({ dataDir = process.env.ZENDURE_DATA_DIR || '
       );
     },
 
-    /** Write the totals when they changed (atomic: temp file then rename). */
-    async save() {
-      if (!dirty) {
-        return;
-      }
-      const devices = Object.fromEntries(
-        [...meters].map(([deviceKey, meter]) => [deviceKey, { kwh: meter.kwh }]),
-      );
-      try {
-        await mkdir(dataDir, { recursive: true });
-        const temporaryPath = `${filePath}.tmp`;
-        await writeFile(temporaryPath, JSON.stringify({ version: 1, devices }));
-        await rename(temporaryPath, filePath);
-        dirty = false;
-        saveFailureLogged = false;
-      } catch (e) {
-        if (!saveFailureLogged) {
-          saveFailureLogged = true;
-          logger.warn(`energy: could not save ${filePath} (${e.message}), retrying later`);
-        }
-      }
+    /**
+     * Write the totals when they changed (atomic: temp file then rename),
+     * serialized with the other saves.
+     * @returns {Promise<void>}
+     */
+    save() {
+      const run = saveQueue.then(() => writeNow());
+      saveQueue = run.catch(() => {});
+      return run;
     },
   };
 }

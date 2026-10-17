@@ -27,6 +27,7 @@ import {
   FAKE_CLOUD_KEY,
   FAKE_SOLARFLOW_DEVICE,
   createTestEnergyMeters,
+  createFakeZenSdkFetch,
 } from './helpers/fakeZendure.js';
 
 const SELECTOR = 'zendure';
@@ -49,6 +50,9 @@ before(async () => {
     fetchImpl: createFakeZendureFetch(),
     mqttLibrary,
     energyMeters: createTestEnergyMeters().meters,
+    // Never the network: every local HTTP API is unreachable unless a test
+    // injects its own fake.
+    localFetchImpl: createFakeZenSdkFetch(),
   });
 
   gladys = new GladysIntegration({

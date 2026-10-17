@@ -10,6 +10,69 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Added
+
+- Local API transport (zenSDK, the one Home Assistant's Zendure-HA uses): every
+  SolarFlow is read through `GET http://<ip>/properties/report` every 5 s and
+  driven through `POST /properties/write`, on by default (**Use the local API
+  of the batteries**). The address comes from the Zendure cloud, else the mDNS
+  name `zendure-<model>-<serial>.local`, else the new **Local API addresses**
+  option (`SERIAL=IP` pairs, spaces around `=` and the case of the serial
+  ignored, unused pairs logged). An address the cloud changes is picked up
+  by the next scan. Per device the best source wins: local API, then local
+  MQTT, then the Zendure cloud, with automatic fallback and return; the cloud
+  only takes over after 90 s without an answer, and at startup a battery has
+  the same 90 s for its first answer (unless it already missed three
+  requests), so a Wi-Fi blip or a slow first answer stays local.
+  The full report brings the settings (limits, AC mode, charge levels) and the
+  pack list (stored energy) that the local MQTT feed lacked.
+- Battery widget: remaining time of the current charge or discharge ("Full
+  in" / "Empty in"), as the battery reports it (`remainInputTime` /
+  `remainOutTime`, minutes, the 999 h "no estimate" value ignored) or computed
+  from its capacity and charge levels like Zendure-HA does. The battery group
+  shows it on each battery line.
+
+### Changed
+
+- The Zendure cloud MQTT broker is only connected while a device needs it:
+  when every battery answers on its local API, it stays disconnected and no
+  longer fights Home Assistant over the account's single cloud session. Once
+  connected for a fallback, it is kept 5 minutes after the last battery that
+  needed it (instead of about a minute), so a battery that blinks does not
+  take the session and give it back each time.
+- Scene and widget commands go through the local API when it serves the
+  battery, with the same guards (clamping, smart mode, rate limit, unchanged
+  values not re-sent, SoC scale).
+- Widgets only show what a battery has: a device without a battery pack (a
+  SolarFlow 800 used as a plain micro-inverter, known from `packNum` /
+  `packData`) keeps its solar, home output and output limit, without level,
+  charge figures, charge levels, AC mode, charge limit nor **Mode & levels**
+  button; the battery group leaves it out of its average level and stored
+  energy, and a group without any battery shows no battery figure (no 0 %).
+  AC-coupled models (1600 AC+, 2400 AC, 2400 AC+) have no solar tile, unless
+  they report solar power. While the presence of a pack is not known yet,
+  every figure stays.
+- The battery widget gauge shows its % unit.
+- Transport badges, the battery widget source and the logs
+  (`telemetry(local http): ...`) show the local API; the degraded badge tells
+  when a battery's local API stopped answering. A battery whose local API
+  never answered stays a plain cloud device.
+
+### Fixed
+
+- Battery group widget: past 10 batteries, the last row tells how many are
+  not listed ("+3 more") instead of the extra ones being silently dropped.
+- Energy totals: two saves at once (the periodic save, the push cleanup and
+  the shutdown hook) shared one temporary file, so the second failed with
+  `could not save /data/energy.json (ENOENT ... rename ...)`. Saves are now
+  serialized, each with its own temporary file, and an update landing during
+  a save is kept for the next one.
+- Local MQTT: the reported settings published on `Zendure/number|select|switch/<serial>/...`
+  (outputLimit, inputLimit, socSet, minSoc, acMode...) are now read (command
+  `/set` topics stay ignored), so the widget no longer shows them as "—".
+- Widgets and controls read the fresh cloud report instead of the discovery
+  snapshot when both carry a value.
+
 ## [1.5.0] - 2026-10-16
 
 ### Added

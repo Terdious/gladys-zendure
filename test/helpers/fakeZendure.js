@@ -90,6 +90,43 @@ export const FAKE_LOCAL_SOLARFLOW_DEVICE = {
   enable: false,
 };
 
+// A SolarFlow 800 served by its zenSDK local HTTP API (no local MQTT broker):
+// the cloud deviceList gives its LAN `ip` and serial number.
+export const FAKE_HTTP_SOLARFLOW_DEVICE = {
+  deviceKey: 'HtTp800',
+  snNumber: 'SN-HTTP-800',
+  productKey: 'prodW',
+  productModel: 'SolarFlow 800',
+  deviceName: 'Shed inverter',
+  online: true,
+  ip: '192.168.1.80',
+  electricLevel: 30,
+  packInputPower: 0,
+  outputPackPower: 0,
+  outputHomePower: 100,
+  solarInputPower: 150,
+};
+
+// What its local API answers: the cloud report shape, complete.
+export const FAKE_HTTP_REPORT = {
+  properties: {
+    electricLevel: 64,
+    packInputPower: 250,
+    outputPackPower: 0,
+    outputHomePower: 480,
+    solarInputPower: 230,
+    outputLimit: 600,
+    inputLimit: 800,
+    acMode: 2,
+    socSet: 1000,
+    minSoc: 100,
+    packNum: 1,
+    remainOutTime: 135,
+    remainInputTime: 59940,
+  },
+  packData: [{ sn: 'C0A1', socLevel: 64 }],
+};
+
 export const FAKE_UNSUPPORTED_DEVICE = {
   deviceKey: 'ZzZ999',
   productKey: 'prodY',
@@ -179,4 +216,45 @@ export function createFakeMqttLibrary() {
 export function createTestEnergyMeters() {
   const dataDir = mkdtempSync(join(tmpdir(), 'gladys-zendure-energy-'));
   return { meters: createEnergyMeters({ dataDir }), dataDir };
+}
+
+/**
+ * Fake `fetch` for the zenSDK local HTTP API of the devices. Nothing ever
+ * leaves the process: a host without a report (or marked failing) rejects
+ * like an unreachable device, a "hanging" host never answers until the
+ * request's abort signal fires (timeout path).
+ * @param {{ reports?: Record<string, object> }} [options] host -> report body
+ */
+export function createFakeZenSdkFetch({ reports = {} } = {}) {
+  const bodies = new Map(Object.entries(reports));
+  const failing = new Set();
+  const hanging = new Set();
+  const calls = [];
+  const fetchImpl = async (url, options = {}) => {
+    const { host, pathname } = new URL(url);
+    calls.push({
+      url,
+      host,
+      path: pathname,
+      method: options.method || 'GET',
+      headers: options.headers,
+      body: options.body ? JSON.parse(options.body) : undefined,
+    });
+    if (hanging.has(host)) {
+      return new Promise((resolve, reject) => {
+        options.signal?.addEventListener('abort', () => reject(options.signal.reason));
+      });
+    }
+    if (failing.has(host) || !bodies.has(host)) {
+      throw new TypeError('fetch failed', { cause: { code: 'EHOSTUNREACH' } });
+    }
+    const text = pathname === '/properties/report' ? JSON.stringify(bodies.get(host)) : '';
+    return { status: 200, ok: true, text: async () => text, json: async () => JSON.parse(text) };
+  };
+  fetchImpl.calls = calls;
+  fetchImpl.setReport = (host, body) => bodies.set(host, body);
+  fetchImpl.fail = (host) => failing.add(host);
+  fetchImpl.recover = (host) => failing.delete(host);
+  fetchImpl.hang = (host) => hanging.add(host);
+  return fetchImpl;
 }

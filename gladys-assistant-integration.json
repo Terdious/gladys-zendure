@@ -25,10 +25,10 @@
         "es": "Primeros pasos"
       },
       "description": {
-        "en": "Paste your Zendure cloud authorization key below (generated from the Zendure mobile app). Your SolarFlow / Hyper batteries then appear in the Discover tab. Optionally enable local MQTT for LAN-speed, offline-resilient telemetry with automatic cloud fallback. The full step-by-step is in the Documentation link above.",
-        "fr": "Collez ci-dessous votre clé d'autorisation cloud Zendure (générée depuis l'application mobile Zendure). Vos batteries SolarFlow / Hyper apparaissent alors dans l'onglet Découverte. Activez éventuellement le MQTT local pour une télémétrie rapide et résiliente hors-ligne, avec repli cloud automatique. Le pas à pas complet est dans le lien Documentation ci-dessus.",
-        "de": "Füge unten deinen Zendure-Cloud-Autorisierungsschlüssel ein (in der Zendure-App erzeugt). Deine SolarFlow- / Hyper-Batterien erscheinen dann im Tab Entdecken. Aktiviere optional lokales MQTT für schnelle, auch ohne Internet stabile Telemetrie mit automatischem Rückfall auf die Cloud. Die vollständige Schritt-für-Schritt-Anleitung findest du über den Link Dokumentation oben.",
-        "es": "Pegue abajo su clave de autorización de la nube de Zendure (generada desde la aplicación móvil Zendure). Sus baterías SolarFlow / Hyper aparecen entonces en la pestaña Descubrir. Active opcionalmente el MQTT local para una telemetría rápida y resistente sin conexión, con respaldo automático en la nube. El paso a paso completo está en el enlace Documentación de arriba."
+        "en": "Paste your Zendure cloud authorization key below (generated from the Zendure mobile app). Your SolarFlow / Hyper batteries then appear in the Discover tab. Each battery is then served by its local API when it answers on your network (like Home Assistant does), with automatic Zendure cloud fallback; local MQTT remains an option for older firmwares. The full step-by-step is in the Documentation link above.",
+        "fr": "Collez ci-dessous votre clé d'autorisation cloud Zendure (générée depuis l'application mobile Zendure). Vos batteries SolarFlow / Hyper apparaissent alors dans l'onglet Découverte. Chaque batterie est ensuite servie par son API locale quand elle répond sur votre réseau (comme le fait Home Assistant), avec repli automatique sur le cloud Zendure ; le MQTT local reste une option pour les anciens firmwares. Le pas à pas complet est dans le lien Documentation ci-dessus.",
+        "de": "Füge unten deinen Zendure-Cloud-Autorisierungsschlüssel ein (in der Zendure-App erzeugt). Deine SolarFlow- / Hyper-Batterien erscheinen dann im Tab Entdecken. Jede Batterie wird dann über ihre lokale API bedient, wenn sie in deinem Netzwerk antwortet (wie bei Home Assistant), mit automatischem Rückfall auf die Zendure-Cloud; lokales MQTT bleibt eine Option für ältere Firmwares. Die vollständige Schritt-für-Schritt-Anleitung findest du über den Link Dokumentation oben.",
+        "es": "Pegue abajo su clave de autorización de la nube de Zendure (generada desde la aplicación móvil Zendure). Sus baterías SolarFlow / Hyper aparecen entonces en la pestaña Descubrir. Cada batería se sirve entonces por su API local cuando responde en su red (como hace Home Assistant), con respaldo automático en la nube de Zendure; el MQTT local sigue siendo una opción para firmwares antiguos. El paso a paso completo está en el enlace Documentación de arriba."
       },
       "links": [
         {
@@ -80,6 +80,48 @@
       "max": 3600
     },
     {
+      "key": "enable_local_http",
+      "type": "boolean",
+      "label": {
+        "en": "Use the local API of the batteries",
+        "fr": "Utiliser l'API locale des batteries",
+        "de": "Lokale API der Batterien verwenden",
+        "es": "Usar la API local de las baterías"
+      },
+      "description": {
+        "en": "Read and drive each battery through its zenSDK local HTTP API on your network (what Home Assistant uses), every few seconds. A battery that does not answer stays on the Zendure cloud, automatically.",
+        "fr": "Lire et piloter chaque batterie via son API HTTP locale zenSDK sur votre réseau (ce qu'utilise Home Assistant), toutes les quelques secondes. Une batterie qui ne répond pas reste sur le cloud Zendure, automatiquement.",
+        "de": "Liest und steuert jede Batterie über ihre lokale zenSDK-HTTP-API in deinem Netzwerk (die auch Home Assistant nutzt), alle paar Sekunden. Eine Batterie, die nicht antwortet, bleibt automatisch bei der Zendure-Cloud.",
+        "es": "Leer y controlar cada batería a través de su API HTTP local zenSDK en su red (la que usa Home Assistant), cada pocos segundos. Una batería que no responde sigue en la nube de Zendure, automáticamente."
+      },
+      "required": false,
+      "default": true
+    },
+    {
+      "key": "local_http_addresses",
+      "type": "string",
+      "label": {
+        "en": "Local API addresses (optional)",
+        "fr": "Adresses de l'API locale (facultatif)",
+        "de": "Adressen der lokalen API (optional)",
+        "es": "Direcciones de la API local (opcional)"
+      },
+      "description": {
+        "en": "Only for a battery whose local API is not found (no address from the cloud, mDNS name not resolved): serial number=IP address pairs, separated by commas.",
+        "fr": "Seulement pour une batterie dont l'API locale n'est pas trouvée (pas d'adresse fournie par le cloud, nom mDNS non résolu) : paires numéro de série=adresse IP, séparées par des virgules.",
+        "de": "Nur für eine Batterie, deren lokale API nicht gefunden wird (keine Adresse aus der Cloud, mDNS-Name nicht aufgelöst): Paare Seriennummer=IP-Adresse, durch Kommas getrennt.",
+        "es": "Solo para una batería cuya API local no se encuentra (sin dirección de la nube, nombre mDNS no resuelto): pares número de serie=dirección IP, separados por comas."
+      },
+      "placeholder": {
+        "en": "HOA1NAH4N123456=192.168.1.42",
+        "fr": "HOA1NAH4N123456=192.168.1.42",
+        "de": "HOA1NAH4N123456=192.168.1.42",
+        "es": "HOA1NAH4N123456=192.168.1.42"
+      },
+      "required": false,
+      "default": ""
+    },
+    {
       "key": "enable_local_mqtt",
       "type": "boolean",
       "label": {
@@ -89,10 +131,10 @@
         "es": "Activar el MQTT local (zenSDK)"
       },
       "description": {
-        "en": "Read telemetry from the device's local MQTT broker when available, instead of the Zendure cloud.",
-        "fr": "Lire la télémétrie via le broker MQTT local de l'appareil quand il est disponible, plutôt que via le cloud Zendure.",
-        "de": "Liest die Telemetrie vom lokalen MQTT-Broker des Geräts, wenn verfügbar, statt aus der Zendure-Cloud.",
-        "es": "Leer la telemetría desde el broker MQTT local del dispositivo cuando esté disponible, en lugar de la nube de Zendure."
+        "en": "Also read telemetry from the device's local MQTT broker when available (older firmwares, Hyper 2000), before the Zendure cloud.",
+        "fr": "Lire aussi la télémétrie via le broker MQTT local de l'appareil quand il est disponible (anciens firmwares, Hyper 2000), avant le cloud Zendure.",
+        "de": "Liest die Telemetrie zusätzlich vom lokalen MQTT-Broker des Geräts, wenn verfügbar (ältere Firmwares, Hyper 2000), vor der Zendure-Cloud.",
+        "es": "Leer también la telemetría desde el broker MQTT local del dispositivo cuando esté disponible (firmwares antiguos, Hyper 2000), antes de la nube de Zendure."
       },
       "required": false,
       "default": false
@@ -164,10 +206,10 @@
         "es": "Accesibilidad de una batería"
       },
       "description": {
-        "en": "A battery stopped reporting, or reports again (local MQTT mode).",
-        "fr": "Une batterie ne remonte plus rien, ou remonte à nouveau (mode MQTT local).",
-        "de": "Eine Batterie meldet nichts mehr oder wieder (lokaler MQTT-Modus).",
-        "es": "Una batería deja de informar o vuelve a hacerlo (modo MQTT local)."
+        "en": "A battery stopped reporting, or reports again (local modes).",
+        "fr": "Une batterie ne remonte plus rien, ou remonte à nouveau (modes locaux).",
+        "de": "Eine Batterie meldet nichts mehr oder wieder (lokale Modi).",
+        "es": "Una batería deja de informar o vuelve a hacerlo (modos locales)."
       },
       "fields": [
         {

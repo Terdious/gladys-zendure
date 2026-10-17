@@ -1,9 +1,16 @@
 // -----------------------------------------------------------------------------
-// Device type: ZENDURE SOLARFLOW (v1: SolarFlow 800 Pro, read-only telemetry)
+// Device type: ZENDURE SOLARFLOW (and Hyper)
 //
-// Discovery comes from the Zendure cloud deviceList; telemetry comes from the
-// Zendure cloud MQTT broker (`properties/report` payloads), with the raw
-// deviceList entry as a fallback until the first report arrives.
+// Discovery comes from the Zendure cloud deviceList. Telemetry and control go
+// through the best source each device offers, per device and re-assessed
+// continuously:
+//   1. the zenSDK local HTTP API of the device (`enable_local_http`, on by
+//      default; src/zendure/zensdk.js) — what Home Assistant uses;
+//   2. the device's local MQTT broker (`enable_local_mqtt`, older firmwares
+//      and the Hyper 2000);
+//   3. the Zendure cloud MQTT broker, the fallback — connected only while a
+//      device needs it, since Zendure allows one cloud consumer per account.
+// The raw deviceList entry bootstraps the values until the first report.
 //
 // Unlike the single-device template blueprints, this blueprint manages ONE
 // Gladys device PER Zendure device found in the cloud account: it exposes
@@ -14,6 +21,15 @@ import { createLogger, DEVICE_TRANSPORTS } from '@gladysassistant/integration-sd
 
 import { toGladysPollFrequency } from '../config.js';
 import { fetchCloudData } from '../zendure/client.js';
+import { batteryPresenceOf, hasSolarInput, remainingTimeOf } from '../zendure/battery.js';
+import { modelCapabilitiesOf } from '../zendure/constants.js';
+import {
+  createZendureZenSdk,
+  parseAddressOverrides,
+  parseAddressOverridesDetailed,
+  zenSdkAddressOf,
+  ZENSDK_FAILURES_BEFORE_DOWN,
+} from '../zendure/zensdk.js';
 import {
   createZendureMqtt,
   createZendureLocalMqtt,
@@ -67,6 +83,12 @@ const localMqttRuntimes = new Map();
 // not received anything yet, which must not count as silence).
 let cloudRuntimeStartedAt = 0;
 const localRuntimeStartedAt = new Map(); // broker url -> creation time (ms)
+// The zenSDK local HTTP runtime (one for every device: it polls each one).
+let zenSdkRuntime = null;
+// When the polling (re)started: start of the startup grace (see localHttpStateOf).
+let zenSdkStartedAt = 0;
+// Last time a device needed the cloud broker (see CLOUD_HOLD_TIME_IN_MS).
+let cloudLastNeededAt = 0;
 
 // --- Per-device effective telemetry source (local mode) -----------------------
 // In local mode a device can silently stop publishing on its LOCAL broker
@@ -85,6 +107,11 @@ export const LOCAL_SILENCE_TIMEOUT_IN_MS = 90 * 1000;
 export const UNREACHABLE_TIMEOUT_IN_MS = 5 * 60 * 1000;
 // The evaluator re-assesses every device at this interval.
 export const SOURCE_EVALUATOR_INTERVAL_IN_MS = 30 * 1000;
+// A lazily connected cloud broker stays up this long after the last device
+// that needed it: a battery whose Wi-Fi blinks every few minutes must not
+// take the account's single cloud session away from Home Assistant (and give
+// it back) each time.
+export const CLOUD_HOLD_TIME_IN_MS = 5 * 60 * 1000;
 
 // Tooltip of the degraded badge (cloud fallback of a locally reachable device),
 // in every language of the Gladys interface.
@@ -94,6 +121,23 @@ export const LOCAL_SILENT_MESSAGE = {
   de: 'Die lokale Telemetrie schweigt — Betrieb über den Rückfall auf die Zendure-Cloud.',
   es: 'La telemetría local está en silencio — funcionando con el respaldo de la nube de Zendure.',
 };
+
+// Same, for a device whose local HTTP API answered before and stopped.
+export const LOCAL_HTTP_SILENT_MESSAGE = {
+  en: 'The local API of the battery is not answering — running on the Zendure cloud fallback.',
+  fr: "L'API locale de la batterie ne répond plus — repli sur le cloud Zendure.",
+  de: 'Die lokale API der Batterie antwortet nicht — Betrieb über den Rückfall auf die Zendure-Cloud.',
+  es: 'La API local de la batería no responde — funcionando con el respaldo de la nube de Zendure.',
+};
+
+// Log names of the sources ('local' is the local MQTT broker).
+const SOURCE_LABELS = {
+  http: 'local http',
+  local: 'local',
+  cloud: 'cloud',
+  unreachable: 'unreachable',
+};
+const isLocalSource = (source) => source === 'local' || source === 'http';
 
 // --- Energy meters (src/zendure/energy.js) ------------------------------------
 // Created and loaded from /data on the first push start; `dependencies` can
@@ -393,7 +437,23 @@ export function flushStatesNow(gladys) {
 }
 
 /**
- * Inject test doubles: `{ fetchImpl, mqttLibrary }`.
+ * Test hook: poll every device's local HTTP API once, now.
+ * @returns {Promise<void>}
+ */
+export function pollLocalHttpNow() {
+  return zenSdkRuntime ? zenSdkRuntime.pollAll() : Promise.resolve();
+}
+
+/**
+ * Test hook: counters of the local HTTP runtime (null before it exists).
+ * @returns {object|null}
+ */
+export function getLocalHttpStats() {
+  return zenSdkRuntime ? zenSdkRuntime.getStats() : null;
+}
+
+/**
+ * Inject test doubles: `{ fetchImpl, mqttLibrary, localFetchImpl, energyMeters }`.
  * @param {object} overrides
  */
 export function setSolarflowDependencies(overrides) {
@@ -407,11 +467,17 @@ export function resetSolarflowRuntime() {
   }
   cloudMqttRuntime = null;
   cloudRuntimeStartedAt = 0;
+  cloudLastNeededAt = 0;
   for (const runtime of localMqttRuntimes.values()) {
     runtime.disconnect();
   }
   localMqttRuntimes.clear();
   localRuntimeStartedAt.clear();
+  if (zenSdkRuntime) {
+    zenSdkRuntime.disconnect();
+  }
+  zenSdkRuntime = null;
+  zenSdkStartedAt = 0;
   if (publishTimer) {
     clearTimeout(publishTimer);
     publishTimer = null;
@@ -483,12 +549,16 @@ function supportedDevices(data) {
 async function ensureCloudData(config, { refresh = false } = {}) {
   if (!cloudData || refresh) {
     cloudData = await fetchCloudData(config.cloud_key, { fetchImpl: dependencies.fetchImpl });
+    if (refresh) {
+      refreshLocalHttpDevices(config);
+    }
   }
   return cloudData;
 }
 
 async function ensureCloudRuntime(config, now = Date.now()) {
   const data = await ensureCloudData(config);
+  cloudLastNeededAt = Math.max(cloudLastNeededAt, now);
   if (!cloudMqttRuntime) {
     cloudMqttRuntime = createZendureMqtt({ mqttLibrary: dependencies.mqttLibrary });
     // Creation time drives the startup grace window of the freshness checks.
@@ -515,6 +585,118 @@ async function ensureCloudRuntime(config, now = Date.now()) {
  */
 function isDeviceLocallyReachable(config, rawCloudDevice) {
   return config.enable_local_mqtt === true && buildLocalBrokerConfig(rawCloudDevice) !== null;
+}
+
+/**
+ * Where to reach a device's zenSDK local HTTP API, or null when the option is
+ * off, the model has no such API (Hyper 2000) or the device has no serial.
+ * @param {object} config normalized configuration
+ * @param {object} rawCloudDevice device from the cloud deviceList
+ * @returns {{ host: string, origin: 'override'|'cloud'|'mdns' }|null}
+ */
+function localHttpAddressOf(config, rawCloudDevice) {
+  if (config.enable_local_http !== true || !modelCapabilitiesOf(modelOf(rawCloudDevice)).zenSdk) {
+    return null;
+  }
+  return zenSdkAddressOf(rawCloudDevice, parseAddressOverrides(config.local_http_addresses));
+}
+
+/**
+ * State of a device's local HTTP API, or null when it has none (option off,
+ * no zenSDK, runtime not started, device not polled):
+ *   - 'up': it answers;
+ *   - 'pending': it does not answer right now, but it answered within
+ *     LOCAL_SILENCE_TIMEOUT_IN_MS (hysteresis: a Wi-Fi blip is not an
+ *     outage), or the polling started less than that ago and it has not
+ *     missed ZENSDK_FAILURES_BEFORE_DOWN requests yet (startup grace);
+ *   - 'down': silent past both windows. Only then may the cloud serve it.
+ * @param {object} config normalized configuration
+ * @param {object} rawCloudDevice device from the cloud deviceList
+ * @param {number} [now] current time (ms)
+ * @returns {'up'|'pending'|'down'|null}
+ */
+function localHttpStateOf(config, rawCloudDevice, now = Date.now()) {
+  if (zenSdkRuntime === null || localHttpAddressOf(config, rawCloudDevice) === null) {
+    return null;
+  }
+  const health = zenSdkRuntime.getDeviceHealth(rawCloudDevice.snNumber);
+  if (!health) {
+    return null;
+  }
+  if (zenSdkRuntime.isDeviceUp(rawCloudDevice.snNumber, now)) {
+    return 'up';
+  }
+  const answeredRecently =
+    health.lastSuccessAt !== null && now - health.lastSuccessAt <= LOCAL_SILENCE_TIMEOUT_IN_MS;
+  const inStartupGrace =
+    now - zenSdkStartedAt <= LOCAL_SILENCE_TIMEOUT_IN_MS &&
+    health.failures < ZENSDK_FAILURES_BEFORE_DOWN;
+  return answeredRecently || inStartupGrace ? 'pending' : 'down';
+}
+
+/** Whether the local HTTP API of a device answers right now. */
+function isLocalHttpUp(config, rawCloudDevice, now = Date.now()) {
+  return (
+    zenSdkRuntime !== null &&
+    localHttpAddressOf(config, rawCloudDevice) !== null &&
+    zenSdkRuntime.isDeviceUp(rawCloudDevice.snNumber, now)
+  );
+}
+
+/** Whether the local HTTP API of a device answered at least once (this run). */
+function hasLocalHttpAnswered(config, rawCloudDevice) {
+  return (
+    zenSdkRuntime !== null &&
+    localHttpAddressOf(config, rawCloudDevice) !== null &&
+    zenSdkRuntime.getDeviceHealth(rawCloudDevice.snNumber)?.everAnswered === true
+  );
+}
+
+/**
+ * Whether a device has a local source worth tracking (local HTTP API or
+ * local MQTT broker): the evaluator follows it and brings it back to local.
+ */
+function hasLocalCandidate(config, rawCloudDevice) {
+  return (
+    localHttpAddressOf(config, rawCloudDevice) !== null ||
+    isDeviceLocallyReachable(config, rawCloudDevice)
+  );
+}
+
+/**
+ * Whether a device on the cloud is NOT where it should be (degraded badge):
+ * its local MQTT broker is configured, or its local HTTP API answered before.
+ * A device whose local API never answered is plain "cloud": local access is
+ * on by default, and a site without it (Gladys on another network...) must
+ * not show every battery as degraded.
+ */
+function expectsLocal(config, rawCloudDevice) {
+  return (
+    isDeviceLocallyReachable(config, rawCloudDevice) || hasLocalHttpAnswered(config, rawCloudDevice)
+  );
+}
+
+/**
+ * Source a device should use when the evaluator has no state for it yet: its
+ * local HTTP API when it answers, its local MQTT broker when configured, its
+ * local HTTP API again while it is pending (see localHttpStateOf), the cloud
+ * otherwise. Same order as selectSourceRuntime.
+ * @returns {'http'|'local'|'cloud'}
+ */
+function staticSourceOf(config, rawCloudDevice) {
+  const httpState = localHttpStateOf(config, rawCloudDevice);
+  if (httpState === 'up') {
+    return 'http';
+  }
+  if (isDeviceLocallyReachable(config, rawCloudDevice)) {
+    return 'local';
+  }
+  return httpState === 'pending' ? 'http' : 'cloud';
+}
+
+/** Whether any local transport is enabled (the evaluator then runs). */
+function localTransportsEnabled(config) {
+  return config.enable_local_mqtt === true || config.enable_local_http === true;
 }
 
 /**
@@ -556,18 +738,28 @@ async function ensureLocalRuntime(config, rawCloudDevice) {
 }
 
 /**
- * Select the active telemetry source for one device: prefer the LOCAL broker
- * when enabled and reachable, otherwise fall back to the cloud broker.
+ * Select the active telemetry source for one device: prefer the local HTTP
+ * API when it answers, then the LOCAL broker when enabled and reachable, then
+ * the local HTTP API while it is only pending (a blip, the startup probe not
+ * done yet: never a reason to take the cloud session), otherwise fall back to
+ * the cloud broker.
  * @param {object} config normalized configuration
  * @param {object} rawCloudDevice device from the cloud deviceList
- * @returns {Promise<{ runtime: object, source: 'local'|'cloud' }>}
+ * @returns {Promise<{ runtime: object, source: 'http'|'local'|'cloud' }>}
  */
 async function selectSourceRuntime(config, rawCloudDevice) {
+  const httpState = localHttpStateOf(config, rawCloudDevice);
+  if (httpState === 'up') {
+    return { runtime: zenSdkRuntime, source: 'http' };
+  }
   if (isDeviceLocallyReachable(config, rawCloudDevice)) {
     const runtime = await ensureLocalRuntime(config, rawCloudDevice);
     if (runtime) {
       return { runtime, source: 'local' };
     }
+  }
+  if (httpState === 'pending') {
+    return { runtime: zenSdkRuntime, source: 'http' };
   }
   const runtime = await ensureCloudRuntime(config);
   return { runtime, source: 'cloud' };
@@ -579,11 +771,20 @@ async function selectSourceRuntime(config, rawCloudDevice) {
  * otherwise (including when no effective state exists yet).
  * @param {object} config normalized configuration
  * @param {object} rawCloudDevice device from the cloud deviceList
- * @returns {Promise<{ runtime: object, source: 'local'|'cloud' }>}
+ * @returns {Promise<{ runtime: object, source: 'http'|'local'|'cloud' }>}
  */
 async function selectPollRuntime(config, rawCloudDevice) {
-  if (config.enable_local_mqtt === true && isDeviceLocallyReachable(config, rawCloudDevice)) {
+  if (hasLocalCandidate(config, rawCloudDevice)) {
     const effective = effectiveSourceByDeviceKey.get(deviceKeyOf(rawCloudDevice));
+    // Only while the API answers: otherwise the next source (local broker,
+    // pending API, cloud) rather than a write to a dead host.
+    if (
+      effective &&
+      effective.source === 'http' &&
+      zenSdkRuntime?.isDeviceUp(rawCloudDevice.snNumber)
+    ) {
+      return { runtime: zenSdkRuntime, source: 'http' };
+    }
     if (effective && effective.source === 'cloud') {
       // Fallback in progress: poll the cloud runtime, with the cloud payload
       // logic (its `properties` reports are complete, no local merge needed).
@@ -615,7 +816,7 @@ function deviceLabelOf(rawCloudDevice) {
 
 /** Map an effective source to the Gladys transport badge value. */
 function transportOfSource(source) {
-  if (source === 'local') {
+  if (isLocalSource(source)) {
     return DEVICE_TRANSPORTS.LOCAL;
   }
   if (source === 'cloud') {
@@ -638,10 +839,12 @@ function transportOfSource(source) {
  * @returns {{ degraded?: true, message?: Record<string, string> }}
  */
 function degradedFieldsFor(config, rawCloudDevice, source) {
-  if (source === 'cloud' && isDeviceLocallyReachable(config, rawCloudDevice)) {
+  if (source === 'cloud' && expectsLocal(config, rawCloudDevice)) {
     return {
       degraded: true,
-      message: LOCAL_SILENT_MESSAGE,
+      message: hasLocalHttpAnswered(config, rawCloudDevice)
+        ? LOCAL_HTTP_SILENT_MESSAGE
+        : LOCAL_SILENT_MESSAGE,
     };
   }
   return {};
@@ -710,15 +913,19 @@ function applySourceTransition(gladys, config, rawCloudDevice, nextSource, now) 
   }
 
   const elapsed = formatDuration(now - previous.since);
+  const from = SOURCE_LABELS[previous.source];
+  const to = SOURCE_LABELS[nextSource];
   let detail;
   if (nextSource === 'unreachable') {
     detail = `unreachable (no local or cloud message for ${formatDuration(UNREACHABLE_TIMEOUT_IN_MS)})`;
-  } else if (nextSource === 'local') {
+  } else if (isLocalSource(nextSource) && isLocalSource(previous.source)) {
+    detail = `${from} -> ${to} (after ${elapsed} on ${from})`;
+  } else if (isLocalSource(nextSource)) {
     const recovery =
       previous.source === 'cloud' ? `after ${elapsed} on cloud` : `after ${elapsed} unreachable`;
-    detail = `${previous.source} -> local (recovered ${recovery})`;
-  } else if (previous.source === 'local') {
-    detail = `local -> cloud fallback (local silent for ${elapsed})`;
+    detail = `${from} -> ${to} (recovered ${recovery})`;
+  } else if (isLocalSource(previous.source)) {
+    detail = `${from} -> cloud fallback (local silent for ${elapsed})`;
   } else {
     detail = `unreachable -> cloud (cloud telemetry resumed after ${elapsed})`;
   }
@@ -747,7 +954,9 @@ function publishReachabilityEvent(gladys, rawCloudDevice, source) {
     device: gladys.externalIds(DEVICE_TYPE, deviceKeyOf(rawCloudDevice)).device,
     state: source === 'unreachable' ? 'unreachable' : 'reachable',
     device_name: rawCloudDevice.deviceName || modelOf(rawCloudDevice),
-    source,
+    // The documented values of this scene variable are local, cloud and
+    // unreachable: the local HTTP API is "local" there.
+    source: source === 'http' ? 'local' : source,
   };
   Promise.resolve()
     .then(() => gladys.publishSceneEvent(REACHABILITY_TRIGGER, data))
@@ -756,8 +965,9 @@ function publishReachabilityEvent(gladys, rawCloudDevice, source) {
 
 /**
  * Send a control command to one battery (scene actions, widget buttons):
- * validated, clamped and rate limited by src/zendure/control.js, then
- * published as `properties/write` on the broker currently serving the device.
+ * validated, clamped and rate limited by src/zendure/control.js, then sent
+ * as `properties/write` through the source currently serving the device (an
+ * HTTP POST on the local API, an MQTT publish on a broker).
  * The new value shows up with the device's next report.
  * @param {object} gladys Gladys SDK instance
  * @param {object} config normalized configuration
@@ -776,8 +986,11 @@ export async function controlDevice(gladys, config, deviceExternalId, command) {
   }
 
   const { runtime, source } = await selectPollRuntime(config, rawCloudDevice);
-  const latestPayload = runtime.getLatestPayload(telemetryKeyOf(source, rawCloudDevice));
-  const payload = latestPayload ? { ...rawCloudDevice, ...latestPayload } : rawCloudDevice;
+  const payload = payloadFor(
+    source,
+    rawCloudDevice,
+    runtime.getLatestPayload(telemetryKeyOf(source, rawCloudDevice)),
+  );
   const write = buildWriteCommand(command, { productModel: modelOf(rawCloudDevice), payload });
   if (!write) {
     logger.info(
@@ -791,9 +1004,11 @@ export async function controlDevice(gladys, config, deviceExternalId, command) {
   await runtime.writeDeviceProperties(rawCloudDevice, write.properties);
   writeThrottle.record(deviceKey, write.setting, now);
   logger.info(
-    `control: ${deviceLabelOf(rawCloudDevice)} <- ${JSON.stringify(write.properties)} (${source} broker)`,
+    `control: ${deviceLabelOf(rawCloudDevice)} <- ${JSON.stringify(write.properties)} ` +
+      `(${source === 'http' ? 'local http API' : `${source} broker`})`,
   );
-  // Ask for a fresh report so the new value shows up quickly (cloud only).
+  // Ask for a fresh report so the new value shows up quickly (cloud and
+  // local HTTP; the local broker pushes on its own).
   runtime.requestDeviceProperties(rawCloudDevice);
   return { sent: true, applied: write.applied, source };
 }
@@ -816,46 +1031,52 @@ async function publishTransportEntries(gladys, entries) {
 }
 
 /**
- * Build the push listener of one source. The LOCAL listener always publishes:
- * a local message IS proof of local health, so it also transitions the device
- * back to 'local' when it had fallen back. The CLOUD listener publishes only
- * when the device's effective source is NOT 'local', avoiding duplicates
- * while the local feed is healthy (the paced publish channel deduplicates by
- * value anyway).
+ * Build the push listener of one source. The LOCAL HTTP listener always
+ * publishes: an answer of the device IS proof of local health, so it also
+ * moves the device (back) to 'http'. The LOCAL MQTT listener does the same,
+ * except while the local HTTP API serves the device (then the HTTP feed is
+ * the one published). The CLOUD listener publishes only when no local
+ * source serves the device, avoiding duplicates while a local feed is
+ * healthy (the paced publish channel deduplicates by value anyway).
  * @param {object} gladys Gladys SDK instance
  * @param {object} config normalized configuration
- * @param {'local'|'cloud'} source source of the runtime this listener serves
+ * @param {'http'|'local'|'cloud'} source source of the runtime this listener serves
  * @returns {Function} `(key, payload) => void` payload listener
  */
 function createPushListener(gladys, config, source) {
   return (key, payload) => {
-    // The local runtime emits the serial number as key; the cloud one emits
-    // the device key.
+    // The local runtimes (HTTP and MQTT) emit the serial number as key; the
+    // cloud one emits the device key.
     const rawCloudDevice =
-      source === 'local'
-        ? findSupportedDeviceBySerial(cloudData, key)
-        : findSupportedDevice(cloudData, key);
+      source === 'cloud'
+        ? findSupportedDevice(cloudData, key)
+        : findSupportedDeviceBySerial(cloudData, key);
     if (!rawCloudDevice) {
       return;
     }
-    if (source === 'local') {
+    // Default to the static preference when the evaluator has no state yet.
+    const effective = effectiveSourceByDeviceKey.get(deviceKeyOf(rawCloudDevice));
+    const effectiveSource = effective ? effective.source : staticSourceOf(config, rawCloudDevice);
+    if (source === 'http') {
+      if (localHttpAddressOf(config, rawCloudDevice) === null) {
+        return;
+      }
+      const entry = applySourceTransition(gladys, config, rawCloudDevice, 'http', Date.now());
+      if (entry) {
+        publishTransportEntries(gladys, [entry]);
+      }
+    } else if (source === 'local') {
+      if (effectiveSource === 'http' && isLocalHttpUp(config, rawCloudDevice)) {
+        return;
+      }
       if (config.enable_local_mqtt === true) {
         const entry = applySourceTransition(gladys, config, rawCloudDevice, 'local', Date.now());
         if (entry) {
           publishTransportEntries(gladys, [entry]);
         }
       }
-    } else {
-      // Default to the static preference when the evaluator has no state yet.
-      const effective = effectiveSourceByDeviceKey.get(deviceKeyOf(rawCloudDevice));
-      const effectiveSource = effective
-        ? effective.source
-        : isDeviceLocallyReachable(config, rawCloudDevice)
-          ? 'local'
-          : 'cloud';
-      if (effectiveSource === 'local') {
-        return;
-      }
+    } else if (isLocalSource(effectiveSource)) {
+      return;
     }
     const states = [
       ...buildStates(gladys, rawCloudDevice, payload),
@@ -876,7 +1097,7 @@ function createPushListener(gladys, config, source) {
  * @param {object} gladys Gladys SDK instance
  * @param {object} config normalized configuration
  * @param {object} runtime MQTT runtime
- * @param {'local'|'cloud'} source source of the runtime
+ * @param {'http'|'local'|'cloud'} source source of the runtime
  * @returns {Function} unsubscribe
  */
 function attachSourceListener(gladys, config, runtime, source) {
@@ -884,29 +1105,32 @@ function attachSourceListener(gladys, config, runtime, source) {
 }
 
 /**
- * Re-assess the effective telemetry source of every local-mode device:
- *   - local fresh (within LOCAL_SILENCE_TIMEOUT_IN_MS, grace included) -> 'local';
+ * Re-assess the effective telemetry source of every device with a local
+ * source (local HTTP API and/or local MQTT broker):
+ *   - local HTTP API answering -> 'http';
+ *   - else local broker fresh (within LOCAL_SILENCE_TIMEOUT_IN_MS, grace
+ *     included) -> 'local';
  *   - else cloud fresh (same grace logic) -> 'cloud';
- *   - else silent on BOTH sources beyond UNREACHABLE_TIMEOUT_IN_MS -> 'unreachable';
+ *   - else silent on EVERY source beyond UNREACHABLE_TIMEOUT_IN_MS -> 'unreachable';
  *   - else keep the previous source (pending, no flapping).
  * Transitions are logged and their badges published in one call. Also owns
  * the LAZY cloud connection: the Zendure cloud broker enforces one consumer
  * per account, so it stays disconnected while every device is healthy locally
  * and is only brought up when at least one device went locally silent (then
  * released again after two consecutive all-local evaluations).
- * Scheduled every SOURCE_EVALUATOR_INTERVAL_IN_MS by startPush in local mode;
- * `now` is injectable for tests.
+ * Scheduled every SOURCE_EVALUATOR_INTERVAL_IN_MS by startPush when a local
+ * transport is enabled; `now` is injectable for tests.
  * @param {object} gladys Gladys SDK instance
  * @param {object} config normalized configuration
  * @param {number} [now] current time (ms)
  */
 export async function evaluateTelemetrySources(gladys, config, now = Date.now()) {
-  if (config.enable_local_mqtt !== true || !cloudData) {
+  if (!localTransportsEnabled(config) || !cloudData) {
     return;
   }
   const allDevices = supportedDevices(cloudData);
   const localModeDevices = allDevices.filter((rawCloudDevice) =>
-    isDeviceLocallyReachable(config, rawCloudDevice),
+    hasLocalCandidate(config, rawCloudDevice),
   );
   if (localModeDevices.length === 0) {
     return;
@@ -915,21 +1139,44 @@ export async function evaluateTelemetrySources(gladys, config, now = Date.now())
   const changedEntries = [];
   const locallySilent = [];
   for (const rawCloudDevice of localModeDevices) {
-    const brokerUrl = buildLocalBrokerConfig(rawCloudDevice).url;
-    const localRuntime = localMqttRuntimes.get(brokerUrl) || null;
-    const localActivityAt = lastSourceActivityAt(
-      localRuntime,
-      rawCloudDevice.snNumber,
-      localRuntimeStartedAt.get(brokerUrl),
-    );
-    if (now - localActivityAt <= LOCAL_SILENCE_TIMEOUT_IN_MS) {
-      const entry = applySourceTransition(gladys, config, rawCloudDevice, 'local', now);
+    const withHttp = localHttpAddressOf(config, rawCloudDevice) !== null;
+    const httpState = withHttp ? localHttpStateOf(config, rawCloudDevice, now) : null;
+    if (httpState === 'up') {
+      const entry = applySourceTransition(gladys, config, rawCloudDevice, 'http', now);
       if (entry) {
         changedEntries.push(entry);
       }
-    } else {
-      locallySilent.push({ rawCloudDevice, localActivityAt });
+      continue;
     }
+    // Latest sign of local life, over both local sources (startup grace of
+    // each runtime included).
+    let localActivityAt = withHttp
+      ? lastSourceActivityAt(zenSdkRuntime, rawCloudDevice.snNumber, zenSdkStartedAt)
+      : 0;
+    if (isDeviceLocallyReachable(config, rawCloudDevice)) {
+      const brokerUrl = buildLocalBrokerConfig(rawCloudDevice).url;
+      const mqttActivityAt = lastSourceActivityAt(
+        localMqttRuntimes.get(brokerUrl) || null,
+        rawCloudDevice.snNumber,
+        localRuntimeStartedAt.get(brokerUrl),
+      );
+      if (now - mqttActivityAt <= LOCAL_SILENCE_TIMEOUT_IN_MS) {
+        const entry = applySourceTransition(gladys, config, rawCloudDevice, 'local', now);
+        if (entry) {
+          changedEntries.push(entry);
+        }
+        continue;
+      }
+      localActivityAt = Math.max(localActivityAt, mqttActivityAt);
+    }
+    if (httpState === 'pending') {
+      // A short blip or the startup probe: keep the current source.
+      continue;
+    }
+    locallySilent.push({ rawCloudDevice, localActivityAt });
+  }
+  if (locallySilent.length > 0) {
+    cloudLastNeededAt = Math.max(cloudLastNeededAt, now);
   }
 
   // Lazy cloud fallback connection (one consumer per account: connect only
@@ -970,20 +1217,29 @@ export async function evaluateTelemetrySources(gladys, config, now = Date.now())
 
   await publishTransportEntries(gladys, changedEntries);
 
-  // Lazy cloud disconnect: once every local-mode device has been back on
-  // 'local' for two consecutive evaluations (and no device statically needs
-  // the cloud), release the cloud broker for other consumers of the account.
-  const everyDeviceLocal = localModeDevices.every((rawCloudDevice) => {
-    const effective = effectiveSourceByDeviceKey.get(deviceKeyOf(rawCloudDevice));
-    return effective !== undefined && effective.source === 'local';
-  });
+  // Lazy cloud disconnect: once every local-mode device has been back on a
+  // local source for two consecutive evaluations, no device needed the cloud
+  // for CLOUD_HOLD_TIME_IN_MS (and no device statically needs it), release
+  // the cloud broker for other consumers of the account (Home Assistant on
+  // the same account, typically).
+  const everyDeviceLocal = localModeDevices.every((rawCloudDevice) =>
+    isLocalSource(effectiveSourceByDeviceKey.get(deviceKeyOf(rawCloudDevice))?.source),
+  );
   allLocalEvaluationStreak = everyDeviceLocal ? allLocalEvaluationStreak + 1 : 0;
   const cloudStaticallyNeeded = allDevices.length > localModeDevices.length;
-  if (allLocalEvaluationStreak >= 2 && cloudMqttRuntime && !cloudStaticallyNeeded) {
+  if (
+    allLocalEvaluationStreak >= 2 &&
+    cloudMqttRuntime &&
+    !cloudStaticallyNeeded &&
+    now - cloudLastNeededAt >= CLOUD_HOLD_TIME_IN_MS
+  ) {
     cloudMqttRuntime.disconnect();
     cloudMqttRuntime = null;
     cloudRuntimeStartedAt = 0;
-    logger.info('fallback: all devices back on local -> cloud broker disconnected');
+    logger.info(
+      `fallback: all devices back on local for ${formatDuration(now - cloudLastNeededAt)} ` +
+        '-> cloud broker disconnected',
+    );
   }
 }
 
@@ -1011,13 +1267,34 @@ function findSupportedDeviceBySerial(data, serial) {
 
 /**
  * The key under which a device's telemetry is cached in the selected runtime:
- * the serial number for the LOCAL runtime, the device key for the CLOUD one.
- * @param {'local'|'cloud'} source selected telemetry source
+ * the serial number for the LOCAL runtimes (HTTP and MQTT), the device key
+ * for the CLOUD one.
+ * @param {'http'|'local'|'cloud'} source selected telemetry source
  * @param {object} rawCloudDevice device from the cloud deviceList
  * @returns {string}
  */
 function telemetryKeyOf(source, rawCloudDevice) {
-  return source === 'local' ? rawCloudDevice.snNumber : deviceKeyOf(rawCloudDevice);
+  return isLocalSource(source) ? rawCloudDevice.snNumber : deviceKeyOf(rawCloudDevice);
+}
+
+/**
+ * The payload to read a device's values from. LOCAL MQTT payloads are built
+ * incrementally (one metric per topic): a metric the device has not
+ * re-published yet (state of charge, solar power at night...) would otherwise
+ * never get a value, so the local cache is merged OVER the cloud deviceList
+ * snapshot. The cloud and local HTTP reports are used as they are: their
+ * `properties` are complete, and the raw entry's top-level values would
+ * shadow the fresher nested ones.
+ * @param {'http'|'local'|'cloud'} source
+ * @param {object} rawCloudDevice device from the cloud deviceList
+ * @param {object|null} latestPayload cached payload of the source
+ * @returns {object}
+ */
+function payloadFor(source, rawCloudDevice, latestPayload) {
+  if (source === 'local' && latestPayload) {
+    return { ...rawCloudDevice, ...latestPayload };
+  }
+  return latestPayload || rawCloudDevice;
 }
 
 /**
@@ -1118,20 +1395,24 @@ export async function describeBatteries(gladys, config) {
   return supportedDevices(data).map((rawCloudDevice) => {
     const deviceKey = deviceKeyOf(rawCloudDevice);
     const ids = gladys.externalIds(DEVICE_TYPE, deviceKey);
-    const locallyReachable = isDeviceLocallyReachable(config, rawCloudDevice);
-    const effective = effectiveSourceByDeviceKey.get(deviceKey)?.source;
+    const effective = hasLocalCandidate(config, rawCloudDevice)
+      ? effectiveSourceByDeviceKey.get(deviceKey)?.source
+      : undefined;
     const source =
       rawCloudDevice.online === false
         ? 'unreachable'
-        : (effective ?? (locallyReachable ? 'local' : 'cloud'));
-    const runtime =
-      source === 'local'
-        ? localMqttRuntimes.get(buildLocalBrokerConfig(rawCloudDevice)?.url)
-        : cloudMqttRuntime;
-    const cached = runtime?.getLatestPayload(
-      telemetryKeyOf(source === 'local' ? 'local' : 'cloud', rawCloudDevice),
+        : (effective ?? staticSourceOf(config, rawCloudDevice));
+    // The runtime whose cache to read ('unreachable' reads the cloud one).
+    const readSource = isLocalSource(source) ? source : 'cloud';
+    const runtimes = {
+      http: zenSdkRuntime,
+      local: localMqttRuntimes.get(buildLocalBrokerConfig(rawCloudDevice)?.url),
+      cloud: cloudMqttRuntime,
+    };
+    const cached = runtimes[readSource]?.getLatestPayload(
+      telemetryKeyOf(readSource, rawCloudDevice),
     );
-    const payload = cached ? { ...rawCloudDevice, ...cached } : rawCloudDevice;
+    const payload = payloadFor(readSource, rawCloudDevice, cached);
 
     const values = {};
     for (const featureMapping of getFeaturesForModel(modelOf(rawCloudDevice))) {
@@ -1147,28 +1428,218 @@ export async function describeBatteries(gladys, config) {
       const value = reportedValue(payload, property);
       return value === null || scale === null ? null : Math.round(value / scale);
     };
+    const settings = {
+      outputLimit: reportedValue(payload, 'outputLimit'),
+      inputLimit: reportedValue(payload, 'inputLimit'),
+      acMode: reportedValue(payload, 'acMode'),
+      socSet: scaled('socSet'),
+      minSoc: scaled('minSoc'),
+    };
+    const hasBattery = batteryPresenceOf(modelOf(rawCloudDevice), payload);
     return {
       externalId: ids.device,
       featureExternalId: (key) => ids.feature(key),
       name: rawCloudDevice.deviceName || modelOf(rawCloudDevice),
       model: modelOf(rawCloudDevice),
       source,
-      degraded: source === 'cloud' && locallyReachable,
+      degraded: source === 'cloud' && expectsLocal(config, rawCloudDevice),
       values,
+      // true / false, or null while the telemetry has not told yet.
+      hasBattery,
+      hasSolar: hasSolarInput(modelOf(rawCloudDevice), values.solarInputPower),
       capacityKwh,
       remainingKwh:
         capacityKwh !== null && values.batteryLevel !== null
           ? Math.round(values.batteryLevel * capacityKwh) / 100
           : null,
-      settings: {
-        outputLimit: reportedValue(payload, 'outputLimit'),
-        inputLimit: reportedValue(payload, 'inputLimit'),
-        acMode: reportedValue(payload, 'acMode'),
-        socSet: scaled('socSet'),
-        minSoc: scaled('minSoc'),
-      },
+      remainingTime:
+        hasBattery === false
+          ? null
+          : remainingTimeOf(payload, {
+              level: values.batteryLevel,
+              chargePower: values.batteryOutputPower,
+              dischargePower: values.batteryInputPower,
+              capacityKwh,
+              socSet: settings.socSet,
+              minSoc: settings.minSoc,
+            }),
+      settings,
     };
   });
+}
+
+/**
+ * The devices that have a local API address, with it.
+ * @param {object} config normalized configuration
+ * @param {Array<object>} devices supported raw cloud devices
+ * @returns {Array<{ rawCloudDevice: object, address: { host: string, origin: string } }>}
+ */
+function localHttpEntriesOf(config, devices) {
+  return devices
+    .map((rawCloudDevice) => ({
+      rawCloudDevice,
+      address: localHttpAddressOf(config, rawCloudDevice),
+    }))
+    .filter((entry) => entry.address !== null);
+}
+
+/** The local HTTP runtime's device list built from the entries. */
+const toZenSdkDevices = (entries) =>
+  entries.map(({ rawCloudDevice, address }) => ({
+    rawCloudDevice,
+    host: address.host,
+    origin: address.origin,
+  }));
+
+/**
+ * After a refreshed cloud device list (discovery): hand the new addresses to
+ * the running local HTTP runtime, so a battery that got a new IP address is
+ * polled at it (setDevices keeps the loop of every unchanged device and
+ * starts exactly one for a moved one). Nothing before startPush started it.
+ * @param {object} config normalized configuration
+ */
+function refreshLocalHttpDevices(config) {
+  if (!zenSdkRuntime || config.enable_local_http !== true) {
+    return;
+  }
+  const entries = localHttpEntriesOf(config, supportedDevices(cloudData));
+  for (const { rawCloudDevice, address } of entries) {
+    const previous = zenSdkRuntime.getDeviceHealth(rawCloudDevice.snNumber);
+    if (previous && previous.host !== address.host) {
+      logger.info(
+        `local http: ${deviceLabelOf(rawCloudDevice)}: address changed from ${previous.host} ` +
+          `to ${address.host}`,
+      );
+    }
+  }
+  zenSdkRuntime.setDevices(toZenSdkDevices(entries));
+}
+
+/**
+ * Log, once per start, the pairs of the local API addresses option that are
+ * not used: malformed, or matching no battery of the account. Serial numbers
+ * and IP addresses only (no secret in this option).
+ * @param {object} config normalized configuration
+ * @param {Array<object>} devices supported raw cloud devices
+ */
+function logUnusedAddressOverrides(config, devices) {
+  const { overrides, invalid } = parseAddressOverridesDetailed(config.local_http_addresses);
+  for (const pair of invalid) {
+    logger.info(
+      `local http: "${pair.slice(0, 80)}" ignored in the local API addresses option ` +
+        '(expected SERIAL=IP address)',
+    );
+  }
+  const knownSerials = new Set(
+    devices.map((rawCloudDevice) => String(rawCloudDevice.snNumber || '').toUpperCase()),
+  );
+  for (const [serial, host] of overrides) {
+    if (!knownSerials.has(serial)) {
+      logger.info(
+        `local http: "${serial}=${host}" in the local API addresses option matches no ` +
+          'battery serial number of the Zendure account',
+      );
+    }
+  }
+}
+
+/**
+ * Bring up (or tear down) the zenSDK local HTTP runtime for the devices that
+ * have a local API address, probe each one once and log the outcome, then
+ * start the polling loops. A device that misses the probe is not moved to
+ * the cloud: it stays pending through the startup grace (localHttpStateOf).
+ * @param {object} config normalized configuration
+ * @param {Array<object>} devices supported raw cloud devices
+ */
+async function startLocalHttp(config, devices) {
+  const entries = localHttpEntriesOf(config, devices);
+  if (entries.length === 0) {
+    if (zenSdkRuntime) {
+      zenSdkRuntime.disconnect();
+      zenSdkRuntime = null;
+      zenSdkStartedAt = 0;
+      logger.info('push: local http API no longer used -> polling stopped');
+    }
+    return;
+  }
+  logUnusedAddressOverrides(config, devices);
+  if (!zenSdkRuntime) {
+    zenSdkRuntime = createZendureZenSdk({ fetchImpl: dependencies.localFetchImpl });
+  }
+  // A new runtime, or one stopped by the push cleanup: the startup grace
+  // starts now (a running one keeps its own).
+  if (!zenSdkRuntime.connected) {
+    zenSdkStartedAt = Date.now();
+  }
+  for (const { rawCloudDevice, address } of entries) {
+    if (address.origin === 'mdns') {
+      logger.info(
+        `local http: ${deviceLabelOf(rawCloudDevice)}: no IP address in the Zendure device list, ` +
+          `trying its mDNS name ${address.host} (mDNS rarely resolves inside a Docker container: ` +
+          `if it does not answer, add "${rawCloudDevice.snNumber}=<its IP address>" to the ` +
+          'local API addresses option)',
+      );
+    }
+  }
+  zenSdkRuntime.setDevices(toZenSdkDevices(entries));
+  await zenSdkRuntime.pollAll();
+
+  const silent = entries.filter(({ rawCloudDevice }) => !isLocalHttpUp(config, rawCloudDevice));
+  logger.info(
+    `local http: ${entries.length - silent.length}/${entries.length} device(s) answer on ` +
+      'their zenSDK local API',
+  );
+  for (const { rawCloudDevice, address } of silent) {
+    const health = zenSdkRuntime.getDeviceHealth(rawCloudDevice.snNumber);
+    const origin = { override: 'from the options', cloud: 'from the cloud', mdns: 'mDNS' }[
+      address.origin
+    ];
+    logger.info(
+      `local http: ${deviceLabelOf(rawCloudDevice)} not answering at ${address.host} ` +
+        `(${origin}): ${health?.lastError || 'no answer'} -> retried in the background, ` +
+        `${isDeviceLocallyReachable(config, rawCloudDevice) ? 'its local MQTT broker' : 'the cloud'} ` +
+        'serves it if it stays silent',
+    );
+  }
+  zenSdkRuntime.start();
+}
+
+/**
+ * The devices each live source serves, for the telemetry watchdog: every
+ * device with a local API address under 'http' (the silent ones show which
+ * device does not answer and why), the local-MQTT devices under their broker,
+ * and the devices currently served by the cloud under 'cloud'.
+ * @param {object} config normalized configuration
+ * @param {Array<object>} devices supported raw cloud devices
+ * @returns {Array<{ source: string, runtime: object|null, ownedDevices: Array<object> }>}
+ */
+function watchdogGroups(config, devices) {
+  const groups = [];
+  const httpDevices = devices.filter((d) => localHttpAddressOf(config, d) !== null);
+  if (zenSdkRuntime && httpDevices.length > 0) {
+    groups.push({ source: 'http', runtime: zenSdkRuntime, ownedDevices: httpDevices });
+  }
+  for (const [url, runtime] of localMqttRuntimes) {
+    const ownedDevices = devices.filter(
+      (d) =>
+        isDeviceLocallyReachable(config, d) &&
+        buildLocalBrokerConfig(d).url === url &&
+        effectiveSourceByDeviceKey.get(deviceKeyOf(d))?.source !== 'http',
+    );
+    if (ownedDevices.length > 0) {
+      groups.push({ source: 'local', runtime, ownedDevices });
+    }
+  }
+  const cloudDevices = devices.filter((d) => {
+    const effective = hasLocalCandidate(config, d)
+      ? effectiveSourceByDeviceKey.get(deviceKeyOf(d))?.source
+      : undefined;
+    return !isLocalSource(effective ?? staticSourceOf(config, d));
+  });
+  if (cloudDevices.length > 0) {
+    groups.push({ source: 'cloud', runtime: cloudMqttRuntime, ownedDevices: cloudDevices });
+  }
+  return groups;
 }
 
 export const solarflow = {
@@ -1240,10 +1711,10 @@ export const solarflow = {
 
   /**
    * Per-device transport badges: devices the Zendure account reports offline
-   * (`online === false` in the deviceList) are 'unreachable'; devices served
-   * by their LOCAL MQTT broker follow their EFFECTIVE source when the
-   * evaluator tracked one (local/cloud fallback/unreachable), the static
-   * 'local' otherwise; everything else is 'cloud'.
+   * (`online === false` in the deviceList) are 'unreachable'; devices with a
+   * local source (local HTTP API, local MQTT broker) follow their EFFECTIVE
+   * source when the evaluator tracked one (local/cloud fallback/unreachable),
+   * the static preference otherwise; everything else is 'cloud'.
    * Reads the cloudData cached by the last discovery.
    */
   async buildTransports(gladys, config) {
@@ -1254,9 +1725,9 @@ export const solarflow = {
       // device has no effective state yet, 'cloud' otherwise. The degraded
       // flag (cloud fallback of a local device) is added by buildTransportEntry.
       let source = 'cloud';
-      if (isDeviceLocallyReachable(config, rawCloudDevice)) {
+      if (hasLocalCandidate(config, rawCloudDevice)) {
         const effective = effectiveSourceByDeviceKey.get(deviceKeyOf(rawCloudDevice));
-        source = effective ? effective.source : 'local';
+        source = effective ? effective.source : staticSourceOf(config, rawCloudDevice);
       }
       return buildTransportEntry(gladys, config, rawCloudDevice, source);
     });
@@ -1285,7 +1756,7 @@ export const solarflow = {
     }
 
     const { runtime, source } = await selectPollRuntime(config, rawCloudDevice);
-    logger.debug(`onPoll: using ${source} MQTT source for ${deviceKey}`);
+    logger.debug(`onPoll: using ${SOURCE_LABELS[source]} source for ${deviceKey}`);
     // Local telemetry is keyed by serial number, cloud telemetry by device key.
     const telemetryKey = telemetryKeyOf(source, rawCloudDevice);
     const lastPayloadAt = runtime.getLastPayloadAt(telemetryKey);
@@ -1293,27 +1764,24 @@ export const solarflow = {
       runtime.requestDeviceProperties(rawCloudDevice);
     }
 
-    // LOCAL payloads are built incrementally (one metric per topic): a metric
-    // the device has not re-published yet (state of charge, solar power at
-    // night...) would otherwise never get a value. Merge the local cache OVER
-    // the cloud deviceList snapshot so missing metrics fall back to the last
-    // cloud value. The cloud payload stays as-is (its `properties` report is
-    // complete, and the raw entry would shadow fresher nested values).
+    // Local MQTT payloads are merged over the cloud snapshot, the cloud and
+    // local HTTP reports used as they are (see payloadFor).
     const latestPayload = runtime.getLatestPayload(telemetryKey);
     // A disconnected broker means the cache is BLIND, not that values are
     // stable: re-publishing it (30-min keep-alive included) would present
     // stale data as fresh during an outage. Skip until the broker is back.
     // (Without any cached payload yet, the raw cloud entry still bootstraps.)
-    if (!runtime.connected && latestPayload) {
+    // The local HTTP runtime is always "connected" while it polls: its
+    // blindness is the device's own health.
+    const blind =
+      source === 'http' ? !runtime.isDeviceUp(rawCloudDevice.snNumber) : !runtime.connected;
+    if (blind && latestPayload) {
       logger.debug(
-        `onPoll: ${source} broker disconnected for ${deviceKey}, cached republish skipped`,
+        `onPoll: ${SOURCE_LABELS[source]} source blind for ${deviceKey}, cached republish skipped`,
       );
       return;
     }
-    const payload =
-      source === 'local' && latestPayload
-        ? { ...rawCloudDevice, ...latestPayload }
-        : latestPayload || rawCloudDevice;
+    const payload = payloadFor(source, rawCloudDevice, latestPayload);
     const states = buildStates(gladys, rawCloudDevice, payload);
     if (states.length > 0) {
       // The totals only: a cached payload is not a new interval to integrate.
@@ -1352,13 +1820,30 @@ export const solarflow = {
           energySaveTimer.unref();
         }
 
-        // Explicit source breakdown in the logs: which device is served by the
-        // LOCAL broker (and which one) versus the Zendure CLOUD broker.
+        // Local HTTP API first: probe every device once, so the source of
+        // each one is known before choosing which brokers to connect (a site
+        // where every device answers never connects the cloud broker).
+        await startLocalHttp(config, devices);
+        if (stopped) {
+          return;
+        }
+
+        // Explicit source breakdown in the logs: which device is served by its
+        // local HTTP API, by the LOCAL broker (and which one) or by the
+        // Zendure CLOUD broker.
         const localByBroker = new Map(); // broker url -> [device labels]
+        const httpDeviceLabels = [];
         const cloudDeviceLabels = [];
         const labelOf = (d) => d.deviceName || deviceKeyOf(d);
         for (const rawCloudDevice of devices) {
-          if (isDeviceLocallyReachable(config, rawCloudDevice)) {
+          const staticSource = staticSourceOf(config, rawCloudDevice);
+          if (staticSource === 'http') {
+            httpDeviceLabels.push(
+              isLocalHttpUp(config, rawCloudDevice)
+                ? labelOf(rawCloudDevice)
+                : `${labelOf(rawCloudDevice)} (not answering yet)`,
+            );
+          } else if (staticSource === 'local') {
             const url = buildLocalBrokerConfig(rawCloudDevice).url;
             if (!localByBroker.has(url)) {
               localByBroker.set(url, []);
@@ -1370,9 +1855,14 @@ export const solarflow = {
         }
         const localCount = [...localByBroker.values()].reduce((n, list) => n + list.length, 0);
         logger.info(
-          `push: telemetry source -> ${localCount} local / ${cloudDeviceLabels.length} cloud ` +
-            `(of ${devices.length} device(s))`,
+          `push: telemetry source -> ${httpDeviceLabels.length} local http / ${localCount} local ` +
+            `/ ${cloudDeviceLabels.length} cloud (of ${devices.length} device(s))`,
         );
+        if (httpDeviceLabels.length > 0) {
+          logger.info(
+            `push: LOCAL HTTP API -> ${httpDeviceLabels.length} device(s): ${httpDeviceLabels.join(', ')}`,
+          );
+        }
         for (const [url, labels] of localByBroker) {
           logger.info(
             `push: LOCAL broker ${url} -> ${labels.length} device(s): ${labels.join(', ')}`,
@@ -1391,6 +1881,15 @@ export const solarflow = {
           if (!runtimesBySource.has(runtime)) {
             runtimesBySource.set(runtime, source);
           }
+          // A configured local broker stays connected behind the local HTTP
+          // API (it costs nothing on the LAN): it takes over at once if the
+          // API stops answering, before any cloud fallback.
+          if (source === 'http' && isDeviceLocallyReachable(config, rawCloudDevice)) {
+            const standby = await ensureLocalRuntime(config, rawCloudDevice);
+            if (standby && !runtimesBySource.has(standby)) {
+              runtimesBySource.set(standby, 'local');
+            }
+          }
         }
         if (stopped) {
           return;
@@ -1403,9 +1902,15 @@ export const solarflow = {
         // currently FELL BACK to it (effective source tracked by the evaluator).
         const cloudNeededByFallback = devices.some((rawCloudDevice) => {
           const effective = effectiveSourceByDeviceKey.get(deviceKeyOf(rawCloudDevice));
-          return effective !== undefined && effective.source !== 'local';
+          return effective !== undefined && !isLocalSource(effective.source);
         });
-        if (cloudMqttRuntime && !runtimesBySource.has(cloudMqttRuntime) && !cloudNeededByFallback) {
+        const cloudHeld = Date.now() - cloudLastNeededAt < CLOUD_HOLD_TIME_IN_MS;
+        if (
+          cloudMqttRuntime &&
+          !runtimesBySource.has(cloudMqttRuntime) &&
+          !cloudNeededByFallback &&
+          !cloudHeld
+        ) {
           cloudMqttRuntime.disconnect();
           cloudMqttRuntime = null;
           cloudRuntimeStartedAt = 0;
@@ -1424,6 +1929,9 @@ export const solarflow = {
         // served by its local broker AND, during a fallback, by the cloud
         // one): the per-source listeners decide per device what to publish.
         const activeRuntimes = [];
+        if (zenSdkRuntime) {
+          activeRuntimes.push({ runtime: zenSdkRuntime, source: 'http', url: 'zenSDK' });
+        }
         for (const [url, runtime] of localMqttRuntimes) {
           activeRuntimes.push({ runtime, source: 'local', url });
         }
@@ -1435,20 +1943,12 @@ export const solarflow = {
           });
         }
 
-        const runtimeInfos = [];
         for (const { runtime, source, url } of activeRuntimes) {
           unsubscribes.push(attachSourceListener(gladys, config, runtime, source));
-          // The devices this runtime serves (for the telemetry watchdog): on a
-          // local runtime, only the devices publishing to THIS broker.
-          const ownedDevices = devices.filter((rawCloudDevice) => {
-            if (isDeviceLocallyReachable(config, rawCloudDevice)) {
-              return source === 'local' && buildLocalBrokerConfig(rawCloudDevice).url === url;
-            }
-            return source === 'cloud';
-          });
-          runtimeInfos.push({ runtime, source, ownedDevices });
           logger.info(
-            `push: ${source} broker ${url}: tracking ${runtime.getStats().trackedDevices} device(s)`,
+            source === 'http'
+              ? `push: local http API: polling ${runtime.getStats().trackedDevices} device(s)`
+              : `push: ${source} broker ${url}: tracking ${runtime.getStats().trackedDevices} device(s)`,
           );
         }
 
@@ -1484,17 +1984,23 @@ export const solarflow = {
                 `${stats.connectCount - baseline} (re)connection(s) in the last 5 min`,
             );
           }
-          for (const { runtime, source, ownedDevices } of runtimeInfos) {
-            if (ownedDevices.length === 0) {
-              continue;
-            }
-            const entries = ownedDevices.map((rawCloudDevice) => ({
-              label:
-                `${rawCloudDevice.deviceName || modelOf(rawCloudDevice)} ` +
-                `(${deviceKeyOf(rawCloudDevice)}, SN ${rawCloudDevice.snNumber || 'unknown'})`,
-              lastPayloadAt: runtime.getLastPayloadAt(telemetryKeyOf(source, rawCloudDevice)),
-            }));
-            logger.info(`telemetry(${source}): ${buildTelemetrySummary(entries, now)}`);
+          for (const { source, runtime, ownedDevices } of watchdogGroups(config, devices)) {
+            const entries = ownedDevices.map((rawCloudDevice) => {
+              const health =
+                source === 'http' ? runtime?.getDeviceHealth(rawCloudDevice.snNumber) : null;
+              return {
+                label:
+                  `${rawCloudDevice.deviceName || modelOf(rawCloudDevice)} ` +
+                  `(${deviceKeyOf(rawCloudDevice)}, SN ${rawCloudDevice.snNumber || 'unknown'}` +
+                  `${health?.lastError ? `, ${health.host}: ${health.lastError}` : ''})`,
+                lastPayloadAt: runtime
+                  ? runtime.getLastPayloadAt(telemetryKeyOf(source, rawCloudDevice))
+                  : null,
+              };
+            });
+            logger.info(
+              `telemetry(${SOURCE_LABELS[source]}): ${buildTelemetrySummary(entries, now)}`,
+            );
           }
           logger.info(
             `publish: ${publishSentCount} sent, ${publishDeduplicatedCount} deduplicated ` +
@@ -1508,11 +2014,11 @@ export const solarflow = {
           telemetryWatchdogTimer.unref();
         }
 
-        // Per-device source evaluator: in local mode, re-assess every 30 s
+        // Per-device source evaluator: with a local transport, re-assess every 30 s
         // which source actually delivers telemetry, with automatic cloud
         // fallback and recovery (see evaluateTelemetrySources).
         stopSourceEvaluator();
-        if (config.enable_local_mqtt === true) {
+        if (localTransportsEnabled(config)) {
           sourceEvaluatorTimer = setInterval(() => {
             evaluateTelemetrySources(gladys, config).catch((e) =>
               logger.warn(`telemetry: source evaluation failed: ${e.message}`),
@@ -1532,6 +2038,9 @@ export const solarflow = {
       stopped = true;
       stopTelemetryWatchdog();
       stopSourceEvaluator();
+      // Stop the local API polling (caches and health kept: the next
+      // startPush resumes it).
+      zenSdkRuntime?.stop();
       stopEnergySaveTimer();
       saveEnergyMeters().catch(() => {});
       for (const unsubscribe of unsubscribes) {

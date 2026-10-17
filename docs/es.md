@@ -7,6 +7,10 @@ descarga, salida hacia la casa y producción solar) desde la nube de Zendure y
 dispositivo, para actualizaciones rápidas y resistentes sin conexión a
 internet, con respaldo automático en la nube. Los valores son de solo lectura.
 
+Cada batería se lee y se controla a través de su
+**API local** (zenSDK) cuando responde en su red — como lo hace Home Assistant
+— con la nube de Zendure como respaldo automático.
+
 ## Requisitos previos
 
 - Una **cuenta Zendure**, con sus baterías ya configuradas y en línea en la
@@ -86,6 +90,42 @@ aplicación móvil Zendure:
 6. Haga clic en **Guardar configuración**. Sus baterías aparecen en la pestaña
    **Descubrir**, listas para añadirse.
 
+### API local (zenSDK, activada por defecto)
+
+Las baterías SolarFlow (800, 800 Pro, 1600 AC+, 2400 AC, 2400 AC+, 2400 Pro
+— todos los modelos compatibles salvo el Hyper 2000) ofrecen una pequeña **API HTTP en su red
+doméstica**, llamada zenSDK. Es lo que usa la integración oficial de Home
+Assistant para estos modelos: ni MQTT ni la nube. Con **Usar la API local de
+las baterías** activado (por defecto), la integración lee cada batería a través
+de ella cada 5 segundos, y también envía por ella los comandos de las escenas y
+los widgets.
+
+- **Requisitos previos**: la batería y el host de Gladys en la **misma red**
+  (el contenedor debe poder alcanzar la dirección IP de la batería: sin Wi-Fi
+  de invitados aislado ni VLAN de por medio), y un firmware reciente:
+  actualice la batería desde la aplicación Zendure si su API local no
+  responde. Los pasos propios de un modelo, si los hay, están en la
+  [wiki de Zendure-HA](https://github.com/Zendure/Zendure-HA/wiki) (p. ej. su
+  [página del SolarFlow 800](https://github.com/Zendure/Zendure-HA/wiki/SolarFlow-800)).
+- **Dirección**: la integración toma la dirección IP de la batería de la nube
+  de Zendure. Cuando la nube no la da, prueba el nombre mDNS de la batería
+  `zendure-<modelo>-<número de serie>.local`, que rara vez se resuelve dentro
+  de un contenedor Docker: rellene entonces **Direcciones de la API local** con
+  pares `número de serie=dirección IP`, separados por comas (p. ej.
+  `HOA1NAH4N123456=192.168.1.42`). Dar una IP fija a sus baterías en el router
+  ayuda.
+- **Respaldo automático**: una batería que falla tres peticiones seguidas pasa
+  enseguida a su broker MQTT local si lo activó; a la nube de Zendure solo
+  pasa tras 90 segundos sin respuesta (un corte breve del Wi-Fi no ocupa la
+  conexión a la nube), y vuelve en cuanto su API local responde de nuevo. Al
+  arrancar, una batería tiene los mismos 90 segundos para dar su primera
+  respuesta. Una batería que nunca respondió
+  simplemente sigue en la nube, sin insignia de aviso.
+- **La nube queda en reposo**: cuando todas las baterías responden en local, la
+  integración no se conecta en absoluto al broker de la nube de Zendure, y Home
+  Assistant (u otra aplicación) con la misma cuenta Zendure conserva la única
+  conexión a la nube de la cuenta.
+
 ### MQTT local (recomendado si lo utiliza)
 
 Cuando activa el MQTT local en la aplicación Zendure (modo desarrollador), cada
@@ -115,6 +155,10 @@ momento**:
   Desaparece por sí solo cuando el dispositivo vuelve a publicar en local.
 - **Inaccesible** (rojo) — la nube de Zendure indica que el dispositivo está
   desconectado, o no publica en ninguna fuente.
+
+Con la API local, **Local** significa que su API local o su broker local
+sirve el dispositivo. El motivo del estado degradado indica qué fuente local
+se ha callado.
 
 ## Control desde las escenas
 
@@ -148,8 +192,8 @@ El comando pasa por el broker que sirve la batería en ese momento (local o
 nube); el nuevo valor aparece con el siguiente informe de la batería.
 
 El disparador **Accesibilidad de una batería** inicia una escena cuando una
-batería deja de informar en todas las fuentes, o vuelve a hacerlo (modo MQTT
-local). Sus variables dan el nombre de la batería, el nuevo estado y la fuente
+batería deja de informar en todas las fuentes, o vuelve a hacerlo (API local o
+MQTT local). Sus variables dan el nombre de la batería, el nuevo estado y la fuente
 de telemetría.
 
 ## Widgets del panel
@@ -174,6 +218,16 @@ En el editor del panel hay dos widgets disponibles (Gladys 5.1 o posterior):
 sin batería seleccionada para toda la instalación. Una instalación monofásica
 solo necesita un grupo.
 
+Cada widget solo muestra lo que la batería tiene: un SolarFlow 800 usado sin
+pack de batería conserva su solar, su salida al hogar y su límite de salida
+(sin nivel, sin cifras de carga ni botón **Modo y niveles**), y un modelo
+acoplado en AC (1600 AC+, 2400 AC, 2400 AC+) no tiene mosaico solar. Mientras
+la batería carga o descarga, el widget muestra el tiempo restante hasta su
+objetivo de carga o su mínimo de descarga, tal como lo informa la batería (o
+calculado a partir de su capacidad cuando no lo da). Un grupo deja fuera las
+baterías sin pack de su nivel medio y de su energía almacenada, y un grupo de
+tales dispositivos solo muestra sus potencias.
+
 ## Un solo consumidor de la nube por cuenta Zendure
 
 Zendure solo permite **un consumidor de la nube por cuenta** a la vez. Si otra
@@ -182,6 +236,13 @@ segunda instancia de Gladys…), ambas se disputan la conexión y la telemetría
 vuelve intermitente. Para cualquier segundo consumidor, prefiera el **MQTT
 local** — el broker local no tiene ese límite. La integración avisa una vez en
 sus registros cuando detecta este fenómeno de toma de la conexión.
+
+Con la **API local** activada (por defecto), la integración solo se conecta al
+broker de la nube de Zendure mientras una batería lo necesita, y se desconecta
+5 minutos después de que la última batería que lo necesitaba vuelva a una
+fuente local: si sus
+baterías responden en local, Home Assistant y Gladys ya no se disputan la
+conexión a la nube.
 
 ## Actualizar la integración
 
@@ -232,3 +293,13 @@ campos.
 - **Detalle completo.** Defina `LOG_LEVEL=debug` y lea los registros de la
   integración en su pestaña **Registros** (o con `docker logs` en el host). Cada
   cambio de fuente de telemetría se registra en una línea `telemetry:`.
+- **Una batería sigue en la nube aunque su API local debería funcionar.** Al
+  arrancar, los registros listan cada batería que no responde, con la
+  dirección probada y el motivo, p. ej. `local http: Garage (dCLTD95V) not
+answering at 192.168.1.42 (from the cloud): EHOSTUNREACH`. `ENOTFOUND` en un
+  nombre `.local` significa que el mDNS no se resuelve en el contenedor:
+  indique su dirección en **Direcciones de la API local**. `EHOSTUNREACH`,
+  `ECONNREFUSED` o `no answer within 2 s` significan que el contenedor no
+  alcanza la batería (otra red, VLAN, cortafuegos) o que su firmware aún no
+  tiene API local. Cada 5 minutos, una línea `telemetry(local http):` resume
+  qué baterías responden.

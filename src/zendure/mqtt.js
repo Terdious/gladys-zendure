@@ -12,8 +12,8 @@
 //
 //   - `createZendureLocalMqtt` (LOCAL): connects to a user-provided broker the
 //     device PUBLISHES TO natively, using the flat per-property topic scheme
-//     `Zendure/sensor/{serialNumber}/{metricName}` where each message carries a
-//     single plain scalar payload. Telemetry is keyed by SERIAL NUMBER
+//     `Zendure/{sensor|number|select|switch}/{serialNumber}/{metricName}` where
+//     each message carries a single plain scalar payload. Telemetry is keyed by SERIAL NUMBER
 //     (the cloud `snNumber` field). The device pushes continuously, so there is
 //     no read-request in local mode.
 //
@@ -151,31 +151,68 @@ export function isRequestTopic(topic) {
   );
 }
 
-// Prefix of the native local topic scheme the device publishes its telemetry
-// to: `Zendure/sensor/{serialNumber}/{metricName}`.
-const LOCAL_SENSOR_TOPIC_PREFIX = 'Zendure/sensor';
+// Prefix of the native local topic scheme the device publishes to:
+// `Zendure/{kind}/{serialNumber}/{metricName}`. The telemetry comes on the
+// `sensor` kind, the reported SETTINGS (outputLimit, inputLimit, socSet,
+// minSoc, acMode...) on the `number`, `select` and `switch` kinds, Home
+// Assistant discovery style.
+const LOCAL_TOPIC_ROOT = 'Zendure';
+export const LOCAL_STATE_TOPIC_KINDS = ['sensor', 'number', 'select', 'switch'];
 
 /**
- * Parse a native local sensor topic `Zendure/sensor/{sn}/{metric}`.
+ * Parse a native local state topic `Zendure/{kind}/{sn}/{metric}`, `kind`
+ * being one of LOCAL_STATE_TOPIC_KINDS. Command topics (`.../{metric}/set`,
+ * what a client publishes to CHANGE a setting) are rejected: they are not the
+ * device's state, and ingesting them would echo our own commands.
  * @param {string} topic MQTT topic
- * @returns {{ serial: string, metric: string }|null} null when it is not a
- * sensor telemetry topic (settings topics number/select/switch are ignored).
+ * @returns {{ kind: string, serial: string, metric: string }|null}
  */
 export function parseLocalSensorTopic(topic) {
   if (!topic || typeof topic !== 'string') {
     return null;
   }
   const parts = topic.split('/');
-  // Zendure / sensor / {sn} / {metric}
-  if (parts.length < 4 || parts[0] !== 'Zendure' || parts[1] !== 'sensor') {
+  // Zendure / {kind} / {sn} / {metric}: exactly four levels.
+  if (
+    parts.length !== 4 ||
+    parts[0] !== LOCAL_TOPIC_ROOT ||
+    !LOCAL_STATE_TOPIC_KINDS.includes(parts[1])
+  ) {
     return null;
   }
-  const serial = parts[2];
-  const metric = parts[parts.length - 1];
-  if (!serial || !metric) {
+  const [, kind, serial, metric] = parts;
+  if (!serial || !metric || metric === 'set') {
     return null;
   }
-  return { serial, metric };
+  return { kind, serial, metric };
+}
+
+/**
+ * Value of a native local state message: a number when it is one, the
+ * switch states ON / OFF as 1 / 0, and the AC mode select options ("input",
+ * "output") as the zenSDK acMode numbers (1, 2). Anything else stays a string.
+ * @param {{ kind: string, metric: string }} parsedTopic
+ * @param {Buffer|string} payload raw MQTT payload
+ * @returns {number|string}
+ */
+export function parseLocalStateValue(parsedTopic, payload) {
+  const value = parseLocalScalar(payload);
+  if (typeof value !== 'string') {
+    return value;
+  }
+  const lowered = value.toLowerCase();
+  if (parsedTopic.kind === 'switch' && (lowered === 'on' || lowered === 'off')) {
+    return lowered === 'on' ? 1 : 0;
+  }
+  if (parsedTopic.metric === 'acMode') {
+    if (lowered.includes('input')) {
+      return 1;
+    }
+    if (lowered.includes('output')) {
+      return 2;
+    }
+  }
+  return value;
 }
 
 /**
@@ -705,8 +742,9 @@ export function createZendureMqtt({ mqttLibrary = mqtt, clientId, connectTimeout
 /**
  * Create the Zendure LOCAL MQTT runtime. Depending on the firmware generation,
  * a device publishes on its local broker EITHER the native flat topic scheme
- * `Zendure/sensor/{serialNumber}/{metricName}` (one plain scalar per message)
- * OR the legacy JSON topics `iot/{productKey}/{deviceKey}/...` (the same
+ * `Zendure/{sensor|number|select|switch}/{serialNumber}/{metricName}` (one
+ * plain scalar per message: telemetry on `sensor`, reported settings on the
+ * others) OR the legacy JSON topics `iot/{productKey}/{deviceKey}/...` (the same
  * format as the cloud broker; e.g. the SolarFlow 800 Pro only publishes the
  * legacy format locally). The runtime subscribes to BOTH and keys everything
  * by SERIAL NUMBER (the cloud `snNumber` field), accumulating a flat payload
@@ -743,7 +781,10 @@ export function createZendureLocalMqtt({ mqttLibrary = mqtt, clientId, connectTi
       return serial;
     },
     topicsForDevice(rawCloudDevice) {
-      const topics = [`${LOCAL_SENSOR_TOPIC_PREFIX}/${rawCloudDevice.snNumber}/#`];
+      // One wildcard per state kind (telemetry + reported settings).
+      const topics = LOCAL_STATE_TOPIC_KINDS.map(
+        (kind) => `${LOCAL_TOPIC_ROOT}/${kind}/${rawCloudDevice.snNumber}/#`,
+      );
       // Also listen to the legacy JSON topics on the local broker: some
       // firmwares only publish that format locally.
       const { productKey } = rawCloudDevice;
@@ -756,11 +797,11 @@ export function createZendureLocalMqtt({ mqttLibrary = mqtt, clientId, connectTi
     parseMessage(topic, payload) {
       const parsedTopic = parseLocalSensorTopic(topic);
       if (parsedTopic) {
-        // Native flat format, one metric per message: build a flat partial
+        // Native flat format, one metric or setting per message: build a flat partial
         // `{ [metric]: value }` that merges into the per-serial payload.
         return {
           key: parsedTopic.serial,
-          partialPayload: { [parsedTopic.metric]: parseLocalScalar(payload) },
+          partialPayload: { [parsedTopic.metric]: parseLocalStateValue(parsedTopic, payload) },
         };
       }
 

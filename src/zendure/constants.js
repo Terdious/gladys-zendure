@@ -49,3 +49,62 @@ export const SUPPORTED_PRODUCT_MODELS = {
   // this on real hardware, so treat its telemetry mapping as best-effort.
   HYPER_2000: 'hyper 2000',
 };
+
+// What each model offers, beyond its feature list:
+//   - `zenSdk`: the device serves the zenSDK local HTTP API
+//     (`GET /properties/report`, `POST /properties/write`). Zendure-HA drives
+//     every SolarFlow 800 / 800 Plus / 800 Pro / 1600 AC+ / 2400 AC / 2400 AC+
+//     / 2400 Pro / 4000 AC+ through its `ZendureZenSdk` class, the Hyper 2000
+//     through the legacy MQTT-only `ZendureLegacy` class.
+//   - `solarInput`: the device has MPPT (photovoltaic) inputs. Zendure-HA does
+//     not settle it (every class sets a `maxSolar`, the AC-coupled ones
+//     included), so it follows the product line: the "AC" models are
+//     AC-coupled batteries without a PV input. A device that does report solar
+//     power shows it anyway (see src/widgets.js), so a wrong entry hides nothing.
+//   - `battery`: 'built-in' when the device always carries a pack (all-in-one
+//     units: an AC-coupled device without a battery would do nothing), or
+//     'optional' when it is an inverter hub that may run without any pack
+//     (SolarFlow 800, Hyper 2000): its battery presence then comes from the
+//     telemetry (packNum / packData).
+export const MODEL_CAPABILITIES = {
+  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_800_PRO]: {
+    zenSdk: true,
+    solarInput: true,
+    battery: 'built-in',
+  },
+  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_800]: { zenSdk: true, solarInput: true, battery: 'optional' },
+  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_1600]: {
+    zenSdk: true,
+    solarInput: false,
+    battery: 'built-in',
+  },
+  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_2400]: {
+    zenSdk: true,
+    solarInput: false,
+    battery: 'built-in',
+  },
+  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_2400_AC]: {
+    zenSdk: true,
+    solarInput: false,
+    battery: 'built-in',
+  },
+  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_2400_PRO]: {
+    zenSdk: true,
+    solarInput: true,
+    battery: 'built-in',
+  },
+  [SUPPORTED_PRODUCT_MODELS.HYPER_2000]: { zenSdk: false, solarInput: true, battery: 'optional' },
+};
+
+/**
+ * Capabilities of a product model (case-insensitive), or the most permissive
+ * guess for an unknown one (no local HTTP, solar input, battery unknown).
+ * @param {string} productModel raw cloud productModel
+ * @returns {{ zenSdk: boolean, solarInput: boolean, battery: 'built-in'|'optional' }}
+ */
+export function modelCapabilitiesOf(productModel) {
+  const normalized = String(productModel || '')
+    .toLowerCase()
+    .trim();
+  return MODEL_CAPABILITIES[normalized] || { zenSdk: false, solarInput: true, battery: 'optional' };
+}

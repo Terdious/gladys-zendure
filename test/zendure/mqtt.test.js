@@ -445,14 +445,51 @@ async function createConnectedLocalRuntime() {
   return { library, runtime, client };
 }
 
-test('parseLocalSensorTopic reads the serial and metric, ignores non-sensor topics', () => {
+test('parseLocalSensorTopic reads telemetry and settings state topics, never commands', () => {
   assert.deepEqual(parseLocalSensorTopic('Zendure/sensor/SN-1/electricLevel'), {
+    kind: 'sensor',
     serial: 'SN-1',
     metric: 'electricLevel',
   });
-  assert.equal(parseLocalSensorTopic('Zendure/number/SN-1/socSet'), null);
+  // The reported settings arrive on the number / select / switch kinds.
+  assert.deepEqual(parseLocalSensorTopic('Zendure/number/SN-1/socSet'), {
+    kind: 'number',
+    serial: 'SN-1',
+    metric: 'socSet',
+  });
+  assert.equal(parseLocalSensorTopic('Zendure/select/SN-1/acMode').kind, 'select');
+  assert.equal(parseLocalSensorTopic('Zendure/switch/SN-1/lampSwitch').kind, 'switch');
+  // Command topics (what a client publishes to change a setting) are not state.
+  assert.equal(parseLocalSensorTopic('Zendure/number/SN-1/outputLimit/set'), null);
+  assert.equal(parseLocalSensorTopic('Zendure/select/SN-1/set'), null);
+  assert.equal(parseLocalSensorTopic('Zendure/light/SN-1/lamp'), null);
   assert.equal(parseLocalSensorTopic('Zendure/sensor/SN-1'), null);
   assert.equal(parseLocalSensorTopic(undefined), null);
+});
+
+test('local runtime stores the reported settings of the number / select / switch topics', async () => {
+  const { runtime, client } = await createConnectedLocalRuntime();
+  runtime.subscribeDevice(LOCAL_DEVICE);
+
+  client.emit('message', 'Zendure/number/SN-LOCAL-1/outputLimit', Buffer.from('600'));
+  client.emit('message', 'Zendure/number/SN-LOCAL-1/inputLimit', Buffer.from('800'));
+  client.emit('message', 'Zendure/number/SN-LOCAL-1/socSet', Buffer.from('100'));
+  client.emit('message', 'Zendure/number/SN-LOCAL-1/minSoc', Buffer.from('10'));
+  client.emit('message', 'Zendure/select/SN-LOCAL-1/acMode', Buffer.from('output'));
+  client.emit('message', 'Zendure/switch/SN-LOCAL-1/lampSwitch', Buffer.from('ON'));
+  // A command (ours or another client's) never lands in the cache.
+  client.emit('message', 'Zendure/number/SN-LOCAL-1/outputLimit/set', Buffer.from('0'));
+
+  assert.deepEqual(runtime.getLatestPayload('SN-LOCAL-1'), {
+    outputLimit: 600,
+    inputLimit: 800,
+    socSet: 100,
+    minSoc: 10,
+    acMode: 2,
+    lampSwitch: 1,
+  });
+  client.emit('message', 'Zendure/select/SN-LOCAL-1/acMode', Buffer.from('input'));
+  assert.equal(runtime.getLatestPayload('SN-LOCAL-1').acMode, 1);
 });
 
 test('parseLocalScalar keeps finite numbers as numbers and everything else as strings', () => {
@@ -463,7 +500,7 @@ test('parseLocalScalar keeps finite numbers as numbers and everything else as st
   assert.equal(parseLocalScalar(Buffer.from('')), '');
 });
 
-test('local subscribeDevice subscribes the flat sensor wildcard by serial', async () => {
+test('local subscribeDevice subscribes the flat state wildcards by serial', async () => {
   const { runtime, client } = await createConnectedLocalRuntime();
 
   runtime.subscribeDevice(LOCAL_DEVICE);
@@ -471,7 +508,12 @@ test('local subscribeDevice subscribes the flat sensor wildcard by serial', asyn
   // A device without a serial number is skipped.
   runtime.subscribeDevice({ productModel: 'SolarFlow 800 Pro' });
 
-  assert.deepEqual(client.subscriptions, ['Zendure/sensor/SN-LOCAL-1/#']);
+  assert.deepEqual(client.subscriptions, [
+    'Zendure/sensor/SN-LOCAL-1/#',
+    'Zendure/number/SN-LOCAL-1/#',
+    'Zendure/select/SN-LOCAL-1/#',
+    'Zendure/switch/SN-LOCAL-1/#',
+  ]);
 });
 
 test('local runtime accumulates a flat payload per serial from plain scalars', async () => {
@@ -530,6 +572,9 @@ test('local subscribeDevice also subscribes the legacy iot topics when keys exis
 
   assert.deepEqual(client.subscriptions, [
     'Zendure/sensor/SN-LOCAL-1/#',
+    'Zendure/number/SN-LOCAL-1/#',
+    'Zendure/select/SN-LOCAL-1/#',
+    'Zendure/switch/SN-LOCAL-1/#',
     'iot/prodA/LocKey1/#',
     '/prodA/LocKey1/#',
   ]);

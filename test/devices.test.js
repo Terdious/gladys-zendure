@@ -18,6 +18,7 @@ import {
   evaluateTelemetrySources,
   TELEMETRY_WATCHDOG_INTERVAL_IN_MS,
   LOCAL_SILENCE_TIMEOUT_IN_MS,
+  CLOUD_HOLD_TIME_IN_MS,
   UNREACHABLE_TIMEOUT_IN_MS,
   REACHABILITY_TRIGGER,
   controlDevice,
@@ -34,6 +35,7 @@ import {
   FAKE_SOLARFLOW_2400_DEVICE,
   FAKE_LOCAL_SOLARFLOW_DEVICE,
   createTestEnergyMeters,
+  createFakeZenSdkFetch,
 } from './helpers/fakeZendure.js';
 
 const CLOUD_BROKER_URL = 'mqtt://broker.zendure.example:1883';
@@ -48,6 +50,9 @@ beforeEach(() => {
     fetchImpl: createFakeZendureFetch(),
     mqttLibrary: createFakeMqttLibrary(),
     energyMeters: createTestEnergyMeters().meters,
+    // Never the network: every local HTTP API is unreachable unless a test
+    // injects its own fake.
+    localFetchImpl: createFakeZenSdkFetch(),
   });
 });
 
@@ -694,7 +699,9 @@ test('the evaluator keeps a fresh local device on local and never connects the c
   stopPush();
 });
 
-test('a locally-silent device falls back to the cloud (lazy connect) then recovers', async () => {
+test('a locally-silent device falls back to the cloud (lazy connect) then recovers', async (t) => {
+  // Only the clock is mocked (timers stay real), to cross the hold time.
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
   const localGladys = createFakeGladys();
   const mqttLibrary = createFakeMqttLibrary();
   setSolarflowDependencies({
@@ -771,8 +778,18 @@ test('a locally-silent device falls back to the cloud (lazy connect) then recove
     { external_id: device.external_id, transport: 'local' },
   ]);
 
-  // After two consecutive all-local evaluations the cloud broker is released
+  // The cloud broker is held CLOUD_HOLD_TIME_IN_MS after the last device
+  // needed it, then released after two consecutive all-local evaluations
   // (one consumer per account: another instance may need it).
+  await evaluateTelemetrySources(localGladys, localConfig);
+  await evaluateTelemetrySources(localGladys, localConfig);
+  assert.equal(cloudClient.ended, false);
+  t.mock.timers.tick(fallbackNow + 1000 + CLOUD_HOLD_TIME_IN_MS - Date.now());
+  localClient.emit(
+    'message',
+    LOCAL_SENSOR_TOPIC(FAKE_LOCAL_SOLARFLOW_DEVICE.snNumber, 'electricLevel'),
+    Buffer.from('62'),
+  );
   await evaluateTelemetrySources(localGladys, localConfig);
   await evaluateTelemetrySources(localGladys, localConfig);
   assert.equal(cloudClient.ended, true);
