@@ -267,6 +267,8 @@ Four widgets are available in the dashboard editor (Gladys 5.1 or later):
   (saved under `/data` with a snapshot every 30 minutes, kept 26 hours): they
   count from the first report of the day, which the **Counted since** line
   shows (for example after a first install in the morning).
+  With an electricity tariff in the configuration, it also shows the savings
+  estimate (see **Savings (estimate)** below).
 
 **Three-phase example:** 17 batteries on L1, L2 and L3. Add a **Zendure
 site** widget, set **Electrical layout** to _Three-phase_, and tick in
@@ -288,6 +290,98 @@ discharges, the widget shows the time left until its charge target or its
 discharge floor, as the battery reports it (or computed from its capacity when
 it gives none). A group leaves the batteries without a pack out of its average
 level and stored energy, and a group of such devices only shows their powers.
+
+## Savings (estimate)
+
+With your electricity tariff, the integration **estimates** what your
+batteries save, every 30 minutes, per battery, and the **Energy today**
+widget sums it for its batteries (the site, or each phase). It is an
+**estimate without a grid meter**, marked as such in the widget: read the
+limits below.
+
+### Setting the tariff
+
+In the **Configuration** tab, section **Savings (estimate, no grid meter)**:
+
+- **Electricity tariff**: _None_ (the default: no estimate), _Base_ (one
+  price) or _Peak / off-peak_.
+- **Base price**, or **Peak price** and **Off-peak price**: the price of one
+  kWh bought from the grid, taxes included (for example `0.1952`). A missing
+  price turns the estimate off.
+- **Off-peak hours**: `HH:MM-HH:MM` ranges separated by commas, for example
+  `22:00-06:00` or `01:30-07:30,12:30-14:30`. A range may cross midnight;
+  `24:00` is accepted as an end. Invalid hours turn the estimate off: the
+  logs and the diagnostic say why (once), and the widget shows _Tariff
+  invalid_.
+- **I sell my solar surplus** and **Resale price**: on, the solar energy
+  stored in the batteries is valued at the resale price (what it would have
+  earned on the grid); off, stored solar energy is free.
+- **Tariff timezone** (IANA name, `Europe/Paris` by default): the off-peak
+  hours, and the days, months and years of the savings, follow it, clock
+  changes included. It is a setting of the integration and not of the widget
+  because the slots are valued in the background, as they close, when no
+  widget is open; the widget's own **Timezone** still sets the midnight of
+  its energy figures.
+
+In the **Energy today** widget, **Show the savings (estimate)** is on by
+default: it only shows something once a tariff is set.
+
+### How it is computed
+
+For each battery and each 30-minute slot, from its energy counters:
+
+- **Price of the slot**: the base price, or the peak / off-peak price at the
+  local time of the slot (a slot straddling the edge of a range is priced pro
+  rata).
+- **Cost of the stored energy**: a weighted average per battery. The energy
+  charged from the grid (the **Grid charging energy** counter) costs the
+  price of the slot; the rest of the charge, from the solar panels, costs the
+  resale price when you sell your surplus, 0 otherwise. The stored energy is
+  re-read from the state of charge when the packs are known.
+- **Home output**: without a grid meter the integration cannot know what was
+  exported, so the energy sent to the home is **assumed consumed** by the
+  house. Its share coming from the battery saves _price of the slot − cost of
+  the stored energy_ (a battery charged at peak and discharged off-peak saves
+  less than nothing); its share coming straight from the solar panels saves
+  the price of the slot; the rest (grid passing through an AC battery) saves
+  nothing.
+- **Savings** = battery time-shift + direct solar (+ resale revenue, with the
+  grid meter). The **Grid charging (paid)** line is information: that cost is
+  already inside the cost of the stored energy.
+
+The widget shows **Saved today (estimate)**, the month and the year, today
+per phase in three-phase, and today's breakdown (battery time-shift, direct
+solar, grid charging paid, export). The totals of the current and previous
+day, month and year are saved in `/data/energy.json` with the energy
+counters (a file from an earlier version loads as is; the savings start at
+the first 30-minute boundary after the update).
+
+### Limits
+
+- **No knowledge of the export**: the home output sent back to the grid
+  (house consumption below the battery output) is counted as saved at the
+  price of the slot. The **Exported, not valued** line (or **Resale** when
+  you sell) stays at 0 until the grid meter can be read.
+- **AC batteries** (1600 AC+, 2400 AC, 2400 AC+, 4000 AC+): their AC charging
+  is counted as **grid charging** at the price of the slot, even when it
+  actually comes from the solar surplus of another inverter: only the site
+  balance (the grid meter) could tell.
+- Pack losses, conversion losses and missed reports make the figures
+  approximate; the savings start when the tariff is set (nothing is computed
+  backwards), and a tariff change applies to the slots that close afterwards.
+- The currency is the one of your prices; the widget writes `€`.
+
+### Coming soon
+
+Two options will appear in the configuration once Gladys offers them to
+integrations (Gladys changes in progress:
+[#3229](https://github.com/GladysAssistant/Gladys/pull/3229) and
+[#3230](https://github.com/GladysAssistant/Gladys/pull/3230)):
+
+- **Use the prices of Gladys energy monitoring**, instead of typing them here.
+- **Grid meter** (single-phase, or three-phase L1 / L2 / L3): to know what is
+  really consumed or exported, value the resale and the losses, and tell the
+  solar surplus from grid charging on the AC batteries.
 
 ## One cloud consumer per Zendure account
 

@@ -85,3 +85,29 @@ test('normalizeConfig keeps the local API address overrides as a trimmed string'
   );
   assert.equal(normalizeConfig({ local_http_addresses: null }).local_http_addresses, '');
 });
+
+test('normalizeConfig: the savings tariff fields, prices never guessed', () => {
+  const defaults = normalizeConfig();
+  assert.equal(defaults.tariff_mode, 'none');
+  assert.equal(defaults.price_base, null);
+  assert.equal(defaults.resale_enabled, false);
+  assert.equal(defaults.tariff_timezone, 'Europe/Paris');
+  const config = normalizeConfig({
+    tariff_mode: 'peak_offpeak',
+    price_peak: '0,2081',
+    price_offpeak: 0.1635,
+    price_base: '',
+    resale_price: -1,
+    resale_enabled: 'true',
+    offpeak_hours: ' 22:00-06:00 ',
+    tariff_timezone: '  ',
+  });
+  assert.equal(config.price_peak, 0.2081);
+  assert.equal(config.price_offpeak, 0.1635);
+  assert.equal(config.price_base, null);
+  assert.equal(config.resale_price, null);
+  assert.equal(config.resale_enabled, true);
+  assert.equal(config.offpeak_hours, '22:00-06:00');
+  assert.equal(config.tariff_timezone, 'Europe/Paris');
+  assert.equal(normalizeConfig({ tariff_mode: 'tempo' }).tariff_mode, 'none');
+});

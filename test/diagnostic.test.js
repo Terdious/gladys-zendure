@@ -270,6 +270,27 @@ test('the fleet report without a cloud key says so, and the failed request', asy
   assert.match(report, /== Batteries \(0\) ==/);
 });
 
+test('the fleet report tells the savings tariff, and why it is ignored', async () => {
+  const report = async (cfg) =>
+    buildFleetDiagnostic(
+      await describeDiagnostics(gladys, normalizeConfig({ cloud_key: '', ...cfg })),
+    );
+  assert.match(await report({}), /Savings estimate: none\n/);
+  assert.match(
+    await report({
+      tariff_mode: 'peak_offpeak',
+      price_peak: 0.2,
+      price_offpeak: 0.1,
+      offpeak_hours: '01:30-07:30,12:30-14:30',
+    }),
+    /Savings estimate: peak_offpeak, timezone Europe\/Paris, 2 off-peak range\(s\), resale off\n/,
+  );
+  assert.match(
+    await report({ tariff_mode: 'base' }),
+    /Savings estimate: base, timezone Europe\/Paris, resale off — IGNORED: the base price must be/,
+  );
+});
+
 test('test_local_api reads the report once and lists the properties, masked', async () => {
   await start();
   const outcome = await import('../src/devices/index.js').then((m) =>

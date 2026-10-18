@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-import { DEFAULT_CONFIG } from '../src/config.js';
+import { DEFAULT_CONFIG, TARIFF_MODE_VALUES } from '../src/config.js';
 import { CONNECTION_MESSAGES } from '../src/devices/index.js';
 import { LOCAL_HTTP_SILENT_MESSAGE, LOCAL_SILENT_MESSAGE } from '../src/devices/solarflow.js';
 
@@ -139,6 +139,25 @@ test('config_schema keys are snake_case and defaults match DEFAULT_CONFIG', () =
       );
     }
   }
+});
+
+test('the savings tariff fields: options and defaults tied to the code', () => {
+  const field = (key) => manifest.config_schema.find((candidate) => candidate.key === key);
+  assert.deepEqual(
+    field('tariff_mode').options.map((option) => option.value),
+    TARIFF_MODE_VALUES,
+  );
+  for (const key of ['price_base', 'price_peak', 'price_offpeak', 'resale_price']) {
+    assert.equal(field(key).type, 'number', key);
+    // No default: a price is never guessed (the placeholder shows an example).
+    assert.equal(field(key).default, undefined, key);
+    assert.equal(DEFAULT_CONFIG[key], null, key);
+  }
+  for (const key of ['tariff_mode', 'offpeak_hours', 'resale_enabled', 'tariff_timezone']) {
+    assert.equal(field(key).default, DEFAULT_CONFIG[key], key);
+  }
+  // The upcoming options are information only: no field Gladys would store.
+  assert.equal(field('savings_upcoming').type, 'section');
 });
 
 test('section fields are purely presentational', () => {

@@ -597,6 +597,21 @@ export function buildFleetDiagnostic(
   );
   lines.push(`Local MQTT: ${cfg.enableLocalMqtt ? 'on' : 'off'}`);
   lines.push(`Feature names: ${cfg.featureNames}`);
+  if (cfg.savings) {
+    const savings = cfg.savings;
+    lines.push(
+      `Savings estimate: ${savings.mode}` +
+        (savings.mode === 'none'
+          ? ''
+          : `, timezone ${savings.timeZone}` +
+            (savings.mode === 'peak_offpeak'
+              ? `, ${savings.offpeakRanges} off-peak range(s)`
+              : '') +
+            `, resale ${savings.resaleEnabled ? 'on' : 'off'}` +
+            (savings.error ? ` — IGNORED: ${savings.error}` : '') +
+            (savings.warning ? ` (${savings.warning})` : '')),
+    );
+  }
 
   lines.push('', '== Zendure cloud API ==');
   const cloud = snapshot.cloud;

@@ -294,6 +294,8 @@ ou plus récent) :
   minutes, gardé 26 heures) : ils comptent depuis la première remontée du
   jour, qu'indique la ligne **Compté depuis** (par exemple après une première
   installation le matin).
+  Avec un tarif d'électricité dans la configuration, il affiche aussi
+  l'estimation des économies (voir **Économies (estimation)** plus bas).
 
 **Exemple triphasé :** 17 batteries sur L1, L2 et L3. Ajoutez un widget
 **Installation Zendure**, réglez l'**Installation électrique** sur
@@ -317,6 +319,107 @@ la cible de charge ou au plancher de décharge, tel que la batterie le remonte
 (ou calculé d'après sa capacité quand elle ne le donne pas). Un groupe exclut
 les batteries sans pack de son niveau moyen et de son énergie stockée, et un
 groupe de tels appareils n'affiche que leurs puissances.
+
+## Économies (estimation)
+
+Avec votre tarif d'électricité, l'intégration **estime** ce que vos
+batteries font économiser, toutes les 30 minutes, par batterie, et le widget
+**Énergie du jour** en fait la somme pour ses batteries (le site, ou chaque
+phase). C'est une **estimation sans compteur réseau**, signalée comme telle
+dans le widget : lisez les limites ci-dessous.
+
+### Renseigner le tarif
+
+Dans l'onglet **Configuration**, section **Économies (estimation, sans
+compteur)** :
+
+- **Tarif d'électricité** : _Aucun_ (par défaut : pas d'estimation), _Base_
+  (un seul prix) ou _Heures pleines / creuses_.
+- **Prix base**, ou **Prix heures pleines** et **Prix heures creuses** : le
+  prix d'un kWh acheté au réseau, toutes taxes comprises (par exemple
+  `0,1952`). Un prix manquant désactive l'estimation.
+- **Heures creuses** : plages `HH:MM-HH:MM` séparées par des virgules, par
+  exemple `22:00-06:00` ou `01:30-07:30,12:30-14:30`. Une plage peut passer
+  minuit ; `24:00` est accepté comme fin. Des heures invalides désactivent
+  l'estimation : les journaux et le diagnostic disent pourquoi (une fois), et
+  le widget affiche _Tarif invalide_.
+- **Je revends mon surplus solaire** et **Prix de revente** : activé,
+  l'énergie solaire stockée dans les batteries est valorisée au prix de
+  revente (ce qu'elle aurait rapporté sur le réseau) ; désactivé, l'énergie
+  solaire stockée est gratuite.
+- **Fuseau horaire du tarif** (nom IANA, `Europe/Paris` par défaut) : les
+  heures creuses, ainsi que les jours, mois et années des économies, le
+  suivent, changements d'heure compris. C'est un réglage de l'intégration et
+  non du widget car les créneaux sont valorisés en arrière-plan, à leur
+  clôture, quand aucun widget n'est ouvert ; le **Fuseau horaire** du widget
+  fixe toujours le minuit de ses chiffres d'énergie.
+
+Dans le widget **Énergie du jour**, **Afficher les économies (estimation)**
+est activé par défaut : il n'affiche quelque chose qu'une fois un tarif
+renseigné.
+
+### Mode de calcul
+
+Pour chaque batterie et chaque créneau de 30 minutes, à partir de ses
+compteurs d'énergie :
+
+- **Prix du créneau** : le prix base, ou le prix heures pleines / creuses à
+  l'heure locale du créneau (un créneau à cheval sur le bord d'une plage est
+  calculé au prorata).
+- **Coût de l'énergie stockée** : une moyenne pondérée par batterie.
+  L'énergie chargée depuis le réseau (le compteur **Énergie chargée
+  depuis le réseau**) coûte le prix du créneau ; le reste de la charge, venu des
+  panneaux solaires, coûte le prix de revente si vous revendez votre surplus,
+  0 sinon. L'énergie stockée est relue depuis le niveau de charge quand les
+  packs sont connus.
+- **Sortie vers la maison** : sans compteur réseau, l'intégration ne peut pas
+  savoir ce qui a été injecté, l'énergie envoyée vers la maison est donc
+  **supposée consommée** par le logement. Sa part venue de la batterie fait
+  économiser _prix du créneau − coût de l'énergie stockée_ (une batterie
+  chargée en heures pleines et déchargée en heures creuses fait perdre) ; sa
+  part venue directement des panneaux fait économiser le prix du créneau ; le
+  reste (le réseau traversant une batterie AC) ne fait rien économiser.
+- **Économies** = décalage batterie + solaire direct (+ revenu de revente,
+  avec le compteur réseau). La ligne **Recharge réseau (payée)** est une
+  information : ce coût est déjà dans le coût de l'énergie stockée.
+
+Le widget affiche **Économie du jour (est.)**, le mois et l'année, le jour
+par phase en triphasé, et le détail du jour (décalage batterie, solaire
+direct, recharge réseau payée, injection). Les totaux du jour, du mois et de
+l'année en cours et précédents sont enregistrés dans `/data/energy.json` avec
+les compteurs d'énergie (un fichier d'une version précédente se charge tel
+quel ; les économies démarrent à la première limite de 30 minutes après la
+mise à jour).
+
+### Limites
+
+- **Aucune connaissance de l'injection** : la sortie vers la maison renvoyée
+  sur le réseau (consommation du logement inférieure à la sortie de la
+  batterie) est comptée comme économisée au prix du créneau. La ligne
+  **Injecté, non valorisé** (ou **Revente** si vous revendez) reste à 0 tant
+  que le compteur réseau ne peut pas être lu.
+- **Batteries AC** (1600 AC+, 2400 AC, 2400 AC+, 4000 AC+) : leur charge AC
+  est comptée comme **recharge réseau** au prix du créneau, même quand elle
+  vient en réalité du surplus solaire d'un autre onduleur : seul le bilan du
+  site (le compteur réseau) permettrait de le savoir.
+- Les pertes des packs, les pertes de conversion et les remontées manquées
+  rendent les chiffres approximatifs ; les économies démarrent quand le tarif
+  est renseigné (rien n'est recalculé en arrière), et un changement de tarif
+  s'applique aux créneaux clos ensuite.
+- La devise est celle de vos prix ; le widget écrit `€`.
+
+### Bientôt disponible
+
+Deux options apparaîtront dans la configuration dès que Gladys les proposera
+aux intégrations (évolutions de Gladys en cours :
+[#3229](https://github.com/GladysAssistant/Gladys/pull/3229) et
+[#3230](https://github.com/GladysAssistant/Gladys/pull/3230)) :
+
+- **Utiliser les prix du suivi d'énergie de Gladys**, au lieu de les saisir
+  ici.
+- **Compteur réseau** (monophasé, ou triphasé L1 / L2 / L3) : pour savoir ce
+  qui est vraiment consommé ou injecté, valoriser la revente et les pertes, et
+  distinguer le surplus solaire de la recharge réseau sur les batteries AC.
 
 ## Un seul consommateur cloud par compte Zendure
 

@@ -50,6 +50,7 @@ import {
   ENERGY_FLOWS,
   ENERGY_SAVE_INTERVAL_IN_MS,
 } from '../zendure/energy.js';
+import { tariffFromConfig } from '../zendure/savings.js';
 import {
   buildWriteCommand,
   createWriteThrottle,
@@ -178,6 +179,15 @@ function stopEnergySaveTimer() {
     clearInterval(energySaveTimer);
     energySaveTimer = null;
   }
+}
+
+/**
+ * Give the energy meters the tariff of the savings estimate (none, or an
+ * invalid one: no estimate). Called at every push start and config update.
+ * @param {object} config normalized configuration
+ */
+export function applySavingsTariff(config) {
+  getEnergyMeters().setTariff(tariffFromConfig(config).tariff);
 }
 
 /** Write the energy totals to /data now (shutdown, tests). */
@@ -1354,6 +1364,14 @@ function buildEnergyStates(gladys, rawCloudDevice, payload, { integrate, at = Da
   const ids = gladys.externalIds(DEVICE_TYPE, deviceKeyOf(rawCloudDevice));
   const features = getFeaturesForModel(modelOf(rawCloudDevice));
   const meters = getEnergyMeters();
+  // Stored energy = state of charge x capacity of the known packs.
+  const capacity = deviceCapacityKwh(payload);
+  const levelMapping = features.find((featureMapping) => featureMapping.key === 'batteryLevel');
+  const level = levelMapping ? extractMetricValue(payload, levelMapping.metricPaths) : null;
+  const storedKwh =
+    capacity !== null && level !== null
+      ? Math.round(normalizeMetricValue('batteryLevel', level) * capacity) / 100
+      : null;
   let totals;
   if (integrate) {
     const powers = {};
@@ -1365,7 +1383,7 @@ function buildEnergyStates(gladys, rawCloudDevice, payload, { integrate, at = Da
         }
       }
     }
-    totals = meters.update(deviceKeyOf(rawCloudDevice), powers, at);
+    totals = meters.update(deviceKeyOf(rawCloudDevice), powers, at, { storedKwh });
   } else {
     totals = meters.totals(deviceKeyOf(rawCloudDevice));
   }
@@ -1380,14 +1398,10 @@ function buildEnergyStates(gladys, rawCloudDevice, payload, { integrate, at = Da
       state: kwh,
     }));
 
-  // Stored energy = state of charge x capacity of the known packs.
-  const capacity = deviceCapacityKwh(payload);
-  const levelMapping = features.find((featureMapping) => featureMapping.key === 'batteryLevel');
-  const level = levelMapping ? extractMetricValue(payload, levelMapping.metricPaths) : null;
-  if (capacity !== null && level !== null) {
+  if (storedKwh !== null) {
     states.push({
       device_feature_external_id: ids.feature('batteryEnergyRemaining'),
-      state: Math.round(normalizeMetricValue('batteryLevel', level) * capacity) / 100,
+      state: storedKwh,
     });
   }
   return states;
@@ -1490,11 +1504,26 @@ export async function describeBatteries(gladys, config) {
       energyReady: energyLoaded,
       energySince: (since) =>
         energyLoaded ? getEnergyMeters().energySince(deviceKey, since) : null,
+      // Savings estimate (src/zendure/savings.js): null without a tariff.
+      savingsAt: (now) => (energyLoaded ? getEnergyMeters().savingsOf(deviceKey, now) : null),
     };
   });
 }
 
 // --- Diagnostic (manifest actions fleet_diagnostic / test_local_api) ---------
+
+/** The tariff of the savings estimate as the diagnostic reports it. */
+function savingsDiagnosticOf(config) {
+  const { tariff, error, warning } = tariffFromConfig(config);
+  return {
+    mode: config.tariff_mode,
+    timeZone: tariff?.timeZone ?? config.tariff_timezone,
+    offpeakRanges: tariff?.offpeakRanges?.length ?? 0,
+    resaleEnabled: config.resale_enabled === true,
+    error,
+    warning,
+  };
+}
 // Read-only snapshots of the runtimes for src/diagnostic.js, which formats and
 // redacts them. Nothing here opens a broker connection or changes a source:
 // a diagnostic must observe the installation, not disturb it.
@@ -1832,6 +1861,7 @@ export async function describeDiagnostics(gladys, config, { filter = '', now = D
       enableLocalHttp: config.enable_local_http === true,
       enableLocalMqtt: config.enable_local_mqtt === true,
       featureNames: config.feature_names,
+      savings: savingsDiagnosticOf(config),
       addressOverrides: {
         count: overrides.size,
         invalid: invalid.length,
@@ -2284,6 +2314,7 @@ export const solarflow = {
       try {
         const data = await ensureCloudData(config);
         const devices = supportedDevices(data);
+        applySavingsTariff(config);
         await ensureEnergyLoaded();
         stopEnergySaveTimer();
         energySaveTimer = setInterval(() => {

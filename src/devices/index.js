@@ -18,6 +18,7 @@ import { createLogger } from '@gladysassistant/integration-sdk';
 import { solarflow } from './solarflow.js';
 
 export {
+  applySavingsTariff,
   saveEnergyMeters,
   controlDevice,
   describeBatteries,

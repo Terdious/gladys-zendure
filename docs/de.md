@@ -288,6 +288,8 @@ Im Dashboard-Editor stehen vier Widgets bereit (Gladys 5.1 oder neuer):
   Minuten, 26 Stunden lang aufbewahrt): Sie zählen ab der ersten Meldung des
   Tages, die die Zeile **Gezählt seit** angibt (etwa nach einer ersten
   Installation am Morgen).
+  Mit einem Stromtarif in der Konfiguration zeigt es auch die geschätzte
+  Ersparnis (siehe **Ersparnis (Schätzung)** unten).
 
 **Dreiphasiges Beispiel:** 17 Batterien auf L1, L2 und L3. Füge ein Widget
 **Zendure-Anlage** hinzu, stelle **Elektrische Anlage** auf _Dreiphasig_ und
@@ -311,6 +313,105 @@ bis zum Ladeziel oder zur Entladegrenze, wie die Batterie sie meldet (oder aus
 ihrer Kapazität berechnet, wenn sie keine liefert). Eine Gruppe lässt
 Batterien ohne Pack bei ihrem mittleren Ladestand und der gespeicherten
 Energie außen vor, und eine Gruppe solcher Geräte zeigt nur ihre Leistungen.
+
+## Ersparnis (Schätzung)
+
+Mit deinem Stromtarif **schätzt** die Integration, was deine Batterien
+einsparen, alle 30 Minuten, pro Batterie, und das Widget **Energie heute**
+summiert es für seine Batterien (die Anlage oder jede Phase). Es ist eine
+**Schätzung ohne Netzzähler** und im Widget so gekennzeichnet: Lies die
+Grenzen unten.
+
+### Den Tarif eintragen
+
+Im Tab **Konfiguration**, Abschnitt **Ersparnis (Schätzung, ohne Zähler)**:
+
+- **Stromtarif**: _Keiner_ (Standard: keine Schätzung), _Grundtarif_ (ein
+  Preis) oder _Hoch- / Niedertarif_.
+- **Grundpreis**, oder **Hochtarif-Preis** und **Niedertarif-Preis**: der
+  Preis einer aus dem Netz bezogenen kWh, inklusive Steuern (zum Beispiel
+  `0,35`). Ein fehlender Preis schaltet die Schätzung ab.
+- **Niedertarifzeiten**: Bereiche `HH:MM-HH:MM`, durch Kommas getrennt, zum
+  Beispiel `22:00-06:00` oder `01:30-07:30,12:30-14:30`. Ein Bereich darf
+  über Mitternacht gehen; `24:00` wird als Ende akzeptiert. Ungültige Zeiten
+  schalten die Schätzung ab: Protokoll und Diagnose nennen den Grund
+  (einmal), und das Widget zeigt _Tarif ungültig_.
+- **Ich verkaufe meinen Solarüberschuss** und **Einspeisepreis**: an, wird
+  die in den Batterien gespeicherte Solarenergie zum Einspeisepreis bewertet
+  (was sie im Netz eingebracht hätte); aus, ist gespeicherte Solarenergie
+  kostenlos.
+- **Zeitzone des Tarifs** (IANA-Name, Standard `Europe/Paris`): Die
+  Niedertarifzeiten sowie Tage, Monate und Jahre der Ersparnis folgen ihr,
+  Zeitumstellungen inklusive. Sie ist eine Einstellung der Integration und
+  nicht des Widgets, weil die Zeitfenster im Hintergrund bewertet werden, wenn
+  sie enden, auch wenn kein Widget geöffnet ist; die **Zeitzone** des Widgets
+  legt weiterhin die Mitternacht seiner Energiewerte fest.
+
+Im Widget **Energie heute** ist **Ersparnis anzeigen (Schätzung)**
+standardmäßig an: Es zeigt erst etwas, wenn ein Tarif eingetragen ist.
+
+### Berechnung
+
+Für jede Batterie und jedes 30-Minuten-Fenster, aus ihren Energiezählern:
+
+- **Preis des Fensters**: der Grundpreis, oder der Hoch- / Niedertarif-Preis
+  zur Ortszeit des Fensters (ein Fenster über dem Rand eines Bereichs wird
+  anteilig berechnet).
+- **Kosten der gespeicherten Energie**: ein gewichteter Durchschnitt pro
+  Batterie. Aus dem Netz geladene Energie (der Zähler **Aus dem Netz geladene
+  Energie**) kostet den Preis des Fensters; der Rest der Ladung, von den
+  Solarmodulen, kostet den Einspeisepreis, wenn du deinen Überschuss
+  verkaufst, sonst 0. Die gespeicherte Energie wird aus dem Ladestand neu
+  gelesen, wenn die Packs bekannt sind.
+- **Ausgang zum Haus**: Ohne Netzzähler weiß die Integration nicht, was
+  eingespeist wurde, daher gilt die ans Haus gelieferte Energie als **im Haus
+  verbraucht**. Ihr Anteil aus der Batterie spart _Preis des Fensters −
+  Kosten der gespeicherten Energie_ (eine im Hochtarif geladene und im
+  Niedertarif entladene Batterie spart weniger als nichts); ihr Anteil direkt
+  von den Solarmodulen spart den Preis des Fensters; der Rest (Netzstrom, der
+  durch eine AC-Batterie fließt) spart nichts.
+- **Ersparnis** = Batterie-Verschiebung + Solar direkt (+ Einspeiseerlös, mit
+  dem Netzzähler). Die Zeile **Netzladung (bezahlt)** ist eine Information:
+  Diese Kosten stecken bereits in den Kosten der gespeicherten Energie.
+
+Das Widget zeigt **Heute gespart (Schätz.)**, den Monat und das Jahr,
+dreiphasig den Tag je Phase, und die Aufteilung des Tages
+(Batterie-Verschiebung, Solar direkt, bezahlte Netzladung, Einspeisung). Die
+Summen des aktuellen und vorherigen Tages, Monats und Jahres werden mit den
+Energiezählern in `/data/energy.json` gespeichert (eine Datei einer früheren
+Version wird unverändert geladen; die Ersparnis beginnt an der ersten
+30-Minuten-Grenze nach dem Update).
+
+### Grenzen
+
+- **Keine Kenntnis der Einspeisung**: Der ins Netz zurückfließende Ausgang
+  zum Haus (Hausverbrauch unter dem Batterieausgang) wird als zum Preis des
+  Fensters gespart gezählt. Die Zeile **Eingespeist, unbewertet** (oder
+  **Einspeisung**, wenn du verkaufst) bleibt bei 0, bis der Netzzähler
+  gelesen werden kann.
+- **AC-Batterien** (1600 AC+, 2400 AC, 2400 AC+, 4000 AC+): Ihre AC-Ladung
+  zählt als **Netzladung** zum Preis des Fensters, auch wenn sie in
+  Wirklichkeit aus dem Solarüberschuss eines anderen Wechselrichters stammt:
+  Nur die Bilanz der Anlage (der Netzzähler) könnte es zeigen.
+- Pack-Verluste, Umwandlungsverluste und verpasste Meldungen machen die Werte
+  ungefähr; die Ersparnis beginnt, wenn der Tarif eingetragen ist (nichts wird
+  rückwirkend berechnet), und eine Tarifänderung gilt für die danach endenden
+  Fenster.
+- Die Währung ist die deiner Preise; das Widget schreibt `€`.
+
+### Demnächst
+
+Zwei Optionen erscheinen in der Konfiguration, sobald Gladys sie
+Integrationen anbietet (laufende Gladys-Änderungen:
+[#3229](https://github.com/GladysAssistant/Gladys/pull/3229) und
+[#3230](https://github.com/GladysAssistant/Gladys/pull/3230)):
+
+- **Preise der Gladys-Energieüberwachung verwenden**, statt sie hier
+  einzutippen.
+- **Netzzähler** (einphasig oder dreiphasig L1 / L2 / L3): um zu wissen, was
+  wirklich verbraucht oder eingespeist wird, Einspeisung und Verluste zu
+  bewerten und bei den AC-Batterien Solarüberschuss von Netzladung zu
+  unterscheiden.
 
 ## Ein Cloud-Verbraucher pro Zendure-Konto
 

@@ -40,6 +40,26 @@ the notes of the version's GitHub Release.
   `socStatus`, `socLimit`, `pass`, `hemsState`, `faultLevel`, `hyperTmp`)
   with their meaning, and per pack its level, hottest temperature, voltage,
   current and state of health. Serial numbers stay masked.
+- **Savings estimate, without a grid meter**: a new optional section of the
+  configuration takes the electricity tariff (`tariff_mode`: none by default,
+  base or peak / off-peak; `price_base`, `price_peak`, `price_offpeak`,
+  `offpeak_hours` such as `22:00-06:00` or `01:30-07:30,12:30-14:30`,
+  `resale_enabled` and `resale_price`, `tariff_timezone`, `Europe/Paris` by
+  default). Every 30 minutes and per battery, the energy sent to the home is
+  assumed consumed by the house and valued at the price of the slot, minus the
+  weighted-average cost of the stored energy (grid charging at its price,
+  solar charging at the resale price or free). Invalid off-peak hours or a
+  missing price turn the estimate off, logged once and shown in the
+  diagnostic.
+- The **Energy today** widget shows it when a tariff is set (new setting
+  **Show the savings (estimate)**, on by default): savings today, this month
+  and this year, today per phase in three-phase, and today's breakdown
+  (battery time-shift, direct solar, grid charging paid, export), marked as
+  an estimate. The export and resale rows wait for the grid meter (coming,
+  with Gladys changes #3229 and #3230, announced in the configuration).
+- The savings (current and previous day, month and year, in the tariff
+  timezone) are saved in `/data/energy.json` with the meters (additive: a
+  1.7.0 file loads as is, an older release ignores them).
 
 ### Changed
 
