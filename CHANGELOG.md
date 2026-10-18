@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-10-18
+
 ### Added
 
 - New models, **untested hardware** (ratings from Zendure-HA, reports
@@ -340,7 +342,8 @@ the notes of the version's GitHub Release.
   read-only telemetry (battery level, battery input and output power, home
   output power, solar input power), polling and real-time MQTT push.
 
-[Unreleased]: https://github.com/Terdious/gladys-zendure/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/Terdious/gladys-zendure/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/Terdious/gladys-zendure/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/Terdious/gladys-zendure/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/Terdious/gladys-zendure/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/Terdious/gladys-zendure/compare/v1.4.0...v1.5.0
