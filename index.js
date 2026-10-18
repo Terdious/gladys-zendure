@@ -26,6 +26,7 @@ import {
   findBlueprintByDevice,
   resetTelemetryDedup,
   saveEnergyMeters,
+  applySavingsTariff,
 } from './src/devices/index.js';
 
 const gladys = new GladysIntegration();
@@ -67,6 +68,8 @@ gladys.onPoll(async (device) => {
 gladys.onConfigUpdated(async (newConfig) => {
   logger.info('onConfigUpdated -> new configuration received');
   config = normalizeConfig(newConfig);
+  // The savings tariff applies at once, even when the sync below fails.
+  applySavingsTariff(config);
   // Forget the publish dedup memory: after a config change (e.g. cloud<->local
   // switch) the first sync must re-publish every value immediately instead of
   // waiting for the periodic keep-alive.

@@ -33,8 +33,10 @@ import {
   solarflow,
   setSolarflowDependencies,
   resetSolarflowRuntime,
+  applySavingsTariff,
 } from '../src/devices/solarflow.js';
 import { normalizeConfig } from '../src/config.js';
+import { buildTariff } from '../src/zendure/savings.js';
 import { createFakeGladys } from './helpers/fakeGladys.js';
 import {
   createFakeZendureFetch,
@@ -545,4 +547,166 @@ test('the energy handler waits for the meters, then counts the local API reports
   assert.equal(content.components[0].text.en, 'Energy today');
   assert.match(rowOf(content, 'Counted since').value, / · UTC$/);
   stop();
+});
+
+// --- Energy today: the savings estimate ----------------------------------------
+
+/** Snapshots wired to real meters with a tariff, like meteredSite. */
+function savingsSite(profile, tariffConfig) {
+  const { meters } = createTestEnergyMeters();
+  const { tariff } = buildTariff(normalizeConfig(tariffConfig));
+  meters.setTariff(tariff);
+  for (let at = MIDNIGHT - 60 * MINUTE; at <= NOW; at += 5 * MINUTE) {
+    for (const { id, powers } of profile) {
+      meters.update(id, powers, at);
+    }
+  }
+  return {
+    tariff,
+    batteries: profile.map(({ id, kind }) =>
+      snapshot(id, kind, {
+        energySince: (since) => meters.energySince(id, since),
+        savingsAt: (now) => meters.savingsOf(id, now),
+      }),
+    ),
+  };
+}
+
+const BASE_TARIFF = { tariff_mode: 'base', price_base: 0.2 };
+
+test('energy today: the savings tile and rows, marked as an estimate', () => {
+  const { tariff, batteries } = savingsSite(
+    [
+      {
+        id: 'A',
+        kind: 'pro2400',
+        powers: { homeOutputPower: 600, solarInputPower: 1000, batteryOutputPower: 400 },
+      },
+      { id: 'B', kind: 'ac2400', powers: { homeOutputPower: 300, batteryInputPower: 300 } },
+    ],
+    BASE_TARIFF,
+  );
+  const content = energyTodayContent('Energy today', siteSelection(batteries, {}), {
+    now: NOW,
+    timeZone: 'Europe/Paris',
+    savings: { tariff, tariffError: null },
+  });
+  assert.deepEqual(validateWidgetContent(content), []);
+  assert.ok(content.components.length <= 8);
+  const tiles = tilesOf(content);
+  // 12 h today: A sends 600 W of solar straight to the home, B 300 W out of
+  // its pack (stored before the tariff: valued at 0, the opportunity cost).
+  // (7.2 + 3.6) kWh x 0.20. The month also holds the hour before midnight.
+  assert.equal(tiles['Saved today (estimate)'], 2.16);
+  assert.match(rowOf(content, 'Savings (estimate)').value.en, /^Month 2\.34 € · Year 2\.34 €$/);
+  assert.equal(rowOf(content, 'Battery time-shift').value, '0.72 € · 3.6 kWh');
+  assert.equal(rowOf(content, 'Direct solar').value, '1.44 € · 7.2 kWh');
+  assert.equal(rowOf(content, 'Grid charging (paid)').value, '0.00 € · 0 kWh');
+  assert.equal(rowOf(content, 'Exported, not valued').value.en, '0 kWh: grid meter (soon)');
+  assert.ok(rowOf(content, 'Counted since'), 'the energy rows stay');
+
+  // Resale on: the export row says the revenue needs the grid meter.
+  const resale = savingsSite(
+    [{ id: 'A', kind: 'pro2400', powers: { homeOutputPower: 600, solarInputPower: 600 } }],
+    { ...BASE_TARIFF, resale_enabled: true, resale_price: 0.04 },
+  );
+  const sold = energyTodayContent('Energy today', siteSelection(resale.batteries, {}), {
+    now: NOW,
+    timeZone: 'Europe/Paris',
+    savings: { tariff: resale.tariff, tariffError: null },
+  });
+  assert.deepEqual(validateWidgetContent(sold), []);
+  assert.equal(rowOf(sold, 'Resale').value.en, 'Needs the grid meter (soon)');
+  assert.equal(rowOf(sold, 'Exported, not valued'), undefined);
+});
+
+test('energy today: three-phase savings per phase, within the status budget', () => {
+  const { tariff, batteries } = savingsSite(
+    [
+      { id: 'A', kind: 'pro2400', powers: { homeOutputPower: 600, solarInputPower: 600 } },
+      { id: 'B', kind: 'ac2400', powers: { homeOutputPower: 300, batteryInputPower: 300 } },
+      { id: 'C', kind: 'sf800', powers: { homeOutputPower: 150, solarInputPower: 160 } },
+      { id: 'D', kind: 'pro800', powers: { homeOutputPower: 100, solarInputPower: 100 } },
+    ],
+    {
+      ...BASE_TARIFF,
+      tariff_mode: 'peak_offpeak',
+      price_peak: 0.2,
+      price_offpeak: 0.1,
+      offpeak_hours: '22:00-06:00',
+    },
+  );
+  const [a, b, c] = batteries.map((battery) => battery.externalId);
+  // Worst case: every alert row (a missing device, a duplicate, D unassigned).
+  const selection = siteSelection(batteries, {
+    layout: 'three_phase',
+    phase_l1: [a, 'ext:zendure:solarflow:gone'],
+    phase_l2: [b, a],
+    phase_l3: [c],
+  });
+  const content = energyTodayContent('Energy today', selection, {
+    now: NOW,
+    timeZone: 'Europe/Paris',
+    savings: { tariff, tariffError: null },
+  });
+  assert.deepEqual(validateWidgetContent(content), []);
+  const rows = rowsOf(content);
+  assert.ok(rows.length <= 10);
+  assert.ok(!rows.some((row) => en(row.label).startsWith('+')), 'nothing hidden behind "+N"');
+  // 6 h off-peak (0.10) then 6 h peak (0.20): L1 600 W of solar to the
+  // home, L2 300 W out of a pack stored before the tariff (cost 0), L3 150 W.
+  assert.equal(rowOf(content, 'Today L1 · L2 · L3').value, '1.08 € · 0.54 € · 0.27 €');
+  for (const label of ['Not found', 'In several phases', 'In no phase', 'Counted since']) {
+    assert.ok(rowOf(content, label), `${label} kept`);
+  }
+  assert.ok(rowOf(content, 'Savings (estimate)'));
+});
+
+test('the energy handler: savings with a tariff, off per instance, a warning when invalid', async () => {
+  const zenSdk = createFakeZenSdkFetch({
+    reports: { [FAKE_HTTP_SOLARFLOW_DEVICE.ip]: FAKE_HTTP_REPORT },
+  });
+  resetSolarflowRuntime();
+  setSolarflowDependencies({
+    fetchImpl: createFakeZendureFetch({ deviceList: [FAKE_HTTP_SOLARFLOW_DEVICE] }),
+    mqttLibrary,
+    localFetchImpl: zenSdk,
+    energyMeters: createTestEnergyMeters().meters,
+  });
+  const withTariff = normalizeConfig({ cloud_key: FAKE_CLOUD_KEY, ...BASE_TARIFF });
+  await buildDiscoveredDevices(gladys, withTariff);
+  const stop = solarflow.startPush(gladys, withTariff);
+  for (let i = 0; i < 200 && zenSdk.calls.length === 0; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const get = (settings, cfg) =>
+    WIDGETS[ENERGY_TODAY_WIDGET].get(gladys, { settings, config: cfg });
+
+  const shown = await get({}, withTariff);
+  assert.deepEqual(validateWidgetContent(shown), []);
+  assert.ok('Saved today (estimate)' in tilesOf(shown));
+  assert.ok(rowOf(shown, 'Savings (estimate)'));
+
+  const hidden = await get({ show_savings: false }, withTariff);
+  assert.ok(!('Saved today (estimate)' in tilesOf(hidden)));
+  assert.equal(rowOf(hidden, 'Savings (estimate)'), undefined);
+
+  const none = await get({}, config);
+  assert.equal(rowOf(none, 'Savings (estimate)'), undefined);
+
+  const invalid = normalizeConfig({ cloud_key: FAKE_CLOUD_KEY, tariff_mode: 'base' });
+  applySavingsTariff(invalid);
+  const warned = await get({}, invalid);
+  assert.deepEqual(validateWidgetContent(warned), []);
+  assert.equal(rowOf(warned, 'Savings (estimate)').value.en, 'Tariff invalid: see the logs');
+  assert.equal(rowOf(warned, 'Savings (estimate)').color, 'warning');
+  stop();
+});
+
+test('the show_savings setting is declared on the energy widget, on by default', () => {
+  const setting = settingOf(ENERGY_TODAY_WIDGET, 'show_savings');
+  assert.equal(setting.type, 'boolean');
+  assert.equal(setting.default, true);
+  assert.equal(manifest.widgets.length, 4, 'no new widget (the store allows 5)');
 });

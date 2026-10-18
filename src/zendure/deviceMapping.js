@@ -30,17 +30,23 @@ import {
   DEVICE_FEATURE_UNITS,
 } from '@gladysassistant/integration-sdk';
 
-import { SUPPORTED_PRODUCT_MODELS } from './constants.js';
+import {
+  canonicalProductModelOf,
+  MODEL_CAPABILITIES,
+  SUPPORTED_PRODUCT_MODELS,
+} from './constants.js';
 
 // Every supported model exposes the same five baseline features with identical
 // `metricPaths`; the reference project does not rename these core properties per
-// model. The only per-model difference we apply is the display `max` of the
-// power features, sized from each model's rated power (see MODEL_MAX_POWER).
-//
-// The reference also exposes two extra off-grid sensors (gridOffPower /
-// aggrGridOffPower) on the Pro/1600/2400 models. We intentionally keep the
-// 5-feature baseline for consistency: the off-grid property names are not
-// confirmed on the cloud payload and the SDK solar mapping is not settled yet.
+// model. The per-model differences are the display `max` of the power
+// features, sized from each model's rated power (see MODEL_MAX_POWER), and
+// the optional features of its capabilities (MODEL_CAPABILITIES): the
+// off-grid output (`gridOffPower`, like Zendure-HA's gridOffPower /
+// aggrGridOffPower sensors) and the grid charging input (`gridInputPower`).
+// Every model also gets the two temperature features, published only when the
+// device reports the property. New features are appended after the existing
+// ones: a device created by an older release gets them with "Update" in the
+// Discover tab, its existing features (and their ids) untouched.
 //
 // `metricPaths` are the candidate dot paths inside the MQTT `properties/report`
 // payloads (and, as a fallback, inside the raw cloud deviceList entry).
@@ -62,10 +68,143 @@ const MODEL_MAX_POWER = {
   [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_2400_PRO]: 4000,
   // Hyper 2000 (out/in 1200 / solar 1600) — EXPERIMENTAL, untested hardware.
   [SUPPORTED_PRODUCT_MODELS.HYPER_2000]: 2000,
+  // Untested hardware, Zendure-HA setLimits()/maxSolar:
+  // SolarFlow800Plus (in 1000 / out 800 / solar 1500).
+  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_800_PLUS]: 2000,
+  // SolarFlow800Pro class, used for the 800 Pro 2 (in 1000 / out 800 / solar 1200).
+  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_800_PRO_2]: 1500,
+  // SolarFlow4000AC_Plus (in 3200 / out 2400).
+  [SUPPORTED_PRODUCT_MODELS.SOLARFLOW_4000]: 4000,
 };
 
 // Display ceiling of the energy indexes (kWh): metadata only, never reached.
 const ENERGY_INDEX_MAX_KWH = 1000000;
+
+// Temperatures: Zendure reports them in decikelvin (Zendure-HA converts every
+// "°C" property with `(value - 2731) / 10`). A value outside this range is a
+// placeholder (0 reads -273.1 °C) or a glitch, never published.
+export const TEMPERATURE_RANGE_CELSIUS = { min: -40, max: 120 };
+
+/**
+ * Celsius (one decimal) of a decikelvin value, or null when absurd.
+ * @param {number|null} decikelvin raw value
+ * @returns {number|null}
+ */
+export function decikelvinToCelsius(decikelvin) {
+  if (decikelvin === null || decikelvin === undefined || !Number.isFinite(Number(decikelvin))) {
+    return null;
+  }
+  const celsius = Math.round(Number(decikelvin) - 2731) / 10;
+  return celsius >= TEMPERATURE_RANGE_CELSIUS.min && celsius <= TEMPERATURE_RANGE_CELSIUS.max
+    ? celsius
+    : null;
+}
+
+/** Pack list of a payload (flat local payload or `properties` + `packData`). */
+function packsOf(payload) {
+  const packs = payload?.packData ?? payload?.properties?.packData;
+  return Array.isArray(packs) ? packs : [];
+}
+
+/**
+ * Temperature (°C) of the hottest pack: the highest valid `maxTemp` of
+ * `packData`, null when no pack reports one.
+ * @param {object} payload merged telemetry payload
+ * @returns {number|null}
+ */
+export function hottestPackTemperature(payload) {
+  const temperatures = packsOf(payload)
+    .map((pack) => decikelvinToCelsius(toNumber(pack?.maxTemp)))
+    .filter((value) => value !== null);
+  return temperatures.length === 0 ? null : Math.max(...temperatures);
+}
+
+/**
+ * Optional features of a model, from its capabilities, appended after the
+ * baseline ones.
+ * @param {number} maxPower display ceiling (watts) for the power features
+ * @param {{ offGrid?: boolean, acCharge?: boolean }} capabilities
+ * @returns {Array<object>} feature mappings
+ */
+function buildExtraFeatures(maxPower, capabilities) {
+  const features = [];
+  if (capabilities.offGrid) {
+    features.push(
+      {
+        key: 'offGridPower',
+        name: 'Off-grid output power',
+        category: DEVICE_FEATURE_CATEGORIES.HOME_OUTPUT_SENSOR,
+        type: DEVICE_FEATURE_TYPES.HOME_OUTPUT_SENSOR.OFF_GRID_POWER,
+        unit: DEVICE_FEATURE_UNITS.WATT,
+        min: 0,
+        max: maxPower,
+        // Negative when the port feeds power in (Zendure-HA counts it as a
+        // solar input): clamped to 0 by normalizeMetricValue, never integrated.
+        metricPaths: ['gridOffPower', 'properties.gridOffPower'],
+      },
+      {
+        key: 'offGridEnergy',
+        name: 'Off-grid output energy',
+        category: DEVICE_FEATURE_CATEGORIES.HOME_OUTPUT_SENSOR,
+        type: DEVICE_FEATURE_TYPES.HOME_OUTPUT_SENSOR.OFF_GRID_INDEX,
+        unit: DEVICE_FEATURE_UNITS.KILOWATT_HOUR,
+        min: 0,
+        max: ENERGY_INDEX_MAX_KWH,
+        computed: true,
+      },
+    );
+  }
+  if (capabilities.acCharge) {
+    features.push(
+      {
+        key: 'gridInputPower',
+        name: 'Grid charging power',
+        category: DEVICE_FEATURE_CATEGORIES.GRID_SENSOR,
+        type: DEVICE_FEATURE_TYPES.GRID_SENSOR.INPUT_POWER,
+        unit: DEVICE_FEATURE_UNITS.WATT,
+        min: 0,
+        max: maxPower,
+        metricPaths: ['gridInputPower', 'properties.gridInputPower'],
+      },
+      {
+        key: 'gridInputEnergy',
+        name: 'Grid charging energy',
+        category: DEVICE_FEATURE_CATEGORIES.GRID_SENSOR,
+        type: DEVICE_FEATURE_TYPES.GRID_SENSOR.INPUT_INDEX,
+        unit: DEVICE_FEATURE_UNITS.KILOWATT_HOUR,
+        min: 0,
+        max: ENERGY_INDEX_MAX_KWH,
+        computed: true,
+      },
+    );
+  }
+  // Read through `read` (converted, validated): a device that does not report
+  // the property publishes nothing.
+  features.push(
+    {
+      key: 'deviceTemperature',
+      name: 'Device temperature',
+      category: DEVICE_FEATURE_CATEGORIES.DEVICE_TEMPERATURE_SENSOR,
+      type: DEVICE_FEATURE_TYPES.SENSOR.DECIMAL,
+      unit: DEVICE_FEATURE_UNITS.CELSIUS,
+      min: TEMPERATURE_RANGE_CELSIUS.min,
+      max: TEMPERATURE_RANGE_CELSIUS.max,
+      read: (payload) =>
+        decikelvinToCelsius(extractMetricValue(payload, ['hyperTmp', 'properties.hyperTmp'])),
+    },
+    {
+      key: 'batteryMaxTemperature',
+      name: 'Hottest pack temperature',
+      category: DEVICE_FEATURE_CATEGORIES.DEVICE_TEMPERATURE_SENSOR,
+      type: DEVICE_FEATURE_TYPES.SENSOR.DECIMAL,
+      unit: DEVICE_FEATURE_UNITS.CELSIUS,
+      min: TEMPERATURE_RANGE_CELSIUS.min,
+      max: TEMPERATURE_RANGE_CELSIUS.max,
+      read: hottestPackTemperature,
+    },
+  );
+  return features;
+}
 
 /**
  * Build the baseline SolarFlow/Hyper features shared by every model: the five
@@ -244,6 +383,42 @@ export const FEATURE_NAMES = {
     de: 'Verbleibende Batterieenergie',
     es: 'Energía restante de la batería',
   },
+  offGridPower: {
+    en: 'Off-grid output power',
+    fr: 'Puissance de la sortie hors réseau',
+    de: 'Leistung des Off-Grid-Ausgangs',
+    es: 'Potencia de la salida fuera de red',
+  },
+  offGridEnergy: {
+    en: 'Off-grid output energy',
+    fr: 'Énergie de la sortie hors réseau',
+    de: 'Energie des Off-Grid-Ausgangs',
+    es: 'Energía de la salida fuera de red',
+  },
+  gridInputPower: {
+    en: 'Grid charging power',
+    fr: 'Puissance de charge depuis le réseau',
+    de: 'Ladeleistung aus dem Netz',
+    es: 'Potencia de carga desde la red',
+  },
+  gridInputEnergy: {
+    en: 'Grid charging energy',
+    fr: 'Énergie chargée depuis le réseau',
+    de: 'Aus dem Netz geladene Energie',
+    es: 'Energía cargada desde la red',
+  },
+  deviceTemperature: {
+    en: 'Device temperature',
+    fr: "Température de l'appareil",
+    de: 'Gerätetemperatur',
+    es: 'Temperatura del dispositivo',
+  },
+  batteryMaxTemperature: {
+    en: 'Hottest pack temperature',
+    fr: 'Température du pack le plus chaud',
+    de: 'Temperatur des wärmsten Packs',
+    es: 'Temperatura del pack más caliente',
+  },
 };
 
 /**
@@ -256,25 +431,25 @@ export function featureNameFor(featureMapping, language) {
   return FEATURE_NAMES[featureMapping.key]?.[language] ?? featureMapping.name;
 }
 
-// Feature mappings per product model. Keyed by the lowercase/trimmed cloud
-// `productModel` string (see SUPPORTED_PRODUCT_MODELS).
+// Feature mappings per product model. Keyed by the canonical
+// SUPPORTED_PRODUCT_MODELS value (see canonicalProductModelOf).
 export const MODEL_FEATURES = Object.fromEntries(
   Object.entries(MODEL_MAX_POWER).map(([productModel, maxPower]) => [
     productModel,
-    buildBaselineFeatures(maxPower),
+    [
+      ...buildBaselineFeatures(maxPower),
+      ...buildExtraFeatures(maxPower, MODEL_CAPABILITIES[productModel] || {}),
+    ],
   ]),
 );
 
 /**
- * Feature mappings for one product model (case-insensitive match).
+ * Feature mappings for one product model (case- and whitespace-insensitive).
  * @param {string} productModel raw product model from the cloud
  * @returns {Array<object>} feature mappings ([] when unsupported)
  */
 export function getFeaturesForModel(productModel) {
-  const normalized = String(productModel || '')
-    .toLowerCase()
-    .trim();
-  return MODEL_FEATURES[normalized] || [];
+  return MODEL_FEATURES[canonicalProductModelOf(productModel)] || [];
 }
 
 function getByPath(object, path) {
@@ -382,4 +557,30 @@ export function normalizeMetricValue(metricKey, value) {
     return Math.max(0, Math.min(100, Math.round(value)));
   }
   return Math.max(0, Math.round(value));
+}
+
+/**
+ * Final Gladys value of a measured feature from a payload, or null when the
+ * payload does not carry it. Computed features have no value of their own
+ * (see src/zendure/energy.js).
+ * @param {object} featureMapping one MODEL_FEATURES entry
+ * @param {object} payload MQTT / local API payload or raw cloud device
+ * @param {{ search?: boolean }} [options] fall back on a recursive key search
+ * @returns {number|null}
+ */
+export function featureValueOf(featureMapping, payload, { search = false } = {}) {
+  if (featureMapping.computed) {
+    return null;
+  }
+  if (typeof featureMapping.read === 'function') {
+    return featureMapping.read(payload);
+  }
+  let value = extractMetricValue(payload, featureMapping.metricPaths);
+  if (value === null && search) {
+    value = searchMetricByKeys(
+      payload,
+      featureMapping.metricPaths.map((path) => path.split('.').pop()),
+    );
+  }
+  return value === null ? null : normalizeMetricValue(featureMapping.key, value);
 }

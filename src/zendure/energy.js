@@ -28,12 +28,27 @@
 // Attribution: the pack capacity table (serial prefix -> kWh) comes from the
 // official Home Assistant integration Zendure/Zendure-HA (MIT License, (c) 2024
 // peteS-UK). Only those factual constants are reused; the code is our own.
+//
+// Savings estimate (src/zendure/savings.js): each device also keeps the totals
+// at the start of its open slot, the stored energy with its average cost and
+// the day / month / year accumulators, in a `savings` object of its entry
+// (additive: a 1.7.0 file loads without it, and an older release reading a
+// newer file ignores it). A slot is valued when it closes, at the first
+// payload of the next one, with the tariff set by setTariff().
 // -----------------------------------------------------------------------------
 
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { createLogger } from '@gladysassistant/integration-sdk';
+
+import {
+  closeSavingsSlot,
+  createSavingsState,
+  deserializeSavings,
+  savingsReport,
+  serializeSavings,
+} from './savings.js';
 
 const logger = createLogger({ name: 'energy' });
 
@@ -45,6 +60,12 @@ export const ENERGY_FLOWS = {
   batteryInputPower: 'batteryDischargeEnergy',
   solarInputPower: 'solarEnergy',
   homeOutputPower: 'homeOutputEnergy',
+  // Only on the models with the matching feature (deviceMapping.js): a device
+  // never reporting the power keeps the index at 0, and buildEnergyStates
+  // publishes the indexes of the device's own features only. Added after the
+  // first four: a saved file without them loads them at 0 (additive format).
+  offGridPower: 'offGridEnergy',
+  gridInputPower: 'gridInputEnergy',
 };
 
 // A longer silence between two payloads is a gap (device offline, broker
@@ -61,8 +82,15 @@ export const ENERGY_SLOT_IN_MS = 30 * 60 * 1000;
 export const SLOT_RETENTION_IN_MS = 26 * 60 * 60 * 1000;
 // Order of the kWh values of a saved slot (`[slotStart, ...kWh]`, compact:
 // 17 devices x 52 slots). Written in the file, so a later order change still
-// reads an older file right.
-const SLOT_FIELDS = Object.values(ENERGY_FLOWS);
+// reads an older file right. Only the flows of the "Energy today" widget are
+// snapshotted (the off-grid and grid charging indexes keep their totals only),
+// which keeps the file the size and shape it had.
+const SLOT_FIELDS = [
+  'batteryChargeEnergy',
+  'batteryDischargeEnergy',
+  'solarEnergy',
+  'homeOutputEnergy',
+];
 
 /**
  * Start (ms) of the 30-minute UTC slot holding a timestamp.
@@ -135,6 +163,9 @@ export function createEnergyMeters({ dataDir = process.env.ZENDURE_DATA_DIR || '
   // with ENOENT (the first had already moved it).
   let saveQueue = Promise.resolve();
   let saveCount = 0;
+  // Tariff of the savings estimate (src/zendure/savings.js buildTariff), null:
+  // no estimate (the slot marks still advance).
+  let tariff = null;
 
   async function writeNow() {
     if (!dirty) {
@@ -149,6 +180,7 @@ export function createEnergyMeters({ dataDir = process.env.ZENDURE_DATA_DIR || '
         {
           kwh: { ...meter.kwh },
           slots: meter.slots.map((slot) => [slot.at, ...SLOT_FIELDS.map((key) => slot.kwh[key])]),
+          savings: serializeSavings(meter.savings),
         },
       ]),
     );
@@ -156,8 +188,8 @@ export function createEnergyMeters({ dataDir = process.env.ZENDURE_DATA_DIR || '
     const temporaryPath = `${filePath}.${process.pid}.${saveCount}.tmp`;
     try {
       await mkdir(dataDir, { recursive: true });
-      // Version 1 still: `slots` and `slot_fields` are additive, an older
-      // release reads the totals and ignores them.
+      // Version 1 still: `slots`, `slot_fields` and `savings` are additive,
+      // an older release reads the totals and ignores them.
       await writeFile(
         temporaryPath,
         JSON.stringify({ version: 1, slot_fields: SLOT_FIELDS, devices }),
@@ -176,7 +208,14 @@ export function createEnergyMeters({ dataDir = process.env.ZENDURE_DATA_DIR || '
 
   function meterOf(deviceKey) {
     if (!meters.has(deviceKey)) {
-      meters.set(deviceKey, { lastAt: 0, power: {}, kwh: {}, slots: [] });
+      meters.set(deviceKey, {
+        lastAt: 0,
+        power: {},
+        kwh: {},
+        slots: [],
+        savings: createSavingsState(),
+        storedKwh: null,
+      });
     }
     return meters.get(deviceKey);
   }
@@ -200,6 +239,8 @@ export function createEnergyMeters({ dataDir = process.env.ZENDURE_DATA_DIR || '
     if (last && last.at >= slotAt) {
       return;
     }
+    // The closing slot is valued with the totals at the boundary exactly.
+    closeSavingsSlot(meter.savings, meter.kwh, slotAt, tariff, meter.storedKwh);
     meter.slots.push({
       at: slotAt,
       kwh: Object.fromEntries(SLOT_FIELDS.map((key) => [key, roundWh(meter.kwh[key] || 0)])),
@@ -242,6 +283,10 @@ export function createEnergyMeters({ dataDir = process.env.ZENDURE_DATA_DIR || '
               power: {},
               kwh: { ...meter.kwh },
               slots: loadSlots(meter.slots, saved.slot_fields),
+              savings: deserializeSavings(meter.savings),
+              storedKwh: Number.isFinite(meter.savings?.stock?.kwh)
+                ? meter.savings.stock.kwh
+                : null,
             },
           ]),
         );
@@ -258,9 +303,10 @@ export function createEnergyMeters({ dataDir = process.env.ZENDURE_DATA_DIR || '
      * @param {string} deviceKey Zendure device key
      * @param {Record<string, number>} powers power feature key -> W (missing keys keep their last value)
      * @param {number} at timestamp of the payload (ms)
+     * @param {{ storedKwh?: number|null }} [measures] energy in the packs now (state of charge x capacity), when known
      * @returns {Record<string, number>} index feature key -> kWh
      */
-    update(deviceKey, powers, at) {
+    update(deviceKey, powers, at, { storedKwh = null } = {}) {
       const meter = meterOf(deviceKey);
       const elapsed = at - meter.lastAt;
       const integrable = meter.lastAt > 0 && elapsed > 0 && elapsed <= MAX_INTEGRATION_GAP_IN_MS;
@@ -284,6 +330,9 @@ export function createEnergyMeters({ dataDir = process.env.ZENDURE_DATA_DIR || '
       }
       if (at > meter.lastAt) {
         meter.lastAt = at;
+      }
+      if (Number.isFinite(storedKwh)) {
+        meter.storedKwh = storedKwh;
       }
       return this.totals(deviceKey);
     },
@@ -329,6 +378,29 @@ export function createEnergyMeters({ dataDir = process.env.ZENDURE_DATA_DIR || '
           kwh: delta(slot.kwh, slots[index + 1]?.kwh ?? now),
         })),
       };
+    },
+
+    /**
+     * Set the tariff of the savings estimate (buildTariff().tariff, null for
+     * none): the slots closing from now on are valued with it.
+     * @param {object|null} value
+     */
+    setTariff(value) {
+      tariff = value ?? null;
+    },
+
+    /**
+     * Savings estimate of a device now (src/zendure/savings.js
+     * savingsReport): null without a tariff or for an unseen device.
+     * @param {string} deviceKey Zendure device key
+     * @param {number} now timestamp (ms)
+     */
+    savingsOf(deviceKey, now) {
+      const meter = meters.get(deviceKey);
+      if (!meter || !tariff) {
+        return null;
+      }
+      return savingsReport(meter.savings, meter.kwh, now, tariff, meter.storedKwh);
     },
 
     /**

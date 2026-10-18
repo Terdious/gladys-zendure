@@ -23,9 +23,20 @@ SolarFlow 800, SolarFlow 800 Pro, SolarFlow 1600, SolarFlow 2400,
 SolarFlow 2400 AC, SolarFlow 2400 Pro et Hyper 2000 (expérimental — mapping de
 télémétrie à confirmer par un testeur de la communauté).
 
+**Matériel non testé** : les SolarFlow 800 Plus, SolarFlow 800 Pro 2 et
+SolarFlow 4000 AC+ sont pris en charge à partir des caractéristiques de
+l'intégration Home Assistant officielle (Zendure-HA), sans qu'un appareil réel
+ait encore été vu. Si vous en possédez un, merci de signaler son comportement
+(un rapport **Diagnostic des batteries** est idéal) dans les
+[issues](https://github.com/Terdious/gladys-zendure/issues).
+
+Le nom de modèle renvoyé par le cloud Zendure est reconnu sans tenir compte de
+la casse ni des espaces (`SolarFlow 800 Pro`, `SolarFlow800Pro`), comme le fait
+Zendure-HA.
+
 ## Fonctionnalités
 
-Chaque batterie est créée avec dix fonctionnalités en lecture seule, dans les
+Chaque batterie est créée avec dix fonctionnalités en lecture seule (plus celles qui dépendent du modèle, plus bas), dans les
 catégories énergie de Gladys (graphiques énergie, historique, tableaux de
 bord) :
 
@@ -63,6 +74,47 @@ fonctionnalités sont mises à jour sur place : leur historique, les scènes et
 les tableaux de bord sont conservés. Ce même **Mettre à jour** ajoute les
 fonctionnalités d'énergie à une batterie créée avant la version 1.5.0.
 
+### Sortie hors réseau, charge depuis le réseau et températures
+
+Selon le modèle, une batterie reçoit aussi ces fonctionnalités :
+
+| Fonctionnalité                       | Catégorie Gladys                  | Unité | Modèles                                                             |
+| ------------------------------------ | --------------------------------- | ----- | ------------------------------------------------------------------- |
+| Puissance de la sortie hors réseau   | Capteur de sortie maison          | W     | 800 Pro, 800 Pro 2, 1600 AC+, 2400 AC, 2400 AC+, 2400 Pro, 4000 AC+ |
+| Énergie de la sortie hors réseau     | Capteur de sortie maison          | kWh   | les mêmes                                                           |
+| Puissance de charge depuis le réseau | Capteur réseau                    | W     | tous les modèles (charge AC)                                        |
+| Énergie chargée depuis le réseau     | Capteur réseau                    | kWh   | tous les modèles                                                    |
+| Température de l'appareil            | Capteur de température d'appareil | °C    | tous les modèles, si remontée                                       |
+| Température du pack le plus chaud    | Capteur de température d'appareil | °C    | tous les modèles, si remontée                                       |
+
+- **Sortie hors réseau** : la puissance de la prise hors réseau (secours) de la
+  batterie (`gridOffPower`). Une valeur négative signifie que la prise injecte
+  de la puissance (un panneau solaire branché dessus, comme le note
+  Zendure-HA) : elle affiche 0 et n'est pas comptée.
+- **Charge depuis le réseau** : la puissance que la batterie prélève sur le
+  réseau pour se charger (`gridInputPower`), sur tous les modèles capables de
+  charger en AC.
+- Les deux fonctionnalités d'**énergie** sont calculées comme les autres
+  (puissance cumulée dans le temps, sauvegardée dans le volume de données de
+  l'intégration, silences de plus de 5 minutes écartés).
+- **Températures** : la température de l'appareil (`hyperTmp`) et la plus
+  haute température des packs (`maxTemp`), remontées par Zendure en dixièmes
+  de kelvin et converties en °C. Une batterie qui ne les remonte pas les
+  laisse vides ; une valeur impossible (sous −40 °C ou au-dessus de 120 °C)
+  est ignorée.
+
+**Hiérarchie énergie — éviter le double comptage.** La puissance de charge
+depuis le réseau est un **capteur réseau** : si votre logement a déjà un
+compteur principal (Linky, compteur P1 ou Shelly EM...) dans Gladys, la charge
+de la batterie depuis le réseau est déjà incluse dans ce qu'il mesure. Dans les
+réglages énergie de Gladys, placez la batterie **sous le compteur principal**
+(comme enfant), pas à côté, sinon l'énergie qu'elle prélève serait comptée deux
+fois.
+
+Une batterie créée avec une version précédente reçoit ces fonctionnalités avec
+le même **Mettre à jour** de l'onglet **Découverte** : les fonctionnalités
+existantes, leur historique, les scènes et les tableaux de bord sont conservés.
+
 ## Obtenir votre clé cloud Zendure
 
 L'intégration s'authentifie auprès du cloud Zendure avec une **clé
@@ -93,7 +145,8 @@ l'application mobile Zendure :
 
 ### API locale (zenSDK, activée par défaut)
 
-Les batteries SolarFlow (800, 800 Pro, 1600 AC+, 2400 AC, 2400 AC+, 2400 Pro
+Les batteries SolarFlow (800, 800 Plus, 800 Pro, 800 Pro 2, 1600 AC+, 2400 AC,
+2400 AC+, 2400 Pro, 4000 AC+
 — tous les modèles pris en charge sauf l'Hyper 2000) exposent une petite **API HTTP sur votre réseau
 local**, appelée zenSDK. C'est ce qu'utilise l'intégration officielle Home
 Assistant pour ces modèles : ni MQTT, ni le cloud. Avec **Utiliser l'API locale
@@ -241,6 +294,8 @@ ou plus récent) :
   minutes, gardé 26 heures) : ils comptent depuis la première remontée du
   jour, qu'indique la ligne **Compté depuis** (par exemple après une première
   installation le matin).
+  Avec un tarif d'électricité dans la configuration, il affiche aussi
+  l'estimation des économies (voir **Économies (estimation)** plus bas).
 
 **Exemple triphasé :** 17 batteries sur L1, L2 et L3. Ajoutez un widget
 **Installation Zendure**, réglez l'**Installation électrique** sur
@@ -264,6 +319,107 @@ la cible de charge ou au plancher de décharge, tel que la batterie le remonte
 (ou calculé d'après sa capacité quand elle ne le donne pas). Un groupe exclut
 les batteries sans pack de son niveau moyen et de son énergie stockée, et un
 groupe de tels appareils n'affiche que leurs puissances.
+
+## Économies (estimation)
+
+Avec votre tarif d'électricité, l'intégration **estime** ce que vos
+batteries font économiser, toutes les 30 minutes, par batterie, et le widget
+**Énergie du jour** en fait la somme pour ses batteries (le site, ou chaque
+phase). C'est une **estimation sans compteur réseau**, signalée comme telle
+dans le widget : lisez les limites ci-dessous.
+
+### Renseigner le tarif
+
+Dans l'onglet **Configuration**, section **Économies (estimation, sans
+compteur)** :
+
+- **Tarif d'électricité** : _Aucun_ (par défaut : pas d'estimation), _Base_
+  (un seul prix) ou _Heures pleines / creuses_.
+- **Prix base**, ou **Prix heures pleines** et **Prix heures creuses** : le
+  prix d'un kWh acheté au réseau, toutes taxes comprises (par exemple
+  `0,1952`). Un prix manquant désactive l'estimation.
+- **Heures creuses** : plages `HH:MM-HH:MM` séparées par des virgules, par
+  exemple `22:00-06:00` ou `01:30-07:30,12:30-14:30`. Une plage peut passer
+  minuit ; `24:00` est accepté comme fin. Des heures invalides désactivent
+  l'estimation : les journaux et le diagnostic disent pourquoi (une fois), et
+  le widget affiche _Tarif invalide_.
+- **Je revends mon surplus solaire** et **Prix de revente** : activé,
+  l'énergie solaire stockée dans les batteries est valorisée au prix de
+  revente (ce qu'elle aurait rapporté sur le réseau) ; désactivé, l'énergie
+  solaire stockée est gratuite.
+- **Fuseau horaire du tarif** (nom IANA, `Europe/Paris` par défaut) : les
+  heures creuses, ainsi que les jours, mois et années des économies, le
+  suivent, changements d'heure compris. C'est un réglage de l'intégration et
+  non du widget car les créneaux sont valorisés en arrière-plan, à leur
+  clôture, quand aucun widget n'est ouvert ; le **Fuseau horaire** du widget
+  fixe toujours le minuit de ses chiffres d'énergie.
+
+Dans le widget **Énergie du jour**, **Afficher les économies (estimation)**
+est activé par défaut : il n'affiche quelque chose qu'une fois un tarif
+renseigné.
+
+### Mode de calcul
+
+Pour chaque batterie et chaque créneau de 30 minutes, à partir de ses
+compteurs d'énergie :
+
+- **Prix du créneau** : le prix base, ou le prix heures pleines / creuses à
+  l'heure locale du créneau (un créneau à cheval sur le bord d'une plage est
+  calculé au prorata).
+- **Coût de l'énergie stockée** : une moyenne pondérée par batterie.
+  L'énergie chargée depuis le réseau (le compteur **Énergie chargée
+  depuis le réseau**) coûte le prix du créneau ; le reste de la charge, venu des
+  panneaux solaires, coûte le prix de revente si vous revendez votre surplus,
+  0 sinon. L'énergie stockée est relue depuis le niveau de charge quand les
+  packs sont connus.
+- **Sortie vers la maison** : sans compteur réseau, l'intégration ne peut pas
+  savoir ce qui a été injecté, l'énergie envoyée vers la maison est donc
+  **supposée consommée** par le logement. Sa part venue de la batterie fait
+  économiser _prix du créneau − coût de l'énergie stockée_ (une batterie
+  chargée en heures pleines et déchargée en heures creuses fait perdre) ; sa
+  part venue directement des panneaux fait économiser le prix du créneau ; le
+  reste (le réseau traversant une batterie AC) ne fait rien économiser.
+- **Économies** = décalage batterie + solaire direct (+ revenu de revente,
+  avec le compteur réseau). La ligne **Recharge réseau (payée)** est une
+  information : ce coût est déjà dans le coût de l'énergie stockée.
+
+Le widget affiche **Économie du jour (est.)**, le mois et l'année, le jour
+par phase en triphasé, et le détail du jour (décalage batterie, solaire
+direct, recharge réseau payée, injection). Les totaux du jour, du mois et de
+l'année en cours et précédents sont enregistrés dans `/data/energy.json` avec
+les compteurs d'énergie (un fichier d'une version précédente se charge tel
+quel ; les économies démarrent à la première limite de 30 minutes après la
+mise à jour).
+
+### Limites
+
+- **Aucune connaissance de l'injection** : la sortie vers la maison renvoyée
+  sur le réseau (consommation du logement inférieure à la sortie de la
+  batterie) est comptée comme économisée au prix du créneau. La ligne
+  **Injecté, non valorisé** (ou **Revente** si vous revendez) reste à 0 tant
+  que le compteur réseau ne peut pas être lu.
+- **Batteries AC** (1600 AC+, 2400 AC, 2400 AC+, 4000 AC+) : leur charge AC
+  est comptée comme **recharge réseau** au prix du créneau, même quand elle
+  vient en réalité du surplus solaire d'un autre onduleur : seul le bilan du
+  site (le compteur réseau) permettrait de le savoir.
+- Les pertes des packs, les pertes de conversion et les remontées manquées
+  rendent les chiffres approximatifs ; les économies démarrent quand le tarif
+  est renseigné (rien n'est recalculé en arrière), et un changement de tarif
+  s'applique aux créneaux clos ensuite.
+- La devise est celle de vos prix ; le widget écrit `€`.
+
+### Bientôt disponible
+
+Deux options apparaîtront dans la configuration dès que Gladys les proposera
+aux intégrations (évolutions de Gladys en cours :
+[#3229](https://github.com/GladysAssistant/Gladys/pull/3229) et
+[#3230](https://github.com/GladysAssistant/Gladys/pull/3230)) :
+
+- **Utiliser les prix du suivi d'énergie de Gladys**, au lieu de les saisir
+  ici.
+- **Compteur réseau** (monophasé, ou triphasé L1 / L2 / L3) : pour savoir ce
+  qui est vraiment consommé ou injecté, valoriser la revente et les pertes, et
+  distinguer le surplus solaire de la recharge réseau sur les batteries AC.
 
 ## Un seul consommateur cloud par compte Zendure
 
@@ -355,7 +511,12 @@ journaux. Aucun n'écrit dans une batterie ni ne change son transport.
   données sur chaque source, l'adresse de son API locale (des options, du
   cloud ou mDNS) et son état, les packs, l'entrée solaire, les réglages
   qu'elle remonte (limites, mode AC, niveaux de charge), le temps restant et
-  les compteurs d'énergie. Choisissez une batterie dans la liste **Batterie**
+  les compteurs d'énergie, puis les versions de firmware (appareil, maître,
+  DSP, packs), le signal Wi-Fi (`rssi`, avec une indication sous −75 dBm) et
+  les états de connexion, les codes d'état bruts (chauffage, basse
+  température, calibration et limite de SoC, bypass, HEMS, niveau de défaut)
+  et, par pack, son niveau, la température de sa cellule la plus chaude, sa
+  tension, son courant et son état de santé. Choisissez une batterie dans la liste **Batterie**
   (les batteries créées dans Gladys) pour ne décrire qu'elle ; pour une
   batterie non créée dans Gladys, saisissez son nom ou son numéro de série
   dans le champ en dessous.

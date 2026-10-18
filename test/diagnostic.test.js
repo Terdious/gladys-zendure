@@ -17,7 +17,10 @@ import {
   hintForLocalApiError,
   maskIdentifier,
   truncateReport,
+  formatFirmwareVersion,
+  packCurrentAmperes,
   MASKED_HOST,
+  MAX_REPORT_LENGTH,
   INTEGRATION_VERSION,
 } from '../src/diagnostic.js';
 import { buildDiscoveredDevices, describeDiagnostics } from '../src/devices/index.js';
@@ -267,6 +270,27 @@ test('the fleet report without a cloud key says so, and the failed request', asy
   assert.match(report, /== Batteries \(0\) ==/);
 });
 
+test('the fleet report tells the savings tariff, and why it is ignored', async () => {
+  const report = async (cfg) =>
+    buildFleetDiagnostic(
+      await describeDiagnostics(gladys, normalizeConfig({ cloud_key: '', ...cfg })),
+    );
+  assert.match(await report({}), /Savings estimate: none\n/);
+  assert.match(
+    await report({
+      tariff_mode: 'peak_offpeak',
+      price_peak: 0.2,
+      price_offpeak: 0.1,
+      offpeak_hours: '01:30-07:30,12:30-14:30',
+    }),
+    /Savings estimate: peak_offpeak, timezone Europe\/Paris, 2 off-peak range\(s\), resale off\n/,
+  );
+  assert.match(
+    await report({ tariff_mode: 'base' }),
+    /Savings estimate: base, timezone Europe\/Paris, resale off — IGNORED: the base price must be/,
+  );
+});
+
 test('test_local_api reads the report once and lists the properties, masked', async () => {
   await start();
   const outcome = await import('../src/devices/index.js').then((m) =>
@@ -427,4 +451,87 @@ test('the actions run through the SDK: a report in every language, masked by def
   } finally {
     await sdk.disconnect();
   }
+});
+
+test('the fleet report details firmware, Wi-Fi, states and packs, still masked', async () => {
+  setup({
+    reports: {
+      [HTTP_DEVICE.ip]: {
+        ...HTTP_REPORT,
+        properties: {
+          ...HTTP_REPORT.properties,
+          softVersion: 4101,
+          masterSoftVersion: 8197,
+          dspversion: 'V1.2',
+          rssi: -82,
+          wifiState: 1,
+          heatState: 0,
+          lowTemperature: 0,
+          socStatus: 1,
+          socLimit: 2,
+          pass: 3,
+          hemsState: 0,
+          faultLevel: 0,
+          hyperTmp: 3051,
+        },
+        packData: [
+          {
+            sn: 'CO4FHMEFM300123',
+            socLevel: 64,
+            maxTemp: 3011,
+            totalVol: 5210,
+            batcur: 65504,
+            soh: 1000,
+            softVersion: 4103,
+          },
+        ],
+      },
+    },
+  });
+  await start();
+  const snapshot = await describeDiagnostics(gladys, config);
+  const report = buildFleetDiagnostic(snapshot);
+
+  assertMasked(report);
+  assert.match(
+    report,
+    /Pack #1 CO4F…0123: socLevel 64 %, maxTemp 28 °C \(3011\), totalVol 52\.1 V, batcur -3\.2 A, soh 100 %, softVersion v1\.0\.7 \(4103\)/,
+  );
+  assert.match(
+    report,
+    /Firmware: softVersion v1\.0\.5 \(4101\), masterSoftVersion v2\.0\.5 \(8197\), dspversion V1\.2/,
+  );
+  assert.match(report, /Network: rssi -82 dBm \(WEAK signal, below -75 dBm/);
+  assert.match(report, /wifiState 1 \(connected\)/);
+  assert.match(
+    report,
+    /States: heatState 0 \(off\), lowTemperature 0 \(no\), socStatus 1 \(calibrating\), socLimit 2 \(full\), pass 3 \(grid direct supply\), hemsState 0 \(off\), faultLevel 0, hyperTmp 32 °C \(3051\)/,
+  );
+  // The battery on local MQTT reports none of them.
+  assert.match(report, /Firmware: not reported/);
+  // The SolarFlow 800 has no off-grid port: no off-grid counter listed.
+  const shed = report.slice(report.indexOf('--- Shed inverter ---'));
+  assert.match(shed, /Energy counters: .*gridInputEnergy/);
+  assert.doesNotMatch(shed.split('\n---')[0], /offGridEnergy/);
+
+  // A good signal gets no hint; 17 detailed batteries stay within the bound.
+  const [device] = snapshot.devices.filter((d) => d.name === 'Shed inverter');
+  const fleet = { ...snapshot, devices: Array.from({ length: 17 }, () => device) };
+  fleet.devices[0] = { ...device, network: { rssi: -60 } };
+  const big = buildFleetDiagnostic(fleet);
+  assert.match(big, /Network: rssi -60 dBm\n/);
+  assert.ok(big.length <= MAX_REPORT_LENGTH);
+  assertMasked(big);
+});
+
+test('firmware versions and pack currents decode like Zendure-HA', () => {
+  assert.equal(formatFirmwareVersion(4101), 'v1.0.5 (4101)');
+  assert.equal(formatFirmwareVersion('4101'), 'v1.0.5 (4101)');
+  assert.equal(formatFirmwareVersion(0), '0 (not provided)');
+  assert.equal(formatFirmwareVersion(3), '3');
+  assert.equal(formatFirmwareVersion('V2.1.0'), 'V2.1.0');
+  assert.equal(packCurrentAmperes(32), 3.2);
+  assert.equal(packCurrentAmperes(65535), -0.1);
+  assert.equal(packCurrentAmperes(32768), -3276.8);
+  assert.equal(packCurrentAmperes('x'), null);
 });

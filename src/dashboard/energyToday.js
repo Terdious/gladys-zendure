@@ -12,12 +12,19 @@
 // Same selection as the `site` widget (single-phase, or L1/L2/L3). The
 // figures start when the meters saw the batteries: after a first install or
 // a day spent offline, the "Counted since" row tells from when.
+//
+// With an electricity tariff in the configuration and the `show_savings`
+// setting on (the default), the widget adds the savings ESTIMATE (no grid
+// meter, src/dashboard/savings.js): one tile and a few rows.
 // -----------------------------------------------------------------------------
 
 import { WIDGET_COLORS } from '@gladysassistant/integration-sdk';
 
 import { describeBatteries } from '../devices/index.js';
+import { tariffFromConfig, TARIFF_MODES } from '../zendure/savings.js';
+import { savingsComponents } from './savings.js';
 import {
+  MAX_STATUS_ROWS,
   T,
   ASSIGN_PHASES,
   LAYOUTS,
@@ -110,10 +117,11 @@ function pointsOf(slots) {
  * Content of the energy widget.
  * @param {string|object} title heading
  * @param {ReturnType<typeof siteSelection>} selection
- * @param {{ now: number, timeZone: string }} options
+ * @param {{ now: number, timeZone: string, savings?: { tariff: object|null, tariffError: string|null } }} options
+ *   `savings` absent: no savings shown
  * @returns {object} widget content
  */
-export function energyTodayContent(title, selection, { now, timeZone }) {
+export function energyTodayContent(title, selection, { now, timeZone, savings }) {
   const { batteries } = selection;
   const since = startOfLocalDay(now, timeZone);
   const site = energyOf(batteries, since);
@@ -138,6 +146,10 @@ export function energyTodayContent(title, selection, { now, timeZone }) {
     components.push(tile(site.kwh.solar, LABELS.solar, 'sun'));
   }
   components.push(tile(site.kwh.home, LABELS.home, 'home'));
+  const savingsParts = savings
+    ? savingsComponents(selection, { now, ...savings })
+    : { tiles: [], rows: [] };
+  components.push(...savingsParts.tiles);
 
   const rows = [];
   const series = [];
@@ -205,7 +217,7 @@ export function energyTodayContent(title, selection, { now, timeZone }) {
   // meters first saw a battery today (first install, offline morning).
   const startedLate = site.countingSince !== null && site.countingSince > since;
   const from = `${localTime(site.countingSince ?? since, timeZone)} · ${timeZone}`;
-  rows.push({
+  const countedSince = {
     label: T('Counted since', 'Compté depuis', 'Gezählt seit', 'Contado desde'),
     icon: 'clock',
     value:
@@ -213,8 +225,12 @@ export function energyTodayContent(title, selection, { now, timeZone }) {
         ? T('No data today', "Rien aujourd'hui", 'Heute keine Daten', 'Sin datos hoy')
         : from,
     color: startedLate || site.countingSince === null ? WIDGET_COLORS.INFO : WIDGET_COLORS.NEUTRAL,
-  });
-  rows.push(...selectionAlerts(selection));
+  };
+  const alerts = selectionAlerts(selection);
+  // The savings rows take the room the others leave, the least important
+  // (the end of the breakdown) dropped first.
+  const room = Math.max(1, MAX_STATUS_ROWS - rows.length - 1 - alerts.length);
+  rows.push(...savingsParts.rows.slice(0, room), countedSince, ...alerts);
   components.push({ type: 'status', items: fitRows(rows) });
 
   // Energy moves slowly: two minutes.
@@ -233,9 +249,18 @@ export const energyTodayWidget = {
     const title =
       (typeof settings.title === 'string' && settings.title.trim()) ||
       T('Energy today', 'Énergie du jour', 'Energie heute', 'Energía de hoy');
+    // The savings: on unless the instance turns them off, and only with a
+    // tariff in the configuration (none: nothing shown).
+    const showSavings = settings.show_savings !== false && settings.show_savings !== 'false';
+    let savings;
+    if (showSavings && config?.tariff_mode && config.tariff_mode !== TARIFF_MODES.NONE) {
+      const { tariff, error } = tariffFromConfig(config);
+      savings = { tariff, tariffError: error };
+    }
     return energyTodayContent(title, selection, {
       now,
       timeZone: resolveTimezone(settings.timezone),
+      savings,
     });
   },
 };

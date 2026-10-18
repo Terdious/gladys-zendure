@@ -39,9 +39,9 @@ import {
 import {
   getFeaturesForModel,
   extractMetricValue,
-  searchMetricByKeys,
   normalizeMetricValue,
   featureNameFor,
+  featureValueOf,
 } from '../zendure/deviceMapping.js';
 import {
   createEnergyMeters,
@@ -50,6 +50,7 @@ import {
   ENERGY_FLOWS,
   ENERGY_SAVE_INTERVAL_IN_MS,
 } from '../zendure/energy.js';
+import { tariffFromConfig } from '../zendure/savings.js';
 import {
   buildWriteCommand,
   createWriteThrottle,
@@ -178,6 +179,15 @@ function stopEnergySaveTimer() {
     clearInterval(energySaveTimer);
     energySaveTimer = null;
   }
+}
+
+/**
+ * Give the energy meters the tariff of the savings estimate (none, or an
+ * invalid one: no estimate). Called at every push start and config update.
+ * @param {object} config normalized configuration
+ */
+export function applySavingsTariff(config) {
+  getEnergyMeters().setTariff(tariffFromConfig(config).tariff);
 }
 
 /** Write the energy totals to /data now (shutdown, tests). */
@@ -1322,19 +1332,13 @@ function buildStates(gladys, rawCloudDevice, payload) {
     if (featureMapping.computed) {
       continue; // see buildEnergyStates
     }
-    let value = extractMetricValue(payload, featureMapping.metricPaths);
-    if (value === null) {
-      value = searchMetricByKeys(
-        payload,
-        featureMapping.metricPaths.map((path) => path.split('.').pop()),
-      );
-    }
+    const value = featureValueOf(featureMapping, payload, { search: true });
     if (value === null) {
       continue;
     }
     states.push({
       device_feature_external_id: ids.feature(featureMapping.key),
-      state: normalizeMetricValue(featureMapping.key, value),
+      state: value,
     });
   }
 
@@ -1360,6 +1364,14 @@ function buildEnergyStates(gladys, rawCloudDevice, payload, { integrate, at = Da
   const ids = gladys.externalIds(DEVICE_TYPE, deviceKeyOf(rawCloudDevice));
   const features = getFeaturesForModel(modelOf(rawCloudDevice));
   const meters = getEnergyMeters();
+  // Stored energy = state of charge x capacity of the known packs.
+  const capacity = deviceCapacityKwh(payload);
+  const levelMapping = features.find((featureMapping) => featureMapping.key === 'batteryLevel');
+  const level = levelMapping ? extractMetricValue(payload, levelMapping.metricPaths) : null;
+  const storedKwh =
+    capacity !== null && level !== null
+      ? Math.round(normalizeMetricValue('batteryLevel', level) * capacity) / 100
+      : null;
   let totals;
   if (integrate) {
     const powers = {};
@@ -1371,24 +1383,25 @@ function buildEnergyStates(gladys, rawCloudDevice, payload, { integrate, at = Da
         }
       }
     }
-    totals = meters.update(deviceKeyOf(rawCloudDevice), powers, at);
+    totals = meters.update(deviceKeyOf(rawCloudDevice), powers, at, { storedKwh });
   } else {
     totals = meters.totals(deviceKeyOf(rawCloudDevice));
   }
 
-  const states = Object.entries(totals).map(([key, kwh]) => ({
-    device_feature_external_id: ids.feature(key),
-    state: kwh,
-  }));
+  // Only the indexes this model has a feature for (the off-grid and grid
+  // charging ones are per model).
+  const featureKeys = new Set(features.map((featureMapping) => featureMapping.key));
+  const states = Object.entries(totals)
+    .filter(([key]) => featureKeys.has(key))
+    .map(([key, kwh]) => ({
+      device_feature_external_id: ids.feature(key),
+      state: kwh,
+    }));
 
-  // Stored energy = state of charge x capacity of the known packs.
-  const capacity = deviceCapacityKwh(payload);
-  const levelMapping = features.find((featureMapping) => featureMapping.key === 'batteryLevel');
-  const level = levelMapping ? extractMetricValue(payload, levelMapping.metricPaths) : null;
-  if (capacity !== null && level !== null) {
+  if (storedKwh !== null) {
     states.push({
       device_feature_external_id: ids.feature('batteryEnergyRemaining'),
-      state: Math.round(normalizeMetricValue('batteryLevel', level) * capacity) / 100,
+      state: storedKwh,
     });
   }
   return states;
@@ -1440,9 +1453,7 @@ export async function describeBatteries(gladys, config) {
     const values = {};
     for (const featureMapping of getFeaturesForModel(modelOf(rawCloudDevice))) {
       if (!featureMapping.computed) {
-        const value = extractMetricValue(payload, featureMapping.metricPaths);
-        values[featureMapping.key] =
-          value === null ? null : normalizeMetricValue(featureMapping.key, value);
+        values[featureMapping.key] = featureValueOf(featureMapping, payload);
       }
     }
     const capacityKwh = deviceCapacityKwh(payload);
@@ -1493,11 +1504,26 @@ export async function describeBatteries(gladys, config) {
       energyReady: energyLoaded,
       energySince: (since) =>
         energyLoaded ? getEnergyMeters().energySince(deviceKey, since) : null,
+      // Savings estimate (src/zendure/savings.js): null without a tariff.
+      savingsAt: (now) => (energyLoaded ? getEnergyMeters().savingsOf(deviceKey, now) : null),
     };
   });
 }
 
 // --- Diagnostic (manifest actions fleet_diagnostic / test_local_api) ---------
+
+/** The tariff of the savings estimate as the diagnostic reports it. */
+function savingsDiagnosticOf(config) {
+  const { tariff, error, warning } = tariffFromConfig(config);
+  return {
+    mode: config.tariff_mode,
+    timeZone: tariff?.timeZone ?? config.tariff_timezone,
+    offpeakRanges: tariff?.offpeakRanges?.length ?? 0,
+    resaleEnabled: config.resale_enabled === true,
+    error,
+    warning,
+  };
+}
 // Read-only snapshots of the runtimes for src/diagnostic.js, which formats and
 // redacts them. Nothing here opens a broker connection or changes a source:
 // a diagnostic must observe the installation, not disturb it.
@@ -1625,10 +1651,54 @@ function localHttpDiagnosticOf(config, rawCloudDevice, now) {
   };
 }
 
+/**
+ * One reported property as is (number, string or boolean), from a flat local
+ * payload or the cloud `properties`; null when absent or not a scalar.
+ * @param {object} payload merged telemetry payload
+ * @param {string} key property name
+ * @returns {number|string|boolean|null}
+ */
+function rawPropertyOf(payload, key) {
+  for (const value of [payload?.[key], payload?.properties?.[key]]) {
+    if (['number', 'string', 'boolean'].includes(typeof value)) {
+      return value;
+    }
+  }
+  return null;
+}
+
+// Device properties shown raw in the diagnostic (firmware, network, states).
+const DIAGNOSTIC_FIRMWARE_KEYS = ['softVersion', 'masterSoftVersion', 'dspversion'];
+const DIAGNOSTIC_NETWORK_KEYS = ['rssi', 'wifiState', 'localState'];
+const DIAGNOSTIC_STATE_KEYS = [
+  'heatState',
+  'lowTemperature',
+  'socStatus',
+  'socLimit',
+  'pass',
+  'hemsState',
+  'faultLevel',
+  'hyperTmp',
+];
+const DIAGNOSTIC_PACK_KEYS = ['socLevel', 'maxTemp', 'totalVol', 'batcur', 'soh', 'softVersion'];
+
+/** Raw values of some properties, absent ones left out. */
+function rawPropertiesOf(source, keys) {
+  return Object.fromEntries(
+    keys.map((key) => [key, rawPropertyOf(source, key)]).filter(([, value]) => value !== null),
+  );
+}
+
 /** Pack list of a payload (flat local MQTT or `properties` + `packData`). */
 function packsOf(payload) {
   const packs = payload?.packData ?? payload?.properties?.packData;
   return Array.isArray(packs) ? packs : null;
+}
+
+/** The energy totals a model has a feature for. */
+function energyTotalsOf(model, totals) {
+  const keys = new Set(getFeaturesForModel(model).map((featureMapping) => featureMapping.key));
+  return Object.fromEntries(Object.entries(totals).filter(([key]) => keys.has(key)));
 }
 
 /**
@@ -1682,9 +1752,7 @@ export async function describeDiagnostics(gladys, config, { filter = '', now = D
     const values = {};
     for (const featureMapping of getFeaturesForModel(model)) {
       if (!featureMapping.computed) {
-        const value = extractMetricValue(payload, featureMapping.metricPaths);
-        values[featureMapping.key] =
-          value === null ? null : normalizeMetricValue(featureMapping.key, value);
+        values[featureMapping.key] = featureValueOf(featureMapping, payload);
       }
     }
     const scale = socScaleOf(payload);
@@ -1739,6 +1807,9 @@ export async function describeDiagnostics(gladys, config, { filter = '', now = D
               sn: typeof pack?.sn === 'string' ? pack.sn : null,
               capacityKwh: packCapacityKwh(pack),
               socLevel: typeof pack?.socLevel === 'number' ? pack.socLevel : null,
+              // Raw (maxTemp decikelvin, totalVol cV, batcur int16 dA, soh
+              // per mille): src/diagnostic.js converts them.
+              details: rawPropertiesOf(pack, DIAGNOSTIC_PACK_KEYS),
             }))
           : null,
         capacityKwh,
@@ -1765,7 +1836,11 @@ export async function describeDiagnostics(gladys, config, { filter = '', now = D
                 minSoc: scaled(settings.minSoc),
               }),
       },
-      energy: energyLoaded ? getEnergyMeters().totals(deviceKey) : null,
+      // Raw, formatted by src/diagnostic.js.
+      firmware: rawPropertiesOf(payload, DIAGNOSTIC_FIRMWARE_KEYS),
+      network: rawPropertiesOf(payload, DIAGNOSTIC_NETWORK_KEYS),
+      states: rawPropertiesOf(payload, DIAGNOSTIC_STATE_KEYS),
+      energy: energyLoaded ? energyTotalsOf(model, getEnergyMeters().totals(deviceKey)) : null,
     };
   });
 
@@ -1786,6 +1861,7 @@ export async function describeDiagnostics(gladys, config, { filter = '', now = D
       enableLocalHttp: config.enable_local_http === true,
       enableLocalMqtt: config.enable_local_mqtt === true,
       featureNames: config.feature_names,
+      savings: savingsDiagnosticOf(config),
       addressOverrides: {
         count: overrides.size,
         invalid: invalid.length,
@@ -2238,6 +2314,7 @@ export const solarflow = {
       try {
         const data = await ensureCloudData(config);
         const devices = supportedDevices(data);
+        applySavingsTariff(config);
         await ensureEnergyLoaded();
         stopEnergySaveTimer();
         energySaveTimer = setInterval(() => {

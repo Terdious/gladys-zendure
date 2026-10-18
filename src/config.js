@@ -26,7 +26,23 @@ export const DEFAULT_CONFIG = {
   local_http_addresses: '',
   enable_local_mqtt: false, // opt-in to the per-device local MQTT broker (zenSDK)
   feature_names: 'en', // language of the feature names of newly discovered devices
+  // Savings estimate without a grid meter (src/zendure/savings.js). Prices
+  // per kWh in the user's currency; no manifest default (null here): an empty
+  // field shows its placeholder, and a missing price disables the estimate.
+  tariff_mode: 'none', // none | base | peak_offpeak
+  price_base: null,
+  price_peak: null,
+  price_offpeak: null,
+  offpeak_hours: '', // e.g. "22:00-06:00" or "01:30-07:30,12:30-14:30"
+  resale_enabled: false,
+  resale_price: null,
+  // The off-peak hours and the calendar days of the savings are in this
+  // timezone (Gladys gives an integration no instance timezone).
+  tariff_timezone: 'Europe/Paris',
 };
+
+// Values the `tariff_mode` option accepts; anything else is `none`.
+export const TARIFF_MODE_VALUES = ['none', 'base', 'peak_offpeak'];
 
 // Languages the `feature_names` option accepts (the Gladys interface ones);
 // anything else falls back to English.
@@ -67,6 +83,20 @@ function toPositiveNumber(value, fallback) {
 }
 
 /**
+ * Coerce a form value into a finite number >= 0 (a decimal comma accepted),
+ * or null when empty or invalid: a price is never guessed.
+ * @param {unknown} value raw value
+ * @returns {number|null}
+ */
+function toPriceOrNull(value) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return null;
+  }
+  const numericValue = typeof value === 'number' ? value : Number(String(value).replace(',', '.'));
+  return Number.isFinite(numericValue) && numericValue >= 0 ? numericValue : null;
+}
+
+/**
  * Merge the user config with the defaults.
  * @param {Record<string, unknown>} raw config returned by the SDK
  */
@@ -85,6 +115,16 @@ export function normalizeConfig(raw = {}) {
     feature_names: FEATURE_NAME_LANGUAGES.includes(raw.feature_names)
       ? raw.feature_names
       : DEFAULT_CONFIG.feature_names,
+    tariff_mode: TARIFF_MODE_VALUES.includes(raw.tariff_mode)
+      ? raw.tariff_mode
+      : DEFAULT_CONFIG.tariff_mode,
+    price_base: toPriceOrNull(raw.price_base),
+    price_peak: toPriceOrNull(raw.price_peak),
+    price_offpeak: toPriceOrNull(raw.price_offpeak),
+    offpeak_hours: String(raw.offpeak_hours ?? DEFAULT_CONFIG.offpeak_hours).trim(),
+    resale_enabled: toBoolean(raw.resale_enabled, DEFAULT_CONFIG.resale_enabled),
+    resale_price: toPriceOrNull(raw.resale_price),
+    tariff_timezone: String(raw.tariff_timezone ?? '').trim() || DEFAULT_CONFIG.tariff_timezone,
   };
 }
 

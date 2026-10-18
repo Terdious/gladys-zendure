@@ -336,6 +336,272 @@
           }
         }
       ]
+    },
+    {
+      "key": "savings_intro",
+      "type": "section",
+      "label": {
+        "en": "Savings (estimate, no grid meter)",
+        "fr": "Économies (estimation, sans compteur)",
+        "de": "Ersparnis (Schätzung, ohne Zähler)",
+        "es": "Ahorro (estimación, sin contador)"
+      },
+      "description": {
+        "en": "Optional. With your electricity tariff, the integration estimates every 30 minutes what your batteries save: the energy sent to the home is assumed consumed by the house (without a grid meter nothing tells what is exported), valued at the price of the moment, minus the cost of the stored energy (grid charging at its price, solar charging at the resale price or free). The \"Energy today\" widget shows it for today, this month and this year. Details and limits in the Documentation link above.",
+        "fr": "Facultatif. Avec votre tarif d'électricité, l'intégration estime toutes les 30 minutes ce que vos batteries font économiser : l'énergie envoyée vers la maison est supposée consommée par le logement (sans compteur réseau, rien n'indique ce qui est injecté), valorisée au prix du moment, moins le coût de l'énergie stockée (recharge réseau à son prix, recharge solaire au prix de revente ou gratuite). Le widget « Énergie du jour » l'affiche pour aujourd'hui, ce mois et cette année. Détails et limites dans le lien Documentation ci-dessus.",
+        "de": "Optional. Mit deinem Stromtarif schätzt die Integration alle 30 Minuten, was deine Batterien einsparen: Die ans Haus gelieferte Energie gilt als im Haus verbraucht (ohne Netzzähler ist nicht bekannt, was eingespeist wird), bewertet zum aktuellen Preis, abzüglich der Kosten der gespeicherten Energie (Netzladung zu ihrem Preis, Solarladung zum Einspeisepreis oder kostenlos). Das Widget „Energie heute“ zeigt sie für heute, diesen Monat und dieses Jahr. Details und Grenzen über den Link Dokumentation oben.",
+        "es": "Opcional. Con su tarifa eléctrica, la integración estima cada 30 minutos lo que ahorran sus baterías: la energía enviada al hogar se supone consumida por la vivienda (sin contador de red nada indica lo que se inyecta), valorada al precio del momento, menos el coste de la energía almacenada (carga desde la red a su precio, carga solar al precio de reventa o gratuita). El widget «Energía de hoy» la muestra para hoy, este mes y este año. Detalles y límites en el enlace Documentación de arriba."
+      }
+    },
+    {
+      "key": "tariff_mode",
+      "type": "select",
+      "display": "radio",
+      "label": {
+        "en": "Electricity tariff",
+        "fr": "Tarif d'électricité",
+        "de": "Stromtarif",
+        "es": "Tarifa eléctrica"
+      },
+      "description": {
+        "en": "None: no savings estimate. Base: one price. Peak / off-peak: two prices and the off-peak hours.",
+        "fr": "Aucun : pas d'estimation des économies. Base : un seul prix. Heures pleines / creuses : deux prix et les heures creuses.",
+        "de": "Keiner: keine Schätzung der Ersparnis. Grundtarif: ein Preis. Hoch- / Niedertarif: zwei Preise und die Niedertarifzeiten.",
+        "es": "Ninguna: sin estimación del ahorro. Base: un solo precio. Punta / valle: dos precios y las horas valle."
+      },
+      "required": false,
+      "default": "none",
+      "options": [
+        {
+          "value": "none",
+          "label": {
+            "en": "None",
+            "fr": "Aucun",
+            "de": "Keiner",
+            "es": "Ninguna"
+          }
+        },
+        {
+          "value": "base",
+          "label": {
+            "en": "Base (one price)",
+            "fr": "Base (un seul prix)",
+            "de": "Grundtarif (ein Preis)",
+            "es": "Base (un solo precio)"
+          }
+        },
+        {
+          "value": "peak_offpeak",
+          "label": {
+            "en": "Peak / off-peak",
+            "fr": "Heures pleines / creuses",
+            "de": "Hoch- / Niedertarif",
+            "es": "Punta / valle"
+          }
+        }
+      ]
+    },
+    {
+      "key": "price_base",
+      "type": "number",
+      "label": {
+        "en": "Base price (per kWh)",
+        "fr": "Prix base (par kWh)",
+        "de": "Grundpreis (pro kWh)",
+        "es": "Precio base (por kWh)"
+      },
+      "description": {
+        "en": "Base tariff: the price of one kWh bought from the grid, taxes included (€/kWh).",
+        "fr": "Tarif base : le prix d'un kWh acheté au réseau, toutes taxes comprises (€/kWh).",
+        "de": "Grundtarif: der Preis einer aus dem Netz bezogenen kWh, inklusive Steuern (€/kWh).",
+        "es": "Tarifa base: el precio de un kWh comprado a la red, impuestos incluidos (€/kWh)."
+      },
+      "placeholder": {
+        "en": "0.1952",
+        "fr": "0,1952",
+        "de": "0,1952",
+        "es": "0,1952"
+      },
+      "required": false,
+      "min": 0,
+      "max": 10
+    },
+    {
+      "key": "price_peak",
+      "type": "number",
+      "label": {
+        "en": "Peak price (per kWh)",
+        "fr": "Prix heures pleines (par kWh)",
+        "de": "Hochtarif-Preis (pro kWh)",
+        "es": "Precio punta (por kWh)"
+      },
+      "description": {
+        "en": "Peak / off-peak tariff: the price of one kWh outside the off-peak hours, taxes included (€/kWh).",
+        "fr": "Tarif heures pleines / creuses : le prix d'un kWh hors heures creuses, toutes taxes comprises (€/kWh).",
+        "de": "Hoch- / Niedertarif: der Preis einer kWh außerhalb der Niedertarifzeiten, inklusive Steuern (€/kWh).",
+        "es": "Tarifa punta / valle: el precio de un kWh fuera de las horas valle, impuestos incluidos (€/kWh)."
+      },
+      "placeholder": {
+        "en": "0.2081",
+        "fr": "0,2081",
+        "de": "0,2081",
+        "es": "0,2081"
+      },
+      "required": false,
+      "min": 0,
+      "max": 10
+    },
+    {
+      "key": "price_offpeak",
+      "type": "number",
+      "label": {
+        "en": "Off-peak price (per kWh)",
+        "fr": "Prix heures creuses (par kWh)",
+        "de": "Niedertarif-Preis (pro kWh)",
+        "es": "Precio valle (por kWh)"
+      },
+      "description": {
+        "en": "Peak / off-peak tariff: the price of one kWh during the off-peak hours, taxes included (€/kWh).",
+        "fr": "Tarif heures pleines / creuses : le prix d'un kWh pendant les heures creuses, toutes taxes comprises (€/kWh).",
+        "de": "Hoch- / Niedertarif: der Preis einer kWh während der Niedertarifzeiten, inklusive Steuern (€/kWh).",
+        "es": "Tarifa punta / valle: el precio de un kWh durante las horas valle, impuestos incluidos (€/kWh)."
+      },
+      "placeholder": {
+        "en": "0.1635",
+        "fr": "0,1635",
+        "de": "0,1635",
+        "es": "0,1635"
+      },
+      "required": false,
+      "min": 0,
+      "max": 10
+    },
+    {
+      "key": "offpeak_hours",
+      "type": "string",
+      "label": {
+        "en": "Off-peak hours",
+        "fr": "Heures creuses",
+        "de": "Niedertarifzeiten",
+        "es": "Horas valle"
+      },
+      "description": {
+        "en": "HH:MM-HH:MM ranges separated by commas, in the tariff timezone; a range may cross midnight. Invalid hours: the estimate is off (see the logs).",
+        "fr": "Plages HH:MM-HH:MM séparées par des virgules, dans le fuseau du tarif ; une plage peut passer minuit. Heures invalides : pas d'estimation (voir les journaux).",
+        "de": "Bereiche HH:MM-HH:MM, durch Kommas getrennt, in der Zeitzone des Tarifs; ein Bereich darf über Mitternacht gehen. Ungültige Zeiten: keine Schätzung (siehe Protokoll).",
+        "es": "Franjas HH:MM-HH:MM separadas por comas, en la zona horaria de la tarifa; una franja puede pasar la medianoche. Horas no válidas: sin estimación (ver los registros)."
+      },
+      "placeholder": {
+        "en": "22:00-06:00",
+        "fr": "22:00-06:00",
+        "de": "22:00-06:00",
+        "es": "22:00-06:00"
+      },
+      "required": false,
+      "default": ""
+    },
+    {
+      "key": "resale_enabled",
+      "type": "boolean",
+      "label": {
+        "en": "I sell my solar surplus",
+        "fr": "Je revends mon surplus solaire",
+        "de": "Ich verkaufe meinen Solarüberschuss",
+        "es": "Vendo mi excedente solar"
+      },
+      "description": {
+        "en": "On: the solar energy stored in the batteries is valued at the resale price (what it would have earned), and exported energy counts as revenue once a grid meter can be read. Off: stored solar energy is free.",
+        "fr": "Activé : l'énergie solaire stockée dans les batteries est valorisée au prix de revente (ce qu'elle aurait rapporté), et l'énergie injectée comptera comme revenu dès qu'un compteur réseau pourra être lu. Désactivé : l'énergie solaire stockée est gratuite.",
+        "de": "An: Die in den Batterien gespeicherte Solarenergie wird zum Einspeisepreis bewertet (was sie eingebracht hätte), und eingespeiste Energie zählt als Erlös, sobald ein Netzzähler gelesen werden kann. Aus: gespeicherte Solarenergie ist kostenlos.",
+        "es": "Activado: la energía solar almacenada en las baterías se valora al precio de reventa (lo que habría aportado), y la energía inyectada contará como ingreso en cuanto se pueda leer un contador de red. Desactivado: la energía solar almacenada es gratuita."
+      },
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "resale_price",
+      "type": "number",
+      "label": {
+        "en": "Resale price (per kWh)",
+        "fr": "Prix de revente (par kWh)",
+        "de": "Einspeisepreis (pro kWh)",
+        "es": "Precio de reventa (por kWh)"
+      },
+      "description": {
+        "en": "The price paid for one kWh of solar surplus sent to the grid (€/kWh). Used only when the option above is on.",
+        "fr": "Le prix payé pour un kWh de surplus solaire injecté sur le réseau (€/kWh). Utilisé seulement si l'option ci-dessus est activée.",
+        "de": "Der Preis für eine ins Netz eingespeiste kWh Solarüberschuss (€/kWh). Nur verwendet, wenn die Option oben aktiv ist.",
+        "es": "El precio pagado por un kWh de excedente solar inyectado a la red (€/kWh). Solo se usa si la opción de arriba está activada."
+      },
+      "placeholder": {
+        "en": "0.04",
+        "fr": "0,04",
+        "de": "0,04",
+        "es": "0,04"
+      },
+      "required": false,
+      "min": 0,
+      "max": 10
+    },
+    {
+      "key": "tariff_timezone",
+      "type": "string",
+      "label": {
+        "en": "Tariff timezone",
+        "fr": "Fuseau horaire du tarif",
+        "de": "Zeitzone des Tarifs",
+        "es": "Zona horaria de la tarifa"
+      },
+      "description": {
+        "en": "IANA name, e.g. Europe/Paris (the default): the off-peak hours and the days, months and years of the savings follow it, clock changes included.",
+        "fr": "Nom IANA, par ex. Europe/Paris (par défaut) : les heures creuses et les jours, mois et années des économies le suivent, changements d'heure compris.",
+        "de": "IANA-Name, z. B. Europe/Paris (Standard): Niedertarifzeiten sowie Tage, Monate und Jahre der Ersparnis folgen ihr, Zeitumstellungen inklusive.",
+        "es": "Nombre IANA, p. ej. Europe/Paris (por defecto): las horas valle y los días, meses y años del ahorro la siguen, cambios de hora incluidos."
+      },
+      "placeholder": {
+        "en": "Europe/Paris",
+        "fr": "Europe/Paris",
+        "de": "Europe/Paris",
+        "es": "Europe/Paris"
+      },
+      "required": false,
+      "default": "Europe/Paris"
+    },
+    {
+      "key": "savings_upcoming",
+      "type": "section",
+      "label": {
+        "en": "Coming soon",
+        "fr": "Bientôt disponible",
+        "de": "Demnächst",
+        "es": "Próximamente"
+      },
+      "description": {
+        "en": "Two options will appear here once Gladys offers them to integrations (pending Gladys changes, linked below): \"Use the prices of Gladys energy monitoring\", instead of the prices above; and \"Grid meter (single-phase, or three-phase L1 / L2 / L3)\", to know what is really consumed or exported, value the resale and the losses, and tell PV surplus from grid charging on AC batteries. Until then the savings are an estimate.",
+        "fr": "Deux options apparaîtront ici dès que Gladys les proposera aux intégrations (évolutions de Gladys en cours, liées ci-dessous) : « Utiliser les prix du suivi d'énergie de Gladys », à la place des prix ci-dessus ; et « Compteur réseau (monophasé, ou triphasé L1 / L2 / L3) », pour savoir ce qui est vraiment consommé ou injecté, valoriser la revente et les pertes, et distinguer surplus solaire et recharge réseau sur les batteries AC. D'ici là, les économies sont une estimation.",
+        "de": "Zwei Optionen erscheinen hier, sobald Gladys sie Integrationen anbietet (laufende Gladys-Änderungen, unten verlinkt): „Preise der Gladys-Energieüberwachung verwenden“ statt der Preise oben; und „Netzzähler (einphasig oder dreiphasig L1 / L2 / L3)“, um zu wissen, was wirklich verbraucht oder eingespeist wird, Einspeisung und Verluste zu bewerten und bei AC-Batterien Solarüberschuss von Netzladung zu unterscheiden. Bis dahin ist die Ersparnis eine Schätzung.",
+        "es": "Dos opciones aparecerán aquí en cuanto Gladys las ofrezca a las integraciones (cambios de Gladys en curso, enlazados abajo): «Usar los precios del seguimiento de energía de Gladys», en lugar de los precios de arriba; y «Contador de red (monofásico, o trifásico L1 / L2 / L3)», para saber lo que realmente se consume o inyecta, valorar la reventa y las pérdidas, y distinguir excedente solar y carga desde la red en las baterías AC. Hasta entonces, el ahorro es una estimación."
+      },
+      "links": [
+        {
+          "url": "https://github.com/GladysAssistant/Gladys/pull/3229",
+          "label": {
+            "en": "Gladys energy prices (#3229)",
+            "fr": "Prix d'énergie Gladys (#3229)",
+            "de": "Gladys-Energiepreise (#3229)",
+            "es": "Precios de energía Gladys (#3229)"
+          }
+        },
+        {
+          "url": "https://github.com/GladysAssistant/Gladys/pull/3230",
+          "label": {
+            "en": "Grid meter (#3230)",
+            "fr": "Compteur réseau (#3230)",
+            "de": "Netzzähler (#3230)",
+            "es": "Contador de red (#3230)"
+          }
+        }
+      ]
     }
   ],
   "scene_triggers": [
@@ -990,10 +1256,10 @@
         "es": "Energía de hoy"
       },
       "description": {
-        "en": "Energy of the day since local midnight: charged, discharged, solar, home, per phase.",
-        "fr": "Énergie du jour depuis minuit : chargée, déchargée, solaire, maison, par phase.",
-        "de": "Energie seit lokaler Mitternacht: geladen, entladen, Solar, Haus, je Phase.",
-        "es": "Energía del día desde medianoche: cargada, descargada, solar, hogar, por fase."
+        "en": "Energy of the day since local midnight: charged, discharged, solar, home, savings.",
+        "fr": "Énergie du jour depuis minuit : chargée, déchargée, solaire, maison, économies.",
+        "de": "Energie seit Mitternacht: geladen, entladen, Solar, Haus, Ersparnis.",
+        "es": "Energía del día desde medianoche: cargada, descargada, solar, hogar, ahorro."
       },
       "icon": "activity",
       "settings": [
@@ -1124,6 +1390,23 @@
             "es": "Europe/Paris"
           },
           "default": "Europe/Paris"
+        },
+        {
+          "key": "show_savings",
+          "type": "boolean",
+          "label": {
+            "en": "Show the savings (estimate)",
+            "fr": "Afficher les économies (estimation)",
+            "de": "Ersparnis anzeigen (Schätzung)",
+            "es": "Mostrar el ahorro (estimación)"
+          },
+          "description": {
+            "en": "Needs an electricity tariff in the integration configuration. The days follow the tariff timezone.",
+            "fr": "Nécessite un tarif d'électricité dans la configuration de l'intégration. Les jours suivent le fuseau du tarif.",
+            "de": "Benötigt einen Stromtarif in der Konfiguration der Integration. Die Tage folgen der Zeitzone des Tarifs.",
+            "es": "Requiere una tarifa eléctrica en la configuración de la integración. Los días siguen la zona horaria de la tarifa."
+          },
+          "default": true
         }
       ]
     }

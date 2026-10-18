@@ -16,10 +16,12 @@ built with the official JavaScript SDK
 
 - Discovers your Zendure devices through the Zendure cloud API, using the
   authorization key generated from the Zendure mobile app.
-- Publishes telemetry for 7 SolarFlow / Hyper models, in the Gladys
-  energy categories: battery level, charge and discharge power
-  (`battery-storage`), home output power (`home-output-sensor`), solar input
-  power (`energy-production-sensor`).
+- Publishes telemetry for 10 SolarFlow / Hyper models (3 of them untested
+  hardware), in the Gladys energy categories: battery level, charge and
+  discharge power (`battery-storage`), home output and off-grid output power
+  (`home-output-sensor`), solar input power (`energy-production-sensor`), grid
+  charging power (`grid-sensor`), device and pack temperatures
+  (`device-temperature-sensor`).
 - **Local HTTP API (zenSDK)**, on by default: every SolarFlow is polled on
   `GET http://{ip}/properties/report` (every 5 s, 2 s timeout, staggered, at
   most 4 requests in flight, backoff on a silent device) and driven with

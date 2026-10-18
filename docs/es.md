@@ -24,9 +24,20 @@ SolarFlow 2400 AC, SolarFlow 2400 Pro y Hyper 2000 (experimental — la
 correspondencia de la telemetría está pendiente de confirmación por un probador
 de la comunidad).
 
+**Hardware no probado**: los SolarFlow 800 Plus, SolarFlow 800 Pro 2 y
+SolarFlow 4000 AC+ se admiten a partir de las características de la
+integración oficial de Home Assistant (Zendure-HA), sin haber visto aún un
+aparato real. Si tiene uno, indique cómo se comporta (un informe
+**Diagnóstico de las baterías** es ideal) en las
+[issues](https://github.com/Terdious/gladys-zendure/issues).
+
+El nombre de modelo que informa la nube de Zendure se reconoce sin tener en
+cuenta mayúsculas ni espacios (`SolarFlow 800 Pro`, `SolarFlow800Pro`), como
+hace Zendure-HA.
+
 ## Funcionalidades
 
-Cada batería se crea con diez funcionalidades de solo lectura, en las
+Cada batería se crea con diez funcionalidades de solo lectura (más las que dependen del modelo, más abajo), en las
 categorías de energía de Gladys (gráficos de energía, historial, paneles):
 
 | Funcionalidad                  | Categoría de Gladys             | Unidad |
@@ -62,6 +73,45 @@ en el mismo lugar, por lo que se conservan su historial, las escenas y los
 paneles. Ese mismo **Actualizar** añade las funcionalidades de energía a una
 batería creada antes de la versión 1.5.0.
 
+### Salida fuera de red, carga desde la red y temperaturas
+
+Según el modelo, una batería recibe también estas funcionalidades:
+
+| Funcionalidad                      | Categoría de Gladys               | Unidad | Modelos                                                             |
+| ---------------------------------- | --------------------------------- | ------ | ------------------------------------------------------------------- |
+| Potencia de la salida fuera de red | Sensor de salida del hogar        | W      | 800 Pro, 800 Pro 2, 1600 AC+, 2400 AC, 2400 AC+, 2400 Pro, 4000 AC+ |
+| Energía de la salida fuera de red  | Sensor de salida del hogar        | kWh    | los mismos                                                          |
+| Potencia de carga desde la red     | Sensor de red                     | W      | todos los modelos (carga AC)                                        |
+| Energía cargada desde la red       | Sensor de red                     | kWh    | todos los modelos                                                   |
+| Temperatura del dispositivo        | Sensor de temperatura del aparato | °C     | todos los modelos, si se informa                                    |
+| Temperatura del pack más caliente  | Sensor de temperatura del aparato | °C     | todos los modelos, si se informa                                    |
+
+- **Salida fuera de red**: la potencia del enchufe fuera de red (de respaldo)
+  de la batería (`gridOffPower`). Un valor negativo significa que el enchufe
+  aporta potencia (un panel solar conectado ahí, como señala Zendure-HA):
+  se muestra 0 y no se cuenta.
+- **Carga desde la red**: la potencia que la batería toma de la red para
+  cargarse (`gridInputPower`), en todos los modelos capaces de cargar en AC.
+- Las dos funcionalidades de **energía** se calculan como las demás (potencia
+  acumulada en el tiempo, guardada en el volumen de datos de la integración,
+  silencios de más de 5 minutos descartados).
+- **Temperaturas**: la temperatura del dispositivo (`hyperTmp`) y la
+  temperatura más alta de los packs (`maxTemp`), que Zendure informa en
+  décimas de kelvin y que se convierten a °C. Una batería que no las informa
+  las deja vacías; un valor imposible (por debajo de −40 °C o por encima de
+  120 °C) se ignora.
+
+**Jerarquía de energía — evitar el doble conteo.** La potencia de carga desde
+la red es un **sensor de red**: si su vivienda ya tiene un contador principal
+(contador P1, Shelly EM...) en Gladys, la carga de la batería desde la red ya
+está incluida en lo que mide. En los ajustes de energía de Gladys, coloque la
+batería **bajo el contador principal** (como hija), no a su lado, o la energía
+que toma se contaría dos veces.
+
+Una batería creada con una versión anterior recibe estas funcionalidades con el
+mismo **Actualizar** de la pestaña **Descubrir**: se conservan las
+funcionalidades existentes, su historial, las escenas y los paneles.
+
 ## Obtener su clave de la nube de Zendure
 
 La integración se autentica ante la nube de Zendure con una **clave de
@@ -92,7 +142,8 @@ aplicación móvil Zendure:
 
 ### API local (zenSDK, activada por defecto)
 
-Las baterías SolarFlow (800, 800 Pro, 1600 AC+, 2400 AC, 2400 AC+, 2400 Pro
+Las baterías SolarFlow (800, 800 Plus, 800 Pro, 800 Pro 2, 1600 AC+, 2400 AC,
+2400 AC+, 2400 Pro, 4000 AC+
 — todos los modelos compatibles salvo el Hyper 2000) ofrecen una pequeña **API HTTP en su red
 doméstica**, llamada zenSDK. Es lo que usa la integración oficial de Home
 Assistant para estos modelos: ni MQTT ni la nube. Con **Usar la API local de
@@ -239,6 +290,8 @@ posterior):
   30 minutos, conservada 26 horas): cuentan desde el primer informe del día,
   que indica la línea **Contado desde** (por ejemplo tras una primera
   instalación por la mañana).
+  Con una tarifa eléctrica en la configuración, también muestra la
+  estimación del ahorro (vea **Ahorro (estimación)** más abajo).
 
 **Ejemplo trifásico:** 17 baterías en L1, L2 y L3. Añada un widget
 **Instalación Zendure**, ponga la **Instalación eléctrica** en _Trifásica_ y
@@ -262,6 +315,105 @@ objetivo de carga o su mínimo de descarga, tal como lo informa la batería (o
 calculado a partir de su capacidad cuando no lo da). Un grupo deja fuera las
 baterías sin pack de su nivel medio y de su energía almacenada, y un grupo de
 tales dispositivos solo muestra sus potencias.
+
+## Ahorro (estimación)
+
+Con su tarifa eléctrica, la integración **estima** lo que ahorran sus
+baterías, cada 30 minutos, por batería, y el widget **Energía de hoy** lo
+suma para sus baterías (la instalación, o cada fase). Es una **estimación
+sin contador de red**, marcada como tal en el widget: lea los límites más
+abajo.
+
+### Configurar la tarifa
+
+En la pestaña **Configuración**, sección **Ahorro (estimación, sin
+contador)**:
+
+- **Tarifa eléctrica**: _Ninguna_ (por defecto: sin estimación), _Base_ (un
+  solo precio) o _Punta / valle_.
+- **Precio base**, o **Precio punta** y **Precio valle**: el precio de un kWh
+  comprado a la red, impuestos incluidos (por ejemplo `0,15`). Un precio que
+  falta desactiva la estimación.
+- **Horas valle**: franjas `HH:MM-HH:MM` separadas por comas, por ejemplo
+  `22:00-06:00` o `01:30-07:30,12:30-14:30`. Una franja puede pasar la
+  medianoche; `24:00` se acepta como fin. Unas horas no válidas desactivan la
+  estimación: los registros y el diagnóstico dicen por qué (una vez), y el
+  widget muestra _Tarifa no válida_.
+- **Vendo mi excedente solar** y **Precio de reventa**: activado, la energía
+  solar almacenada en las baterías se valora al precio de reventa (lo que
+  habría aportado en la red); desactivado, la energía solar almacenada es
+  gratuita.
+- **Zona horaria de la tarifa** (nombre IANA, `Europe/Paris` por defecto):
+  las horas valle, y los días, meses y años del ahorro, la siguen, cambios de
+  hora incluidos. Es un ajuste de la integración y no del widget porque las
+  franjas se valoran en segundo plano, al cerrarse, aunque no haya ningún
+  widget abierto; la **Zona horaria** del widget sigue fijando la medianoche
+  de sus cifras de energía.
+
+En el widget **Energía de hoy**, **Mostrar el ahorro (estimación)** está
+activado por defecto: solo muestra algo cuando hay una tarifa configurada.
+
+### Cómo se calcula
+
+Para cada batería y cada franja de 30 minutos, a partir de sus contadores de
+energía:
+
+- **Precio de la franja**: el precio base, o el precio punta / valle a la
+  hora local de la franja (una franja a caballo sobre el borde de un rango se
+  calcula a prorrata).
+- **Coste de la energía almacenada**: una media ponderada por batería. La
+  energía cargada desde la red (el contador **Energía cargada desde la red**)
+  cuesta el precio de la franja; el resto de la carga, de los paneles
+  solares, cuesta el precio de reventa si vende su excedente, 0 si no. La
+  energía almacenada se vuelve a leer del nivel de carga cuando se conocen
+  los packs.
+- **Salida al hogar**: sin contador de red, la integración no puede saber lo
+  que se inyectó, así que la energía enviada al hogar se **supone consumida**
+  por la vivienda. Su parte procedente de la batería ahorra _precio de la
+  franja − coste de la energía almacenada_ (una batería cargada en punta y
+  descargada en valle ahorra menos que nada); su parte procedente
+  directamente de los paneles ahorra el precio de la franja; el resto (la red
+  que atraviesa una batería AC) no ahorra nada.
+- **Ahorro** = desplazamiento batería + solar directo (+ ingreso por
+  reventa, con el contador de red). La línea **Carga de red (pagada)** es
+  informativa: ese coste ya está en el coste de la energía almacenada.
+
+El widget muestra **Ahorro hoy (estimación)**, el mes y el año, el día por
+fase en trifásica, y el detalle del día (desplazamiento batería, solar
+directo, carga de red pagada, inyección). Los totales del día, mes y año en
+curso y anteriores se guardan en `/data/energy.json` con los contadores de
+energía (un archivo de una versión anterior se carga tal cual; el ahorro
+empieza en el primer límite de 30 minutos tras la actualización).
+
+### Límites
+
+- **Sin conocimiento de la inyección**: la salida al hogar devuelta a la red
+  (consumo de la vivienda inferior a la salida de la batería) se cuenta como
+  ahorrada al precio de la franja. La línea **Inyectado, sin valorar** (o
+  **Reventa** si vende) se queda en 0 hasta que se pueda leer el contador de
+  red.
+- **Baterías AC** (1600 AC+, 2400 AC, 2400 AC+, 4000 AC+): su carga AC se
+  cuenta como **carga de red** al precio de la franja, incluso cuando en
+  realidad viene del excedente solar de otro inversor: solo el balance de la
+  instalación (el contador de red) podría saberlo.
+- Las pérdidas de los packs, las pérdidas de conversión y los informes
+  perdidos hacen que las cifras sean aproximadas; el ahorro empieza cuando se
+  configura la tarifa (nada se recalcula hacia atrás), y un cambio de tarifa
+  se aplica a las franjas que se cierran después.
+- La moneda es la de sus precios; el widget escribe `€`.
+
+### Próximamente
+
+Dos opciones aparecerán en la configuración en cuanto Gladys las ofrezca a
+las integraciones (cambios de Gladys en curso:
+[#3229](https://github.com/GladysAssistant/Gladys/pull/3229) y
+[#3230](https://github.com/GladysAssistant/Gladys/pull/3230)):
+
+- **Usar los precios del seguimiento de energía de Gladys**, en lugar de
+  escribirlos aquí.
+- **Contador de red** (monofásico, o trifásico L1 / L2 / L3): para saber lo
+  que realmente se consume o inyecta, valorar la reventa y las pérdidas, y
+  distinguir el excedente solar de la carga desde la red en las baterías AC.
 
 ## Un solo consumidor de la nube por cuenta Zendure
 
@@ -354,7 +506,12 @@ registros. Ninguno escribe en una batería ni cambia su transporte.
   últimos datos en cada fuente, la dirección de su API local (de las opciones,
   de la nube o mDNS) y su estado, los packs, la entrada solar, los ajustes que
   informa (límites, modo AC, niveles de carga), el tiempo restante y los
-  contadores de energía. Elija una batería en la lista **Batería** (las
+  contadores de energía, y luego las versiones de firmware (dispositivo,
+  maestro, DSP, packs), la señal Wi-Fi (`rssi`, con una indicación por debajo
+  de −75 dBm) y los estados de conexión, los códigos de estado en bruto
+  (calefacción, baja temperatura, calibración y límite de SoC, bypass, HEMS,
+  nivel de fallo) y, por pack, su nivel, la temperatura de su celda más
+  caliente, su tensión, su corriente y su estado de salud. Elija una batería en la lista **Batería** (las
   baterías creadas en Gladys) para describir solo esa; para una batería no
   creada en Gladys, escriba su nombre o número de serie en el campo de abajo.
 - **Probar la API local de una batería**: lee una vez, ahora, `GET

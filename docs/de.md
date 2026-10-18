@@ -24,9 +24,20 @@ SolarFlow 2400 AC, SolarFlow 2400 Pro und Hyper 2000 (experimentell — die
 Zuordnung der Telemetrie muss noch von einem Tester aus der Community bestätigt
 werden).
 
+**Nicht getestete Hardware**: SolarFlow 800 Plus, SolarFlow 800 Pro 2 und
+SolarFlow 4000 AC+ werden anhand der Kenndaten der offiziellen Home-Assistant-
+Integration (Zendure-HA) unterstützt, ohne dass bisher ein echtes Gerät
+gesehen wurde. Wenn du eines besitzt, melde bitte sein Verhalten (ein Bericht
+**Diagnose der Batterien** ist ideal) in den
+[Issues](https://github.com/Terdious/gladys-zendure/issues).
+
+Der von der Zendure-Cloud gemeldete Modellname wird ohne Rücksicht auf Groß-
+und Kleinschreibung und Leerzeichen erkannt (`SolarFlow 800 Pro`,
+`SolarFlow800Pro`), wie bei Zendure-HA.
+
 ## Funktionen
 
-Jede Batterie wird mit zehn nur lesbaren Funktionen angelegt, in den
+Jede Batterie wird mit zehn nur lesbaren Funktionen angelegt (plus den modellabhängigen weiter unten), in den
 Energiekategorien von Gladys (Energiediagramme, Verlauf, Dashboards):
 
 | Funktion                     | Gladys-Kategorie         | Einheit |
@@ -62,6 +73,44 @@ werden an Ort und Stelle aktualisiert, ihr Verlauf, deine Szenen und Dashboards
 bleiben erhalten. Dasselbe **Aktualisieren** fügt einer vor Version 1.5.0
 angelegten Batterie die Energie-Funktionen hinzu.
 
+### Off-Grid-Ausgang, Laden aus dem Netz und Temperaturen
+
+Je nach Modell erhält eine Batterie zusätzlich diese Funktionen:
+
+| Funktion                       | Gladys-Kategorie       | Einheit | Modelle                                                             |
+| ------------------------------ | ---------------------- | ------- | ------------------------------------------------------------------- |
+| Leistung des Off-Grid-Ausgangs | Hausausgangssensor     | W       | 800 Pro, 800 Pro 2, 1600 AC+, 2400 AC, 2400 AC+, 2400 Pro, 4000 AC+ |
+| Energie des Off-Grid-Ausgangs  | Hausausgangssensor     | kWh     | dieselben                                                           |
+| Ladeleistung aus dem Netz      | Netzsensor             | W       | alle Modelle (AC-Laden)                                             |
+| Aus dem Netz geladene Energie  | Netzsensor             | kWh     | alle Modelle                                                        |
+| Gerätetemperatur               | Gerätetemperatursensor | °C      | alle Modelle, falls gemeldet                                        |
+| Temperatur des wärmsten Packs  | Gerätetemperatursensor | °C      | alle Modelle, falls gemeldet                                        |
+
+- **Off-Grid-Ausgang**: die Leistung an der Off-Grid-Steckdose (Notstrom) der
+  Batterie (`gridOffPower`). Ein negativer Wert bedeutet, dass die Steckdose
+  Leistung einspeist (ein dort angeschlossenes Solarmodul, wie Zendure-HA
+  anmerkt): Er wird als 0 angezeigt und nicht gezählt.
+- **Laden aus dem Netz**: die Leistung, die die Batterie zum Laden aus dem
+  Netz bezieht (`gridInputPower`), bei allen Modellen, die per AC laden können.
+- Die beiden **Energie**-Funktionen werden wie die anderen berechnet (Leistung
+  über die Zeit, im Datenvolume der Integration gespeichert, Pausen über
+  5 Minuten ausgelassen).
+- **Temperaturen**: die Gerätetemperatur (`hyperTmp`) und die höchste
+  Temperatur der Packs (`maxTemp`), von Zendure in Zehntel-Kelvin gemeldet und
+  in °C umgerechnet. Eine Batterie, die sie nicht meldet, lässt sie leer; ein
+  unmöglicher Wert (unter −40 °C oder über 120 °C) wird ignoriert.
+
+**Energie-Hierarchie — Doppelzählung vermeiden.** Die Ladeleistung aus dem
+Netz ist ein **Netzsensor**: Hat dein Zuhause bereits einen Hauptzähler (P1-
+oder Shelly-EM-Zähler...) in Gladys, steckt das Laden der Batterie aus dem
+Netz schon in dem, was dieser misst. Ordne die Batterie in den
+Energieeinstellungen von Gladys **unter dem Hauptzähler** ein (als dessen
+Kind), nicht daneben, sonst würde die bezogene Energie doppelt gezählt.
+
+Eine mit einer älteren Version angelegte Batterie erhält diese Funktionen mit
+demselben **Aktualisieren** im Tab **Entdecken**: Die bestehenden Funktionen,
+ihr Verlauf, deine Szenen und Dashboards bleiben erhalten.
+
 ## Deinen Zendure-Cloud-Schlüssel erhalten
 
 Die Integration meldet sich bei der Zendure-Cloud mit einem
@@ -93,7 +142,8 @@ Zendure-App erzeugst:
 
 ### Lokale API (zenSDK, standardmäßig aktiv)
 
-Die SolarFlow-Batterien (800, 800 Pro, 1600 AC+, 2400 AC, 2400 AC+, 2400 Pro
+Die SolarFlow-Batterien (800, 800 Plus, 800 Pro, 800 Pro 2, 1600 AC+, 2400 AC,
+2400 AC+, 2400 Pro, 4000 AC+
 — alle unterstützten Modelle außer dem Hyper 2000) bieten eine kleine **HTTP-API in deinem
 Heimnetz**, zenSDK genannt. Die offizielle Home-Assistant-Integration nutzt sie
 für diese Modelle: weder MQTT noch die Cloud. Mit **Lokale API der Batterien
@@ -238,6 +288,8 @@ Im Dashboard-Editor stehen vier Widgets bereit (Gladys 5.1 oder neuer):
   Minuten, 26 Stunden lang aufbewahrt): Sie zählen ab der ersten Meldung des
   Tages, die die Zeile **Gezählt seit** angibt (etwa nach einer ersten
   Installation am Morgen).
+  Mit einem Stromtarif in der Konfiguration zeigt es auch die geschätzte
+  Ersparnis (siehe **Ersparnis (Schätzung)** unten).
 
 **Dreiphasiges Beispiel:** 17 Batterien auf L1, L2 und L3. Füge ein Widget
 **Zendure-Anlage** hinzu, stelle **Elektrische Anlage** auf _Dreiphasig_ und
@@ -261,6 +313,105 @@ bis zum Ladeziel oder zur Entladegrenze, wie die Batterie sie meldet (oder aus
 ihrer Kapazität berechnet, wenn sie keine liefert). Eine Gruppe lässt
 Batterien ohne Pack bei ihrem mittleren Ladestand und der gespeicherten
 Energie außen vor, und eine Gruppe solcher Geräte zeigt nur ihre Leistungen.
+
+## Ersparnis (Schätzung)
+
+Mit deinem Stromtarif **schätzt** die Integration, was deine Batterien
+einsparen, alle 30 Minuten, pro Batterie, und das Widget **Energie heute**
+summiert es für seine Batterien (die Anlage oder jede Phase). Es ist eine
+**Schätzung ohne Netzzähler** und im Widget so gekennzeichnet: Lies die
+Grenzen unten.
+
+### Den Tarif eintragen
+
+Im Tab **Konfiguration**, Abschnitt **Ersparnis (Schätzung, ohne Zähler)**:
+
+- **Stromtarif**: _Keiner_ (Standard: keine Schätzung), _Grundtarif_ (ein
+  Preis) oder _Hoch- / Niedertarif_.
+- **Grundpreis**, oder **Hochtarif-Preis** und **Niedertarif-Preis**: der
+  Preis einer aus dem Netz bezogenen kWh, inklusive Steuern (zum Beispiel
+  `0,35`). Ein fehlender Preis schaltet die Schätzung ab.
+- **Niedertarifzeiten**: Bereiche `HH:MM-HH:MM`, durch Kommas getrennt, zum
+  Beispiel `22:00-06:00` oder `01:30-07:30,12:30-14:30`. Ein Bereich darf
+  über Mitternacht gehen; `24:00` wird als Ende akzeptiert. Ungültige Zeiten
+  schalten die Schätzung ab: Protokoll und Diagnose nennen den Grund
+  (einmal), und das Widget zeigt _Tarif ungültig_.
+- **Ich verkaufe meinen Solarüberschuss** und **Einspeisepreis**: an, wird
+  die in den Batterien gespeicherte Solarenergie zum Einspeisepreis bewertet
+  (was sie im Netz eingebracht hätte); aus, ist gespeicherte Solarenergie
+  kostenlos.
+- **Zeitzone des Tarifs** (IANA-Name, Standard `Europe/Paris`): Die
+  Niedertarifzeiten sowie Tage, Monate und Jahre der Ersparnis folgen ihr,
+  Zeitumstellungen inklusive. Sie ist eine Einstellung der Integration und
+  nicht des Widgets, weil die Zeitfenster im Hintergrund bewertet werden, wenn
+  sie enden, auch wenn kein Widget geöffnet ist; die **Zeitzone** des Widgets
+  legt weiterhin die Mitternacht seiner Energiewerte fest.
+
+Im Widget **Energie heute** ist **Ersparnis anzeigen (Schätzung)**
+standardmäßig an: Es zeigt erst etwas, wenn ein Tarif eingetragen ist.
+
+### Berechnung
+
+Für jede Batterie und jedes 30-Minuten-Fenster, aus ihren Energiezählern:
+
+- **Preis des Fensters**: der Grundpreis, oder der Hoch- / Niedertarif-Preis
+  zur Ortszeit des Fensters (ein Fenster über dem Rand eines Bereichs wird
+  anteilig berechnet).
+- **Kosten der gespeicherten Energie**: ein gewichteter Durchschnitt pro
+  Batterie. Aus dem Netz geladene Energie (der Zähler **Aus dem Netz geladene
+  Energie**) kostet den Preis des Fensters; der Rest der Ladung, von den
+  Solarmodulen, kostet den Einspeisepreis, wenn du deinen Überschuss
+  verkaufst, sonst 0. Die gespeicherte Energie wird aus dem Ladestand neu
+  gelesen, wenn die Packs bekannt sind.
+- **Ausgang zum Haus**: Ohne Netzzähler weiß die Integration nicht, was
+  eingespeist wurde, daher gilt die ans Haus gelieferte Energie als **im Haus
+  verbraucht**. Ihr Anteil aus der Batterie spart _Preis des Fensters −
+  Kosten der gespeicherten Energie_ (eine im Hochtarif geladene und im
+  Niedertarif entladene Batterie spart weniger als nichts); ihr Anteil direkt
+  von den Solarmodulen spart den Preis des Fensters; der Rest (Netzstrom, der
+  durch eine AC-Batterie fließt) spart nichts.
+- **Ersparnis** = Batterie-Verschiebung + Solar direkt (+ Einspeiseerlös, mit
+  dem Netzzähler). Die Zeile **Netzladung (bezahlt)** ist eine Information:
+  Diese Kosten stecken bereits in den Kosten der gespeicherten Energie.
+
+Das Widget zeigt **Heute gespart (Schätz.)**, den Monat und das Jahr,
+dreiphasig den Tag je Phase, und die Aufteilung des Tages
+(Batterie-Verschiebung, Solar direkt, bezahlte Netzladung, Einspeisung). Die
+Summen des aktuellen und vorherigen Tages, Monats und Jahres werden mit den
+Energiezählern in `/data/energy.json` gespeichert (eine Datei einer früheren
+Version wird unverändert geladen; die Ersparnis beginnt an der ersten
+30-Minuten-Grenze nach dem Update).
+
+### Grenzen
+
+- **Keine Kenntnis der Einspeisung**: Der ins Netz zurückfließende Ausgang
+  zum Haus (Hausverbrauch unter dem Batterieausgang) wird als zum Preis des
+  Fensters gespart gezählt. Die Zeile **Eingespeist, unbewertet** (oder
+  **Einspeisung**, wenn du verkaufst) bleibt bei 0, bis der Netzzähler
+  gelesen werden kann.
+- **AC-Batterien** (1600 AC+, 2400 AC, 2400 AC+, 4000 AC+): Ihre AC-Ladung
+  zählt als **Netzladung** zum Preis des Fensters, auch wenn sie in
+  Wirklichkeit aus dem Solarüberschuss eines anderen Wechselrichters stammt:
+  Nur die Bilanz der Anlage (der Netzzähler) könnte es zeigen.
+- Pack-Verluste, Umwandlungsverluste und verpasste Meldungen machen die Werte
+  ungefähr; die Ersparnis beginnt, wenn der Tarif eingetragen ist (nichts wird
+  rückwirkend berechnet), und eine Tarifänderung gilt für die danach endenden
+  Fenster.
+- Die Währung ist die deiner Preise; das Widget schreibt `€`.
+
+### Demnächst
+
+Zwei Optionen erscheinen in der Konfiguration, sobald Gladys sie
+Integrationen anbietet (laufende Gladys-Änderungen:
+[#3229](https://github.com/GladysAssistant/Gladys/pull/3229) und
+[#3230](https://github.com/GladysAssistant/Gladys/pull/3230)):
+
+- **Preise der Gladys-Energieüberwachung verwenden**, statt sie hier
+  einzutippen.
+- **Netzzähler** (einphasig oder dreiphasig L1 / L2 / L3): um zu wissen, was
+  wirklich verbraucht oder eingespeist wird, Einspeisung und Verluste zu
+  bewerten und bei den AC-Batterien Solarüberschuss von Netzladung zu
+  unterscheiden.
 
 ## Ein Cloud-Verbraucher pro Zendure-Konto
 
@@ -355,7 +506,12 @@ musst. Keine schreibt in eine Batterie oder ändert ihren Transport.
   ihrer letzten Daten pro Quelle, die Adresse ihrer lokalen API (aus den
   Optionen, der Cloud oder mDNS) und ihr Zustand, die Packs, der
   Solareingang, die gemeldeten Einstellungen (Limits, AC-Modus, Ladestände),
-  die Restzeit und die Energiezähler. Wähle eine Batterie in der Liste
+  die Restzeit und die Energiezähler, dann die Firmware-Versionen (Gerät,
+  Master, DSP, Packs), das WLAN-Signal (`rssi`, mit einem Hinweis unter
+  −75 dBm) und die Verbindungszustände, die rohen Statuscodes (Heizung,
+  niedrige Temperatur, SoC-Kalibrierung und -Grenze, Bypass, HEMS,
+  Fehlerstufe) und pro Pack sein Ladestand, die Temperatur der wärmsten
+  Zelle, Spannung, Strom und Gesundheitszustand. Wähle eine Batterie in der Liste
   **Batterie** (die in Gladys angelegten Batterien), um nur sie zu
   beschreiben; für eine nicht in Gladys angelegte Batterie gib ihren Namen
   oder ihre Seriennummer im Feld darunter ein.

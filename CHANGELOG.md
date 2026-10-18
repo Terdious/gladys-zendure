@@ -10,6 +10,63 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Added
+
+- New models, **untested hardware** (ratings from Zendure-HA, reports
+  welcome): SolarFlow 800 Plus (charge 1000 W / discharge 800 W, solar input),
+  SolarFlow 800 Pro 2 (800 Pro class, built-in battery, off-grid output) and
+  SolarFlow 4000 AC+ (charge 3200 W / discharge 2400 W, AC-coupled, internal
+  8 kWh pack, off-grid output).
+- **Off-grid output power** (`home-output-sensor` / `off-grid-power`, W,
+  `gridOffPower`, negative values shown as 0) and its computed **Off-grid
+  output energy** index (`off-grid-index`, kWh) on the models with an
+  off-grid socket: 800 Pro, 800 Pro 2, 1600 AC+, 2400 AC, 2400 AC+, 2400 Pro,
+  4000 AC+.
+- **Grid charging power** (`grid-sensor` / `input-power`, W,
+  `gridInputPower`) and its computed **Grid charging energy** index
+  (`input-index`, kWh) on every model. The documentation explains where to
+  place the battery in the Gladys energy hierarchy (under the main meter) to
+  avoid counting that energy twice.
+- **Device temperature** (`hyperTmp`) and **Hottest pack temperature** (the
+  highest pack `maxTemp`), `device-temperature-sensor`, °C, converted from
+  decikelvin, published only when reported, impossible values ignored.
+- The new indexes are saved in `/data/energy.json` with the others (additive:
+  a 1.7.0 file loads as is, its "Energy today" snapshots unchanged).
+- Batteries created before get the new features with **Update** in the
+  Discover tab; the existing features and their ids are unchanged.
+- **Diagnostic of the batteries**: firmware versions (device, master, DSP,
+  packs), Wi-Fi signal (`rssi`, hint below -75 dBm), `wifiState` /
+  `localState`, the raw status codes (`heatState`, `lowTemperature`,
+  `socStatus`, `socLimit`, `pass`, `hemsState`, `faultLevel`, `hyperTmp`)
+  with their meaning, and per pack its level, hottest temperature, voltage,
+  current and state of health. Serial numbers stay masked.
+- **Savings estimate, without a grid meter**: a new optional section of the
+  configuration takes the electricity tariff (`tariff_mode`: none by default,
+  base or peak / off-peak; `price_base`, `price_peak`, `price_offpeak`,
+  `offpeak_hours` such as `22:00-06:00` or `01:30-07:30,12:30-14:30`,
+  `resale_enabled` and `resale_price`, `tariff_timezone`, `Europe/Paris` by
+  default). Every 30 minutes and per battery, the energy sent to the home is
+  assumed consumed by the house and valued at the price of the slot, minus the
+  weighted-average cost of the stored energy (grid charging at its price,
+  solar charging at the resale price or free). Invalid off-peak hours or a
+  missing price turn the estimate off, logged once and shown in the
+  diagnostic.
+- The **Energy today** widget shows it when a tariff is set (new setting
+  **Show the savings (estimate)**, on by default): savings today, this month
+  and this year, today per phase in three-phase, and today's breakdown
+  (battery time-shift, direct solar, grid charging paid, export), marked as
+  an estimate. The export and resale rows wait for the grid meter (coming,
+  with Gladys changes #3229 and #3230, announced in the configuration).
+- The savings (current and previous day, month and year, in the tariff
+  timezone) are saved in `/data/energy.json` with the meters (additive: a
+  1.7.0 file loads as is, an older release ignores them).
+
+### Changed
+
+- The cloud model name is matched ignoring case and every space, like
+  Zendure-HA (`SolarFlow800Pro` = `SolarFlow 800 Pro`); every name matched
+  before still matches.
+
 ## [1.7.0] - 2026-10-17
 
 ### Added
