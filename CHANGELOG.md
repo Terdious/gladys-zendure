@@ -10,6 +10,17 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Added
+
+- Scene trigger **Battery alert** (#43): starts a scene when a status code of
+  a battery starts or ends — fault (`is_error`, or `faultLevel` above 0),
+  heating (`heatState`), calibration (`socStatus`), low temperature
+  (`lowTemperature`), reverse flow (`reverseState`) — filtered by battery,
+  alert and change (started / ended). A new state must hold 30 seconds over
+  two reports; the state at startup, deleted batteries and pack devices never
+  fire it. Its variables give the battery name, the alert, the change, the
+  reported code and the telemetry source.
+
 ## [1.9.0] - 2026-10-19
 
 ### Added

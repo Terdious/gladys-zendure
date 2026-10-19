@@ -7,8 +7,9 @@
 // integration (`"source": "devices"`). Throwing fails this action only: the
 // scene logs the message and goes on.
 //
-// The scene TRIGGER (battery_reachability_changed) is fired by the telemetry
-// evaluator, see src/devices/solarflow.js. No action ever fires it, so a scene
+// The scene TRIGGERS are fired by the telemetry, see src/devices/solarflow.js:
+// battery_reachability_changed by the source evaluator, battery_alert by the
+// reports (src/zendure/alerts.js). No action ever fires them, so a scene
 // cannot loop through the integration.
 // -----------------------------------------------------------------------------
 

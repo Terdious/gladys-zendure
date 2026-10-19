@@ -9,7 +9,9 @@ import {
   setSolarflowDependencies,
   resetSolarflowRuntime,
   REACHABILITY_TRIGGER,
+  ALERT_TRIGGER,
 } from '../src/devices/solarflow.js';
+import { ALERT_KINDS } from '../src/zendure/alerts.js';
 import { normalizeConfig } from '../src/config.js';
 import { createFakeGladys } from './helpers/fakeGladys.js';
 import {
@@ -44,10 +46,10 @@ test('every scene_actions key has a handler, and vice versa', () => {
   assert.deepEqual(Object.keys(SCENE_ACTIONS).sort(), [...declared].sort());
 });
 
-test('the only scene trigger is the reachability one the evaluator fires', () => {
+test('the scene triggers are the reachability and alert ones the code fires', () => {
   assert.deepEqual(
     manifest.scene_triggers.map((trigger) => trigger.key),
-    [REACHABILITY_TRIGGER],
+    [REACHABILITY_TRIGGER, ALERT_TRIGGER],
   );
   const trigger = manifest.scene_triggers[0];
   // Every key the evaluator publishes is a declared field or variable.
@@ -55,6 +57,26 @@ test('the only scene trigger is the reachability one the evaluator fires', () =>
   for (const key of ['device', 'state', 'device_name', 'source']) {
     assert.ok(declared.includes(key), `${key} is declared`);
   }
+});
+
+test('the alert trigger declares every kind, state and key the code publishes', () => {
+  const trigger = manifest.scene_triggers.find((entry) => entry.key === ALERT_TRIGGER);
+  const field = (key) => trigger.fields.find((entry) => entry.key === key);
+  assert.equal(field('device').source, 'devices');
+  assert.deepEqual(
+    field('kind').options.map((option) => option.value),
+    Object.keys(ALERT_KINDS),
+  );
+  assert.deepEqual(
+    field('state').options.map((option) => option.value),
+    ['started', 'ended'],
+  );
+  const declared = [...trigger.fields, ...trigger.variables].map((entry) => entry.key);
+  for (const key of ['device', 'kind', 'state', 'device_name', 'value', 'source']) {
+    assert.ok(declared.includes(key), `${key} is declared`);
+  }
+  // A filter left empty matches any value: none is required.
+  assert.ok(trigger.fields.every((entry) => entry.required !== true));
 });
 
 test('every action output the handlers return is declared', async () => {

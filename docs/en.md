@@ -279,6 +279,32 @@ The trigger **Battery reachability changed** starts a scene when a battery
 stops reporting on every source, or reports again (local API or local MQTT). Its
 variables give the battery name, the new state and the telemetry source.
 
+The trigger **Battery alert** starts a scene when a status code of a battery
+starts or ends. Its filters, all optional (left empty: any value):
+
+- **Battery**: one battery;
+- **Alert**: _Fault_ (error flag `is_error`, or fault level `faultLevel` above
+  0), _Heating_ (the pack heater runs, `heatState`), _Calibration_ (the
+  state-of-charge calibration runs, `socStatus`), _Low temperature_
+  (`lowTemperature`), _Reverse flow_ (`reverseState`);
+- **Change**: _Started_ or _Ended_.
+
+Its variables give the battery name, the alert, the change (`started` /
+`ended`), the code reported (the fault level for a fault) and the telemetry
+source (`local` / `cloud`). Examples:
+
+- notify when a battery heats: trigger **Battery alert**, Alert _Heating_,
+  Change _Started_, then a **Send a message** action naming the battery from
+  the variables;
+- notify of a fault, and when it clears: one scene with Alert _Fault_ and
+  Change _Started_, another with Change _Ended_.
+
+An alert fires on a change only: the state a battery is in when the
+integration starts (or when it is created again) is its initial state, not an
+event. A new state must hold for 30 seconds, over at least two reports, before
+the scene starts: a code that blinks for a report never does. A battery
+deleted in Gladys and the pack devices fire no alert.
+
 ## Dashboard widgets
 
 Four widgets are available in the dashboard editor (Gladys 5.1 or later):

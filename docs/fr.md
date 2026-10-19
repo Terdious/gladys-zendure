@@ -305,6 +305,35 @@ batterie ne remonte plus rien sur aucune source, ou remonte à nouveau (API loca
 ou MQTT local). Ses variables donnent le nom de la batterie, le nouvel état et la
 source de télémétrie.
 
+Le déclencheur **Alerte batterie** lance une scène quand un état d'une
+batterie commence ou se termine. Ses filtres, tous facultatifs (laissés vides :
+toute valeur) :
+
+- **Batterie** : une batterie ;
+- **Alerte** : _Défaut_ (indicateur d'erreur `is_error`, ou niveau de défaut
+  `faultLevel` supérieur à 0), _Chauffage_ (le chauffage des packs fonctionne,
+  `heatState`), _Calibrage_ (le calibrage de l'état de charge est en cours,
+  `socStatus`), _Température basse_ (`lowTemperature`), _Flux inverse_
+  (`reverseState`) ;
+- **Changement** : _Commence_ ou _Se termine_.
+
+Ses variables donnent le nom de la batterie, l'alerte, le changement
+(`started` / `ended`), le code remonté (le niveau de défaut pour un défaut) et
+la source de télémétrie (`local` / `cloud`). Exemples :
+
+- être prévenu quand une batterie chauffe : déclencheur **Alerte batterie**,
+  Alerte _Chauffage_, Changement _Commence_, puis une action **Envoyer un
+  message** qui nomme la batterie grâce aux variables ;
+- être prévenu d'un défaut, et de sa fin : une scène avec Alerte _Défaut_ et
+  Changement _Commence_, une autre avec Changement _Se termine_.
+
+Une alerte ne se déclenche que sur un changement : l'état d'une batterie au
+démarrage de l'intégration (ou à sa recréation) est son état initial, pas un
+événement. Un nouvel état doit tenir 30 secondes, sur au moins deux remontées,
+avant que la scène démarre : un code qui clignote le temps d'une remontée ne la
+déclenche jamais. Une batterie supprimée dans Gladys et les appareils pack ne
+déclenchent aucune alerte.
+
 ## Widgets du tableau de bord
 
 Quatre widgets sont disponibles dans l'éditeur de tableau de bord (Gladys 5.1

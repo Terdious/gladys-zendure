@@ -51,6 +51,7 @@ import {
   ENERGY_SAVE_INTERVAL_IN_MS,
 } from '../zendure/energy.js';
 import { tariffFromConfig } from '../zendure/savings.js';
+import { createAlertTracker } from '../zendure/alerts.js';
 import {
   PACK_DEVICE_TYPE,
   PACK_FEATURES,
@@ -76,6 +77,9 @@ import {
 // Scene trigger fired when a battery goes unreachable or comes back
 // (manifest `scene_triggers`).
 export const REACHABILITY_TRIGGER = 'battery_reachability_changed';
+// Scene trigger fired when a status code of a battery (fault, heating,
+// calibration...) starts or ends (src/zendure/alerts.js).
+export const ALERT_TRIGGER = 'battery_alert';
 
 const DEVICE_TYPE = 'solarflow';
 
@@ -197,6 +201,10 @@ let energySaveTimer = null;
 
 // Rate limiter of the control writes (src/zendure/control.js).
 let writeThrottle = createWriteThrottle();
+
+// Edge detector of the battery alerts (src/zendure/alerts.js), fed with the
+// reports of the source serving each battery.
+const alertTracker = createAlertTracker();
 
 function getEnergyMeters() {
   if (!energyMeters) {
@@ -552,6 +560,7 @@ export function resetSolarflowRuntime() {
   allLocalEvaluationStreak = 0;
   stopEnergySaveTimer();
   writeThrottle = createWriteThrottle();
+  alertTracker.clear();
   energyMeters = null;
   energyLoad = null;
   energyLoaded = false;
@@ -1182,6 +1191,38 @@ function publishReachabilityEvent(gladys, rawCloudDevice, source) {
 }
 
 /**
+ * Fire the alert scene trigger for every alert transition of a fresh report,
+ * without ever failing the push listener (an older core without scene
+ * events, a rate limit...). Same payload shape as the reachability trigger.
+ * @param {object} gladys Gladys SDK instance
+ * @param {object} rawCloudDevice device from the cloud deviceList
+ * @param {object} payload fresh report of the serving source
+ * @param {'http'|'local'|'cloud'} source source of the report
+ * @param {number} [now] current time (ms)
+ */
+function publishAlertEvents(gladys, rawCloudDevice, payload, source, now = Date.now()) {
+  const transitions = alertTracker.observe(deviceKeyOf(rawCloudDevice), payload, now);
+  for (const { kind, state, value } of transitions) {
+    logger.info(`alert: ${deviceLabelOf(rawCloudDevice)}: ${kind} ${state} (${value})`);
+    if (typeof gladys.publishSceneEvent !== 'function') {
+      continue;
+    }
+    const data = {
+      device: gladys.externalIds(DEVICE_TYPE, deviceKeyOf(rawCloudDevice)).device,
+      kind,
+      state,
+      device_name: rawCloudDevice.deviceName || modelOf(rawCloudDevice),
+      value,
+      // The local HTTP API is "local" here too (see publishReachabilityEvent).
+      source: source === 'http' ? 'local' : source,
+    };
+    Promise.resolve()
+      .then(() => gladys.publishSceneEvent(ALERT_TRIGGER, data))
+      .catch((e) => logger.debug(`scene event ${ALERT_TRIGGER} not published: ${e.message}`));
+  }
+}
+
+/**
  * Send a control command to one battery (scene actions, widget buttons):
  * validated, clamped and rate limited by src/zendure/control.js, then sent
  * as `properties/write` through the source currently serving the device (an
@@ -1305,6 +1346,9 @@ function createPushListener(gladys, config, source) {
     } else if (isLocalSource(effectiveSource)) {
       return;
     }
+    // A fresh report of the serving source: the alerts follow it (never the
+    // cloud device list, a bootstrap snapshot).
+    publishAlertEvents(gladys, rawCloudDevice, payload, source);
     const states = [
       ...buildStates(gladys, rawCloudDevice, payload),
       ...buildEnergyStates(gladys, rawCloudDevice, payload, { integrate: true }),
@@ -2575,6 +2619,7 @@ async function stopTrackingIgnoredDevices(gladys, config, now = Date.now()) {
     }
     effectiveSourceByDeviceKey.delete(deviceKey);
     cloudNeededAtByDeviceKey.delete(deviceKey);
+    alertTracker.forget(deviceKey);
     forgetDeviceStates(gladys.externalIds(DEVICE_TYPE, deviceKey).device);
   }
   // Packs: the deleted ones, and every pack of a deleted battery.
