@@ -111,7 +111,7 @@ test('discovery publishes the SolarFlow device to the core', async () => {
   // frequencies: 30 s from the config, snapped to milliseconds.
   assert.equal(discoveredDevice.should_poll, true);
   assert.equal(discoveredDevice.poll_frequency, 30000);
-  assert.equal(discoveredDevice.features.length, 16);
+  assert.equal(discoveredDevice.features.length, 18);
   assert.equal(discoveredDevice.selector, 'zendure-solarflow-abc123');
   for (const feature of discoveredDevice.features) {
     assert.equal(feature.read_only, true);

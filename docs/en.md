@@ -79,6 +79,8 @@ Depending on the model, a battery also gets these features:
 | Grid charging energy     | Grid sensor               | kWh  | every model                                                         |
 | Device temperature       | Device temperature sensor | °C   | every model, when reported                                          |
 | Hottest pack temperature | Device temperature sensor | °C   | every model, when reported                                          |
+| Remaining discharge time | Duration                  | min  | every model with a battery, when estimated                          |
+| Remaining charge time    | Duration                  | min  | every model with a battery, when estimated                          |
 
 - **Off-grid output**: the power on the battery's off-grid (backup) socket
   (`gridOffPower`). A negative value means the socket feeds power in (a solar
@@ -91,6 +93,14 @@ Depending on the model, a battery also gets these features:
   temperature of the packs (`maxTemp`), reported by Zendure in tenths of a
   kelvin and converted to °C. A battery that does not report them leaves them
   empty; an impossible value (below −40 °C or above 120 °C) is ignored.
+- **Remaining time**: the time to the discharge floor (`remainOutTime`) and
+  to the charge target (`remainInputTime`), as the battery estimates it, in
+  minutes. When the battery has no estimate (idle, or charging for the
+  discharge time), Zendure reports 999 h: that value is not published, the
+  feature keeps its last estimate and its last update time shows how old it
+  is (0 would read "empty now" and trigger your scenes, 999 h would flatten
+  the charts). A SolarFlow 800 or Hyper 2000 without any pack publishes
+  nothing.
 
 **Energy hierarchy — avoid double counting.** The grid charging power is a
 **grid sensor**: if your home already has a main meter (Linky, a P1 or

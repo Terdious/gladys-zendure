@@ -85,6 +85,8 @@ Je nach Modell erhält eine Batterie zusätzlich diese Funktionen:
 | Aus dem Netz geladene Energie  | Netzsensor             | kWh     | alle Modelle                                                        |
 | Gerätetemperatur               | Gerätetemperatursensor | °C      | alle Modelle, falls gemeldet                                        |
 | Temperatur des wärmsten Packs  | Gerätetemperatursensor | °C      | alle Modelle, falls gemeldet                                        |
+| Verbleibende Entladezeit       | Dauer                  | min     | alle Modelle mit Batterie, falls geschätzt                          |
+| Verbleibende Ladezeit          | Dauer                  | min     | alle Modelle mit Batterie, falls geschätzt                          |
 
 - **Off-Grid-Ausgang**: die Leistung an der Off-Grid-Steckdose (Notstrom) der
   Batterie (`gridOffPower`). Ein negativer Wert bedeutet, dass die Steckdose
@@ -99,6 +101,14 @@ Je nach Modell erhält eine Batterie zusätzlich diese Funktionen:
   Temperatur der Packs (`maxTemp`), von Zendure in Zehntel-Kelvin gemeldet und
   in °C umgerechnet. Eine Batterie, die sie nicht meldet, lässt sie leer; ein
   unmöglicher Wert (unter −40 °C oder über 120 °C) wird ignoriert.
+- **Restzeit**: die Zeit bis zur Entladegrenze (`remainOutTime`) und bis zum
+  Ladeziel (`remainInputTime`), wie die Batterie sie schätzt, in Minuten. Hat
+  die Batterie keine Schätzung (im Ruhezustand, oder beim Laden für die
+  Entladezeit), meldet Zendure 999 h: Dieser Wert wird nicht veröffentlicht,
+  die Funktion behält ihre letzte Schätzung und ihr Aktualisierungszeitpunkt
+  zeigt, wie alt sie ist (0 hieße „jetzt leer“ und würde deine Szenen
+  auslösen, 999 h würde die Diagramme plattdrücken). Ein SolarFlow 800 oder
+  Hyper 2000 ganz ohne Pack veröffentlicht nichts.
 
 **Energie-Hierarchie — Doppelzählung vermeiden.** Die Ladeleistung aus dem
 Netz ist ein **Netzsensor**: Hat dein Zuhause bereits einen Hauptzähler (P1-

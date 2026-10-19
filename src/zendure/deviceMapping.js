@@ -43,10 +43,11 @@ import {
 // the optional features of its capabilities (MODEL_CAPABILITIES): the
 // off-grid output (`gridOffPower`, like Zendure-HA's gridOffPower /
 // aggrGridOffPower sensors) and the grid charging input (`gridInputPower`).
-// Every model also gets the two temperature features, published only when the
-// device reports the property. New features are appended after the existing
-// ones: a device created by an older release gets them with "Update" in the
-// Discover tab, its existing features (and their ids) untouched.
+// Every model also gets the two temperature features and the two remaining
+// time features, published only when the device reports the property. New
+// features are appended after the existing ones: a device created by an older
+// release gets them with "Update" in the Discover tab, its existing features
+// (and their ids) untouched.
 //
 // `metricPaths` are the candidate dot paths inside the MQTT `properties/report`
 // payloads (and, as a fallback, inside the raw cloud deviceList entry).
@@ -119,11 +120,50 @@ export function hottestPackTemperature(payload) {
   return temperatures.length === 0 ? null : Math.max(...temperatures);
 }
 
+// Remaining time: `remainOutTime` (to the discharge floor) and
+// `remainInputTime` (to the charge target) are in minutes, 59940 (999 h) when
+// the device has no estimate (idle battery, or the other direction). Gladys
+// has no "no value" state, and both stand-ins mislead: 0 reads "empty / full
+// now" (and fires the "less than N minutes" scenes), 59940 flattens every
+// chart. So the sentinel is never published, like an absent property: the
+// feature keeps its last estimate and its last update time tells how old it
+// is. battery.js (widgets) reads the same sentinel from here.
+export const REMAINING_TIME_NO_ESTIMATE_IN_MIN = 59940;
+
+/**
+ * Minutes of a remaining time report, or null for the "no estimate" sentinel
+ * (and anything above), a negative or a non-numeric value.
+ * @param {number|null} minutes reported value
+ * @returns {number|null}
+ */
+export function remainingMinutesOf(minutes) {
+  if (minutes === null || minutes < 0 || minutes >= REMAINING_TIME_NO_ESTIMATE_IN_MIN) {
+    return null;
+  }
+  return Math.round(minutes);
+}
+
+/**
+ * Whether the telemetry says the device has no pack at all (`packNum` 0, or
+ * an empty `packData` when `packNum` is absent), like batteryPresenceOf()
+ * returning false for a hub.
+ * @param {object} payload merged telemetry payload
+ * @returns {boolean}
+ */
+function packsReportedAbsent(payload) {
+  const packNum = extractMetricValue(payload, ['packNum', 'properties.packNum']);
+  if (packNum !== null) {
+    return packNum <= 0;
+  }
+  const packs = payload?.packData ?? payload?.properties?.packData;
+  return Array.isArray(packs) && packs.length === 0;
+}
+
 /**
  * Optional features of a model, from its capabilities, appended after the
  * baseline ones.
  * @param {number} maxPower display ceiling (watts) for the power features
- * @param {{ offGrid?: boolean, acCharge?: boolean }} capabilities
+ * @param {{ offGrid?: boolean, acCharge?: boolean, battery?: string }} capabilities
  * @returns {Array<object>} feature mappings
  */
 function buildExtraFeatures(maxPower, capabilities) {
@@ -201,6 +241,35 @@ function buildExtraFeatures(maxPower, capabilities) {
       min: TEMPERATURE_RANGE_CELSIUS.min,
       max: TEMPERATURE_RANGE_CELSIUS.max,
       read: hottestPackTemperature,
+    },
+  );
+  // Remaining time of the current discharge / charge, as the device computes
+  // it (minutes). Every model may carry a pack (built-in, or optional on the
+  // hubs): a hub that reports none publishes nothing.
+  const remainingTime = (property) => (payload) =>
+    capabilities.battery !== 'built-in' && packsReportedAbsent(payload)
+      ? null
+      : remainingMinutesOf(extractMetricValue(payload, [property, `properties.${property}`]));
+  features.push(
+    {
+      key: 'remainingDischargeTime',
+      name: 'Remaining discharge time',
+      category: DEVICE_FEATURE_CATEGORIES.DURATION,
+      type: DEVICE_FEATURE_TYPES.DURATION.INTEGER,
+      unit: DEVICE_FEATURE_UNITS.MINUTES,
+      min: 0,
+      max: REMAINING_TIME_NO_ESTIMATE_IN_MIN,
+      read: remainingTime('remainOutTime'),
+    },
+    {
+      key: 'remainingChargeTime',
+      name: 'Remaining charge time',
+      category: DEVICE_FEATURE_CATEGORIES.DURATION,
+      type: DEVICE_FEATURE_TYPES.DURATION.INTEGER,
+      unit: DEVICE_FEATURE_UNITS.MINUTES,
+      min: 0,
+      max: REMAINING_TIME_NO_ESTIMATE_IN_MIN,
+      read: remainingTime('remainInputTime'),
     },
   );
   return features;
@@ -418,6 +487,18 @@ export const FEATURE_NAMES = {
     fr: 'Température du pack le plus chaud',
     de: 'Temperatur des wärmsten Packs',
     es: 'Temperatura del pack más caliente',
+  },
+  remainingDischargeTime: {
+    en: 'Remaining discharge time',
+    fr: 'Temps de décharge restant',
+    de: 'Verbleibende Entladezeit',
+    es: 'Tiempo de descarga restante',
+  },
+  remainingChargeTime: {
+    en: 'Remaining charge time',
+    fr: 'Temps de charge restant',
+    de: 'Verbleibende Ladezeit',
+    es: 'Tiempo de carga restante',
   },
 };
 

@@ -85,6 +85,8 @@ Según el modelo, una batería recibe también estas funcionalidades:
 | Energía cargada desde la red       | Sensor de red                     | kWh    | todos los modelos                                                   |
 | Temperatura del dispositivo        | Sensor de temperatura del aparato | °C     | todos los modelos, si se informa                                    |
 | Temperatura del pack más caliente  | Sensor de temperatura del aparato | °C     | todos los modelos, si se informa                                    |
+| Tiempo de descarga restante        | Duración                          | min    | todos los modelos con batería, si se estima                         |
+| Tiempo de carga restante           | Duración                          | min    | todos los modelos con batería, si se estima                         |
 
 - **Salida fuera de red**: la potencia del enchufe fuera de red (de respaldo)
   de la batería (`gridOffPower`). Un valor negativo significa que el enchufe
@@ -100,6 +102,14 @@ Según el modelo, una batería recibe también estas funcionalidades:
   décimas de kelvin y que se convierten a °C. Una batería que no las informa
   las deja vacías; un valor imposible (por debajo de −40 °C o por encima de
   120 °C) se ignora.
+- **Tiempo restante**: el tiempo hasta el límite de descarga
+  (`remainOutTime`) y hasta el objetivo de carga (`remainInputTime`), tal como
+  lo estima la batería, en minutos. Cuando la batería no tiene estimación (en
+  reposo, o cargando para el tiempo de descarga), Zendure informa 999 h: ese
+  valor no se publica, la funcionalidad conserva su última estimación y su
+  hora de actualización indica su antigüedad (0 se leería «vacía ahora» y
+  dispararía sus escenas, 999 h aplastaría los gráficos). Un SolarFlow 800 o
+  un Hyper 2000 sin ningún pack no publica nada.
 
 **Jerarquía de energía — evitar el doble conteo.** La potencia de carga desde
 la red es un **sensor de red**: si su vivienda ya tiene un contador principal

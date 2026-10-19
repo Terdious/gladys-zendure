@@ -19,10 +19,11 @@
 
 import { modelCapabilitiesOf } from './constants.js';
 import { reportedValue } from './control.js';
+import { REMAINING_TIME_NO_ESTIMATE_IN_MIN } from './deviceMapping.js';
 import { deviceCapacityKwh } from './energy.js';
 
 // The device's "no estimate" value: 999 h, in minutes.
-export const REMAINING_TIME_UNKNOWN_IN_MIN = 59940;
+export const REMAINING_TIME_UNKNOWN_IN_MIN = REMAINING_TIME_NO_ESTIMATE_IN_MIN;
 const MAX_REMAINING_TIME_IN_MIN = 999 * 60;
 
 /**

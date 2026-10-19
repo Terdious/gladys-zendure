@@ -57,6 +57,8 @@ const EXTRA_FEATURE_KEYS = [
   'gridInputEnergy',
   'deviceTemperature',
   'batteryMaxTemperature',
+  'remainingDischargeTime',
+  'remainingChargeTime',
 ];
 
 const CLOUD_BROKER_URL = 'mqtt://broker.zendure.example:1883';
@@ -151,7 +153,7 @@ test('discovers a newly-supported model (SolarFlow 2400) with the baseline featu
   );
   assert.ok(sf2400, 'the SolarFlow 2400 device is discovered');
   assert.equal(sf2400.name, 'Attic battery');
-  assert.equal(sf2400.features.length, 16);
+  assert.equal(sf2400.features.length, 18);
   assert.equal(sf2400.selector, 'zendure-solarflow-sf2400a');
   assert.equal(sf2400.features[0].selector, 'zendure-solarflow-sf2400a-battery-level');
 
@@ -620,7 +622,8 @@ test('off-grid, grid charging and temperatures are published and integrated per 
       ],
     },
   );
-  report(sf800, { gridOffPower: 500, gridInputPower: 600 });
+  report(sf800, { gridOffPower: 500, gridInputPower: 600, packNum: 0, remainOutTime: 30 });
+  report(FAKE_SOLARFLOW_DEVICE, { remainOutTime: 95, remainInputTime: 59940 });
   t.mock.timers.tick(60 * 1000);
   report(FAKE_SOLARFLOW_DEVICE, { gridOffPower: -100 });
   report(sf800, { gridInputPower: 0 });
@@ -638,6 +641,11 @@ test('off-grid, grid charging and temperatures are published and integrated per 
   assert.equal(`${plain.external_id}:offGridPower` in byId, false);
   assert.equal(`${plain.external_id}:offGridEnergy` in byId, false);
   assert.equal(`${plain.external_id}:deviceTemperature` in byId, false, 'not reported');
+  // Remaining time: minutes as reported, the "no estimate" sentinel and a hub
+  // without any pack publish nothing.
+  assert.equal(byId[`${pro.external_id}:remainingDischargeTime`], 95);
+  assert.equal(`${pro.external_id}:remainingChargeTime` in byId, false, 'sentinel');
+  assert.equal(`${plain.external_id}:remainingDischargeTime` in byId, false, 'no pack');
   stopPush();
 });
 

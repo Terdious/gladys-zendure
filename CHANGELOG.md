@@ -30,6 +30,15 @@ the notes of the version's GitHub Release.
 - The local broker's legacy JSON reports keep their `packData` (pack list and
   hottest pack temperature on the local MQTT path too).
 
+- **Remaining discharge time** (`remainOutTime`) and **Remaining charge
+  time** (`remainInputTime`) as features (`duration`, minutes), as the battery
+  estimates them, on every model. The "no estimate" value (999 h, idle
+  battery) is never published, so the feature keeps its last estimate instead
+  of reading 0 ("empty now") or flattening the charts; a SolarFlow 800 or
+  Hyper 2000 reporting no pack publishes nothing. Batteries created before get
+  them with **Update** in the Discover tab; the existing features and their
+  ids are unchanged.
+
 ### Fixed
 
 - A battery **deleted in Gladys** is no longer tracked (#21): its local API

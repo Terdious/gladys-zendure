@@ -86,6 +86,8 @@ Selon le modèle, une batterie reçoit aussi ces fonctionnalités :
 | Énergie chargée depuis le réseau     | Capteur réseau                    | kWh   | tous les modèles                                                    |
 | Température de l'appareil            | Capteur de température d'appareil | °C    | tous les modèles, si remontée                                       |
 | Température du pack le plus chaud    | Capteur de température d'appareil | °C    | tous les modèles, si remontée                                       |
+| Temps de décharge restant            | Durée                             | min   | tous les modèles avec batterie, si estimé                           |
+| Temps de charge restant              | Durée                             | min   | tous les modèles avec batterie, si estimé                           |
 
 - **Sortie hors réseau** : la puissance de la prise hors réseau (secours) de la
   batterie (`gridOffPower`). Une valeur négative signifie que la prise injecte
@@ -102,6 +104,14 @@ Selon le modèle, une batterie reçoit aussi ces fonctionnalités :
   de kelvin et converties en °C. Une batterie qui ne les remonte pas les
   laisse vides ; une valeur impossible (sous −40 °C ou au-dessus de 120 °C)
   est ignorée.
+- **Temps restant** : le temps jusqu'au seuil de décharge (`remainOutTime`)
+  et jusqu'à l'objectif de charge (`remainInputTime`), tel que la batterie
+  l'estime, en minutes. Quand la batterie n'a pas d'estimation (au repos, ou
+  en charge pour le temps de décharge), Zendure remonte 999 h : cette valeur
+  n'est pas publiée, la fonctionnalité garde sa dernière estimation et sa
+  date de mise à jour indique son âge (0 se lirait « vide maintenant » et
+  déclencherait vos scènes, 999 h écraserait les graphiques). Un SolarFlow 800
+  ou un Hyper 2000 sans aucun pack ne publie rien.
 
 **Hiérarchie énergie — éviter le double comptage.** La puissance de charge
 depuis le réseau est un **capteur réseau** : si votre logement a déjà un
