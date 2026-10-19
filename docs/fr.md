@@ -115,6 +115,47 @@ Une batterie créée avec une version précédente reçoit ces fonctionnalités 
 le même **Mettre à jour** de l'onglet **Découverte** : les fonctionnalités
 existantes, leur historique, les scènes et les tableaux de bord sont conservés.
 
+### Packs de batterie comme appareils séparés (facultatif)
+
+Désactivé par défaut. Avec **Packs de batterie comme appareils séparés** activé
+(onglet Configuration), l'onglet **Découverte** liste aussi un appareil par pack
+de batterie, nommé d'après sa batterie : `Batterie grenier — pack 1`,
+`Batterie grenier — pack 2`… Chaque appareil de pack est identifié par le numéro
+de série du pack lui-même : ses identifiants ne se mélangent jamais avec ceux de
+la batterie.
+
+| Fonctionnalité      | Catégorie Gladys                  | Unité | Source                                 |
+| ------------------- | --------------------------------- | ----- | -------------------------------------- |
+| Niveau du pack      | Batterie                          | %     | `socLevel`                             |
+| Température du pack | Capteur de température d'appareil | °C    | `maxTemp` (cellule la plus chaude)     |
+| Tension du pack     | Capteur d'énergie                 | V     | `totalVol`                             |
+| Courant du pack     | Capteur d'énergie                 | A     | `batcur`, signé comme le pack le donne |
+| Puissance du pack   | Capteur d'énergie                 | W     | `power`, quand le pack la donne        |
+
+- Un pack apparaît dès que sa batterie l'a listé : dans ses rapports (API
+  locale, cloud Zendure, broker local) ou dans la liste d'appareils Zendure.
+  S'il manque un pack, rouvrez l'onglet **Découverte** quelques minutes plus
+  tard.
+- Les valeurs viennent de la source qui sert la batterie : la liste des packs
+  du rapport de l'API locale ou du cloud (valeurs brutes, converties :
+  centièmes de volt, dixièmes d'ampère, dixièmes de kelvin), ou les topics MQTT
+  locaux du pack `Zendure/sensor/<numéro de série du pack>/…` (valeurs déjà en
+  V, A, °C). Elles passent par le même canal cadencé que celles de la batterie.
+- La batterie reste l'appareil qui compte dans les fonctionnalités énergie de
+  Gladys. C'est pourquoi le niveau du pack est un simple niveau de
+  **Batterie**, pas un niveau de batterie domestique (celui de la batterie en
+  est déjà un : compter chaque pack en plus compterait deux fois la même
+  charge), et pourquoi la tension, le courant et la puissance sont de simples
+  mesures : laissez les appareils de pack **hors de la hiérarchie énergie** de
+  Gladys. Seul effet de bord : si vous avez activé la notification de batterie
+  faible de Gladys, un pack sous son seuil au moment du contrôle y figure.
+- L'état de santé des packs reste dans le diagnostic.
+- **Désactiver l'option ne crée rien et ne supprime rien** : les appareils de
+  pack déjà créés restent dans Gladys avec leur historique, mais ne sont plus
+  mis à jour. Supprimez-les dans Gladys si vous n'en voulez plus (voir
+  [Supprimer une batterie](#supprimer-une-batterie)) : l'intégration les ignore
+  alors.
+
 ## Obtenir votre clé cloud Zendure
 
 L'intégration s'authentifie auprès du cloud Zendure avec une **clé
@@ -140,7 +181,10 @@ l'application mobile Zendure :
 4. (Optionnel) Activez le **MQTT local (zenSDK)** — voir ci-dessous.
 5. (Optionnel) Choisissez la langue des **Noms des fonctionnalités** (anglais par
    défaut) : elle s'applique aux batteries que vous créez ensuite.
-6. Cliquez sur **Enregistrer la configuration**. Vos batteries apparaissent dans
+6. (Optionnel) Activez **Packs de batterie comme appareils séparés** pour un
+   appareil de plus par pack (désactivé par défaut) — voir
+   [Packs de batterie comme appareils séparés](#packs-de-batterie-comme-appareils-séparés-facultatif).
+7. Cliquez sur **Enregistrer la configuration**. Vos batteries apparaissent dans
    l'onglet **Découverte**, prêtes à être ajoutées.
 
 ### API locale (zenSDK, activée par défaut)

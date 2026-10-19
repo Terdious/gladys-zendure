@@ -850,10 +850,17 @@ export function createZendureLocalMqtt({ mqttLibrary = mqtt, clientId, connectTi
       const parsedTopic = parseLocalSensorTopic(topic);
       if (parsedTopic) {
         // Native flat format, one metric or setting per message: build a flat partial
-        // `{ [metric]: value }` that merges into the per-serial payload.
+        // `{ [metric]: value }` that merges into the per-serial payload. A
+        // battery pack prefixes its metrics with its own serial
+        // (`Zendure/sensor/{packSn}/{packSn}_socLevel`): the prefix is dropped
+        // so a pack payload reads like a `packData` entry.
+        const packPrefix = `${parsedTopic.serial}_`;
+        const metric = parsedTopic.metric.startsWith(packPrefix)
+          ? parsedTopic.metric.slice(packPrefix.length)
+          : parsedTopic.metric;
         return {
           key: parsedTopic.serial,
-          partialPayload: { [parsedTopic.metric]: parseLocalStateValue(parsedTopic, payload) },
+          partialPayload: { [metric]: parseLocalStateValue({ ...parsedTopic, metric }, payload) },
         };
       }
 
@@ -898,10 +905,16 @@ export function createZendureLocalMqtt({ mqttLibrary = mqtt, clientId, connectTi
           : Object.fromEntries(
               Object.entries(decodedPayload).filter(([, value]) => Number.isFinite(value)),
             );
-      if (Object.keys(properties).length === 0) {
+      // The pack list rides next to `properties` (cloud report format): kept,
+      // it names the packs and carries their raw values.
+      const packData = Array.isArray(decodedPayload.packData) ? decodedPayload.packData : null;
+      if (Object.keys(properties).length === 0 && !packData) {
         return null;
       }
-      return { key: serial, partialPayload: { ...properties } };
+      return {
+        key: serial,
+        partialPayload: packData ? { ...properties, packData } : { ...properties },
+      };
     },
   });
 }

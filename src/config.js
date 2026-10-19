@@ -26,6 +26,10 @@ export const DEFAULT_CONFIG = {
   local_http_addresses: '',
   enable_local_mqtt: false, // opt-in to the per-device local MQTT broker (zenSDK)
   feature_names: 'en', // language of the feature names of newly discovered devices
+  // Opt-in: one more Gladys device per battery pack (level, temperature,
+  // voltage, current, power). Off by default: 16 packs x 5 features would
+  // flood the device list of the users who do not want them.
+  enable_pack_devices: false,
   // Savings estimate without a grid meter (src/zendure/savings.js). Prices
   // per kWh in the user's currency; no manifest default (null here): an empty
   // field shows its placeholder, and a missing price disables the estimate.
@@ -112,6 +116,7 @@ export function normalizeConfig(raw = {}) {
       raw.local_http_addresses ?? DEFAULT_CONFIG.local_http_addresses,
     ).trim(),
     enable_local_mqtt: toBoolean(raw.enable_local_mqtt, DEFAULT_CONFIG.enable_local_mqtt),
+    enable_pack_devices: toBoolean(raw.enable_pack_devices, DEFAULT_CONFIG.enable_pack_devices),
     feature_names: FEATURE_NAME_LANGUAGES.includes(raw.feature_names)
       ? raw.feature_names
       : DEFAULT_CONFIG.feature_names,

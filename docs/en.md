@@ -103,6 +103,44 @@ A battery created with an earlier version gets these features with the same
 **Update** in the **Discover** tab: the existing features, their history,
 scenes and dashboards are kept.
 
+### Battery packs as separate devices (optional)
+
+Off by default. With **Battery packs as separate devices** on (Configuration
+tab), the **Discover** tab also lists one device per battery pack, named after
+its battery: `Attic battery — pack 1`, `Attic battery — pack 2`… Each pack
+device is identified by the pack's own serial number, so its identifiers never
+collide with the battery's.
+
+| Feature          | Gladys category           | Unit | Source                                  |
+| ---------------- | ------------------------- | ---- | --------------------------------------- |
+| Pack level       | Battery                   | %    | `socLevel`                              |
+| Pack temperature | Device temperature sensor | °C   | `maxTemp` (hottest cell)                |
+| Pack voltage     | Energy sensor             | V    | `totalVol`                              |
+| Pack current     | Energy sensor             | A    | `batcur`, signed as the pack reports it |
+| Pack power       | Energy sensor             | W    | `power`, when the pack reports it       |
+
+- A pack appears once its battery has listed it: in its reports (local API,
+  Zendure cloud, local broker) or in the Zendure device list. If a pack is
+  missing, open the **Discover** tab again after a few minutes.
+- The values come from the source serving the battery: the pack list of the
+  local API or cloud report (raw values, converted: hundredths of a volt,
+  tenths of an ampere, tenths of a kelvin), or the pack's own local MQTT
+  topics `Zendure/sensor/<pack serial>/…` (values already in V, A, °C). They
+  go through the same paced channel as the battery's.
+- The battery itself stays the device that counts in the Gladys energy
+  features. That is why the pack level is a plain **Battery** level, not a
+  home battery level (the battery's own level already is one: counting each
+  pack again would count the same charge twice), and why the voltage, current
+  and power are plain measurements: keep the pack devices **out of the energy
+  hierarchy** of Gladys. The one side effect: if you enabled the Gladys
+  low-battery notification, a pack below its threshold at check time is
+  mentioned in it.
+- The state of health of the packs stays in the diagnostic.
+- **Turning the option off creates nothing new and deletes nothing**: the pack
+  devices already created stay in Gladys with their history, but no longer
+  update. Delete them in Gladys if you no longer want them (see
+  [Deleting a battery](#deleting-a-battery)): the integration then ignores them.
+
 ## Getting your Zendure cloud key
 
 The integration authenticates against the Zendure cloud with an **authorization
@@ -125,7 +163,10 @@ key** (a base64 token) that you generate once from the Zendure mobile app:
 4. (Optional) Enable **local MQTT (zenSDK)** — see below.
 5. (Optional) Choose the language of the **Feature names** (English by default):
    it applies to the batteries you create from now on.
-6. Click **Save configuration**. Your batteries appear in the **Discover** tab,
+6. (Optional) Turn on **Battery packs as separate devices** for one more
+   device per pack (off by default) — see
+   [Battery packs as separate devices](#battery-packs-as-separate-devices-optional).
+7. Click **Save configuration**. Your batteries appear in the **Discover** tab,
    ready to be added.
 
 ### Local API (zenSDK, on by default)

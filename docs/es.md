@@ -112,6 +112,49 @@ Una batería creada con una versión anterior recibe estas funcionalidades con e
 mismo **Actualizar** de la pestaña **Descubrir**: se conservan las
 funcionalidades existentes, su historial, las escenas y los paneles.
 
+### Packs de batería como dispositivos separados (opcional)
+
+Desactivado por defecto. Con **Packs de batería como dispositivos separados**
+activado (pestaña Configuración), la pestaña **Descubrir** también lista un
+dispositivo por pack de batería, con el nombre de su batería:
+`Batería del desván — pack 1`, `Batería del desván — pack 2`… Cada dispositivo
+de pack se identifica por el número de serie del propio pack: sus
+identificadores nunca chocan con los de la batería.
+
+| Funcionalidad        | Categoría de Gladys                   | Unidad | Fuente                                |
+| -------------------- | ------------------------------------- | ------ | ------------------------------------- |
+| Nivel del pack       | Batería                               | %      | `socLevel`                            |
+| Temperatura del pack | Sensor de temperatura del dispositivo | °C     | `maxTemp` (celda más caliente)        |
+| Tensión del pack     | Sensor de energía                     | V      | `totalVol`                            |
+| Corriente del pack   | Sensor de energía                     | A      | `batcur`, con el signo que da el pack |
+| Potencia del pack    | Sensor de energía                     | W      | `power`, cuando el pack la da         |
+
+- Un pack aparece en cuanto su batería lo ha listado: en sus informes (API
+  local, nube de Zendure, broker local) o en la lista de dispositivos de
+  Zendure. Si falta un pack, vuelva a abrir la pestaña **Descubrir** unos
+  minutos después.
+- Los valores vienen de la fuente que sirve la batería: la lista de packs del
+  informe de la API local o de la nube (valores brutos, convertidos:
+  centésimas de voltio, décimas de amperio, décimas de kelvin), o los topics
+  MQTT locales del propio pack `Zendure/sensor/<número de serie del pack>/…`
+  (valores ya en V, A, °C). Pasan por el mismo canal pausado que los de la
+  batería.
+- La batería sigue siendo el dispositivo que cuenta en las funcionalidades de
+  energía de Gladys. Por eso el nivel del pack es un simple nivel de
+  **Batería**, no un nivel de batería doméstica (el de la batería ya lo es:
+  contar cada pack otra vez contaría dos veces la misma carga), y por eso la
+  tensión, la corriente y la potencia son simples medidas: deje los
+  dispositivos de pack **fuera de la jerarquía de energía** de Gladys. Único
+  efecto secundario: si activó la notificación de batería baja de Gladys, un
+  pack por debajo de su umbral en el momento de la comprobación aparece en
+  ella.
+- El estado de salud de los packs se queda en el diagnóstico.
+- **Desactivar la opción no crea nada nuevo ni elimina nada**: los
+  dispositivos de pack ya creados se quedan en Gladys con su historial, pero
+  dejan de actualizarse. Elimínelos en Gladys si ya no los quiere (vea
+  [Eliminar una batería](#eliminar-una-batería)): la integración los ignora
+  entonces.
+
 ## Obtener su clave de la nube de Zendure
 
 La integración se autentica ante la nube de Zendure con una **clave de
@@ -137,7 +180,10 @@ aplicación móvil Zendure:
 4. (Opcional) Active **Activar el MQTT local (zenSDK)** — vea más abajo.
 5. (Opcional) Elija el idioma de los **Nombres de las funcionalidades** (inglés
    por defecto): se aplica a las baterías que cree a partir de ahora.
-6. Haga clic en **Guardar configuración**. Sus baterías aparecen en la pestaña
+6. (Opcional) Active **Packs de batería como dispositivos separados** para un
+   dispositivo más por pack (desactivado por defecto) — vea
+   [Packs de batería como dispositivos separados](#packs-de-batería-como-dispositivos-separados-opcional).
+7. Haga clic en **Guardar configuración**. Sus baterías aparecen en la pestaña
    **Descubrir**, listas para añadirse.
 
 ### API local (zenSDK, activada por defecto)

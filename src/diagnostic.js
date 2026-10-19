@@ -598,6 +598,7 @@ export function buildFleetDiagnostic(
   );
   lines.push(`Local MQTT: ${cfg.enableLocalMqtt ? 'on' : 'off'}`);
   lines.push(`Feature names: ${cfg.featureNames}`);
+  lines.push(`Battery packs as separate devices: ${cfg.packDevices ? 'on' : 'off'}`);
   if (cfg.savings) {
     const savings = cfg.savings;
     lines.push(

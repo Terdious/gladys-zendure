@@ -111,6 +111,47 @@ Eine mit einer älteren Version angelegte Batterie erhält diese Funktionen mit
 demselben **Aktualisieren** im Tab **Entdecken**: Die bestehenden Funktionen,
 ihr Verlauf, deine Szenen und Dashboards bleiben erhalten.
 
+### Batteriepacks als eigene Geräte (optional)
+
+Standardmäßig aus. Mit **Batteriepacks als eigene Geräte** an (Tab
+Konfiguration) listet der Tab **Entdecken** zusätzlich ein Gerät pro
+Batteriepack, nach seiner Batterie benannt: `Dachboden-Batterie — Pack 1`,
+`Dachboden-Batterie — Pack 2`… Jedes Pack-Gerät wird über die Seriennummer des
+Packs selbst identifiziert: seine Kennungen kollidieren nie mit denen der
+Batterie.
+
+| Funktion             | Gladys-Kategorie       | Einheit | Quelle                                 |
+| -------------------- | ---------------------- | ------- | -------------------------------------- |
+| Ladestand des Packs  | Batterie               | %       | `socLevel`                             |
+| Temperatur des Packs | Gerätetemperatursensor | °C      | `maxTemp` (wärmste Zelle)              |
+| Spannung des Packs   | Energiesensor          | V       | `totalVol`                             |
+| Strom des Packs      | Energiesensor          | A       | `batcur`, mit dem Vorzeichen des Packs |
+| Leistung des Packs   | Energiesensor          | W       | `power`, wenn das Pack sie meldet      |
+
+- Ein Pack erscheint, sobald seine Batterie es aufgeführt hat: in ihren
+  Berichten (lokale API, Zendure-Cloud, lokaler Broker) oder in der
+  Zendure-Geräteliste. Fehlt ein Pack, öffne den Tab **Entdecken** ein paar
+  Minuten später erneut.
+- Die Werte kommen von der Quelle, die die Batterie bedient: der Pack-Liste
+  des Berichts der lokalen API oder der Cloud (Rohwerte, umgerechnet:
+  Hundertstel Volt, Zehntel Ampere, Zehntel Kelvin) oder den eigenen lokalen
+  MQTT-Topics des Packs `Zendure/sensor/<Pack-Seriennummer>/…` (Werte schon in
+  V, A, °C). Sie laufen über denselben getakteten Kanal wie die der Batterie.
+- Die Batterie bleibt das Gerät, das in den Energie-Funktionen von Gladys
+  zählt. Deshalb ist der Ladestand des Packs ein einfacher **Batterie**-Stand,
+  kein Hausbatterie-Stand (der der Batterie ist schon einer: jedes Pack noch
+  einmal zu zählen, würde dieselbe Ladung doppelt zählen), und deshalb sind
+  Spannung, Strom und Leistung einfache Messwerte: lass die Pack-Geräte
+  **außerhalb der Energie-Hierarchie** von Gladys. Einzige Nebenwirkung: wenn
+  du die Gladys-Benachrichtigung bei schwacher Batterie aktiviert hast,
+  erscheint darin ein Pack, das zum Prüfzeitpunkt unter der Schwelle liegt.
+- Der Gesundheitszustand der Packs bleibt in der Diagnose.
+- **Ausschalten erstellt nichts Neues und löscht nichts**: bereits erstellte
+  Pack-Geräte bleiben mit ihrem Verlauf in Gladys, werden aber nicht mehr
+  aktualisiert. Lösche sie in Gladys, wenn du sie nicht mehr willst (siehe
+  [Eine Batterie löschen](#eine-batterie-löschen)): die Integration ignoriert
+  sie dann.
+
 ## Deinen Zendure-Cloud-Schlüssel erhalten
 
 Die Integration meldet sich bei der Zendure-Cloud mit einem
@@ -137,7 +178,10 @@ Zendure-App erzeugst:
 4. (Optional) Aktiviere **Lokales MQTT aktivieren (zenSDK)** — siehe unten.
 5. (Optional) Wähle die Sprache der **Namen der Funktionen** (standardmäßig
    Englisch): Sie gilt für die Batterien, die du ab jetzt anlegst.
-6. Klicke auf **Konfiguration speichern**. Deine Batterien erscheinen im Tab
+6. (Optional) Schalte **Batteriepacks als eigene Geräte** ein, für ein Gerät
+   mehr pro Pack (standardmäßig aus) — siehe
+   [Batteriepacks als eigene Geräte](#batteriepacks-als-eigene-geräte-optional).
+7. Klicke auf **Konfiguration speichern**. Deine Batterien erscheinen im Tab
    **Entdecken** und können hinzugefügt werden.
 
 ### Lokale API (zenSDK, standardmäßig aktiv)

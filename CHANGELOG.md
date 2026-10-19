@@ -10,6 +10,26 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Added
+
+- **Battery packs as separate devices** (#16), opt-in (new option, off by
+  default): the Discover tab also lists one device per battery pack, named
+  `<battery name> — pack <n>`, identified by the pack serial in its own
+  namespace (`solarflow-pack:<serial>`: the battery's device and features are
+  unchanged). Each pack has its level (`battery` / `integer`, %, so the home
+  battery level the Gladys energy dashboards aggregate is not counted twice),
+  its hottest cell temperature (`device-temperature-sensor`, °C), its voltage,
+  signed current and power (`energy-sensor` / `voltage`, `current`, `power`).
+  Values from the pack list of the local API, cloud and legacy local reports
+  (raw: hundredths of a volt, signed tenths of an ampere, tenths of a kelvin)
+  or from the packs' native local topics `Zendure/sensor/<pack serial>/…`
+  (already scaled), through the same paced channel. Turning the option off
+  creates nothing new and deletes nothing (the pack devices already created
+  stay and stop updating). A deleted pack device is ignored like a deleted
+  battery.
+- The local broker's legacy JSON reports keep their `packData` (pack list and
+  hottest pack temperature on the local MQTT path too).
+
 ### Fixed
 
 - A battery **deleted in Gladys** is no longer tracked (#21): its local API
