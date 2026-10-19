@@ -430,6 +430,23 @@ lokalen Quelle ist: Antworten
 deine Batterien lokal, streiten Home Assistant und Gladys nicht mehr um die
 Cloud-Verbindung.
 
+## Eine Batterie löschen
+
+Eine in Gladys gelöschte Batterie (ihre Geräteseite, **Löschen**) beendet
+sofort und ohne Neustart alles, was die Integration für sie tut: ihre lokale API
+wird nicht mehr abgefragt, ihre Broker-Topics werden abbestellt, sie zählt nicht
+mehr für den Cloud-Rückfall (der Cloud-Broker wird sofort freigegeben, wenn
+keine andere Batterie ihn braucht: Home Assistant bekommt die Cloud-Sitzung des
+Kontos zurück), und sie verschwindet aus den Watchdog-Logs, den
+Dashboard-Widgets, den Szenenaktionen und der Diagnose (die sie einmal als
+ignoriert aufführt). Die Logs sagen es in einer Zeile:
+`1 device(s) ignored (deleted in Gladys): …`.
+
+Die Liste der gelöschten Batterien wird mit der Konfiguration der Integration in
+Gladys gespeichert: ein Neustart oder ein Update bringt sie nicht zurück. Die
+Batterie bleibt im Tab **Entdecken**: dort neu erstellt, wird sie sofort wieder
+verfolgt, unter denselben Kennungen.
+
 ## Die Integration aktualisieren
 
 **Aus dem Katalog installiert** (der übliche Fall): Gladys prüft den Store

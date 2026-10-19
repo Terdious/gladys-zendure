@@ -27,6 +27,9 @@ import {
   resetTelemetryDedup,
   saveEnergyMeters,
   applySavingsTariff,
+  restoreDeviceLifecycle,
+  handleDeviceDeleted,
+  handleDeviceCreated,
 } from './src/devices/index.js';
 
 const gladys = new GladysIntegration();
@@ -62,6 +65,22 @@ gladys.onPoll(async (device) => {
     return;
   }
   await blueprint.onPoll(gladys, config, device);
+});
+
+// --- Device lifecycle: the user deletes / creates a device in Gladys ---------
+// A deleted battery is no longer tracked at all (it would otherwise keep
+// being polled and could hold the account's single cloud session); created
+// again from the Discover tab, it resumes without a restart.
+gladys.onDeviceDeleted(async (device) => {
+  logger.info(`onDeviceDeleted <- ${device.external_id}`);
+  await handleDeviceDeleted(gladys, config, device);
+});
+
+gladys.onDeviceCreated(async (device) => {
+  logger.info(`onDeviceCreated <- ${device.external_id}`);
+  if ((await handleDeviceCreated(gladys, config, device)) && pushCleanups.length > 0) {
+    startPushSubscriptions();
+  }
 });
 
 // --- Configuration updated by the user ---------------------------------------
@@ -114,8 +133,11 @@ for (const [widgetKey, widget] of Object.entries(WIDGETS)) {
 gladys.on('connected', async () => {
   logger.info('WebSocket connected to Gladys');
   try {
-    // 1) Fetch the config filled in by the user.
-    config = normalizeConfig(await gladys.getConfig());
+    // 1) Fetch the config filled in by the user, and the devices deleted in
+    //    Gladys (kept in a free config key), before anything is tracked.
+    const rawConfig = await gladys.getConfig();
+    config = normalizeConfig(rawConfig);
+    await restoreDeviceLifecycle(gladys, rawConfig);
 
     // 2) (Re)publish all devices as soon as we are connected, and report the
     //    connection status + transport badges. A missing cloud key is an

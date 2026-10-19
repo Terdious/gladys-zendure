@@ -437,6 +437,23 @@ source locale : si
 vos batteries répondent en local, Home Assistant et Gladys ne se disputent plus
 la connexion cloud.
 
+## Supprimer une batterie
+
+Supprimer une batterie dans Gladys (sa page d'appareil, **Supprimer**) arrête
+tout ce que l'intégration fait pour elle, immédiatement et sans redémarrage :
+son API locale n'est plus interrogée, ses topics de broker sont désabonnés, elle
+ne compte plus pour le repli cloud (le broker cloud est libéré aussitôt si
+aucune autre batterie n'en a besoin : Home Assistant retrouve la session cloud
+du compte), et elle sort des logs du watchdog, des widgets du tableau de bord,
+des actions de scène et du diagnostic (qui la liste une fois comme ignorée). Les
+logs le disent en une ligne : `1 device(s) ignored (deleted in Gladys): …`.
+
+La liste des batteries supprimées est enregistrée avec la configuration de
+l'intégration dans Gladys : un redémarrage ou une mise à jour ne les fait pas
+revenir. La batterie reste dans l'onglet **Découverte** : recréez-la depuis
+là et elle est de nouveau suivie aussitôt, sous les
+mêmes identifiants.
+
 ## Mettre à jour l'intégration
 
 **Installée depuis le catalogue** (le cas habituel) : Gladys consulte

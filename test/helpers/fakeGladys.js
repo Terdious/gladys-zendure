@@ -6,6 +6,7 @@
 //   - publishState / publishStates   -> record calls so tests can assert them
 //   - publishDiscoveredDevices / setConnectionStatus / publishTransports
 //     -> recorded the same way (discovered / connectionStatuses / transports)
+//   - setConfig -> merged into `config`, each call recorded in configWrites
 // This lets us test the pure "wiring" logic (discovery payloads, dispatch)
 // without a running Gladys server or a real WebSocket.
 // -----------------------------------------------------------------------------
@@ -16,8 +17,14 @@ export function createFakeGladys() {
   const connectionStatuses = [];
   const transports = [];
   const sceneEvents = [];
+  const configWrites = [];
+  const config = {};
 
   return {
+    configWrites,
+    config,
+    // The devices created in Gladys (the SDK fills it at connection).
+    devices: [],
     published,
     discovered,
     connectionStatuses,
@@ -56,6 +63,11 @@ export function createFakeGladys() {
 
     async publishTransports(entries) {
       transports.push(entries);
+    },
+
+    async setConfig(partialConfig) {
+      configWrites.push(partialConfig);
+      Object.assign(config, partialConfig);
     },
 
     async publishSceneEvent(key, data) {

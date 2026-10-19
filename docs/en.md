@@ -397,6 +397,22 @@ Zendure cloud broker while a battery needs it, and disconnects again 5 minutes
 after the last battery that needed it is back on a local source: if your batteries answer
 locally, Home Assistant and Gladys no longer fight over the cloud connection.
 
+## Deleting a battery
+
+Deleting a battery in Gladys (its device page, **Delete**) stops everything the
+integration does for it, at once and without a restart: its local API is no
+longer polled, its broker topics are unsubscribed, it no longer counts for the
+cloud fallback (the cloud broker is released right away when no other battery
+needs it, so Home Assistant gets the account's cloud session back), and it
+leaves the watchdog logs, the dashboard widgets, the scene actions and the
+diagnostic (which lists it once as ignored). The logs say it in one line:
+`1 device(s) ignored (deleted in Gladys): …`.
+
+The list of deleted batteries is saved with the integration configuration in
+Gladys, so a restart or an update does not bring them back. The battery stays in
+the **Discover** tab: create it again there and it is tracked again at once, under
+the same identifiers.
+
 ## Updating the integration
 
 **Installed from the catalog** (the usual case): Gladys checks the store

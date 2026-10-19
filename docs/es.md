@@ -431,6 +431,22 @@ fuente local: si sus
 baterías responden en local, Home Assistant y Gladys ya no se disputan la
 conexión a la nube.
 
+## Eliminar una batería
+
+Eliminar una batería en Gladys (su página de dispositivo, **Eliminar**) detiene
+todo lo que la integración hace por ella, al instante y sin reinicio: su API
+local deja de consultarse, sus topics del broker se dan de baja, deja de contar
+para el respaldo en la nube (el broker de la nube se libera enseguida si ninguna
+otra batería lo necesita: Home Assistant recupera la sesión en la nube de la
+cuenta), y sale de los logs del watchdog, de los widgets del panel, de las
+acciones de escena y del diagnóstico (que la lista una vez como ignorada). Los
+logs lo dicen en una línea: `1 device(s) ignored (deleted in Gladys): …`.
+
+La lista de baterías eliminadas se guarda con la configuración de la
+integración en Gladys: un reinicio o una actualización no las devuelve. La
+batería sigue en la pestaña **Descubrir**: créela de nuevo allí y vuelve a
+seguirse al instante, con los mismos identificadores.
+
 ## Actualizar la integración
 
 **Instalada desde el catálogo** (el caso habitual): Gladys consulta el store

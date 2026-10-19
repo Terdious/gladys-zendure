@@ -10,6 +10,21 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Fixed
+
+- A battery **deleted in Gladys** is no longer tracked (#21): its local API
+  polling stops, its broker topics are unsubscribed, its effective source and
+  cloud need are dropped, and the sources are re-evaluated at once, so a
+  deleted battery never keeps the Zendure cloud fallback connected (the cloud
+  broker is released right away when no remaining battery needs it). It also
+  leaves the watchdog, the dashboard widgets, the scene actions and the
+  diagnostic, which lists the ignored batteries once; the logs say
+  `N device(s) ignored (deleted in Gladys): …`. The list is saved in a free
+  key of the integration configuration (`ignored_devices`, not shown in the
+  form), so it survives restarts and updates. The discovery keeps listing the
+  battery: creating it again from the Discover tab tracks it again at once,
+  without a restart, and re-sends its values immediately.
+
 ## [1.8.0] - 2026-10-18
 
 ### Added
