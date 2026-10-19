@@ -193,7 +193,13 @@ aplicación móvil Zendure:
 6. (Opcional) Active **Packs de batería como dispositivos separados** para un
    dispositivo más por pack (desactivado por defecto) — vea
    [Packs de batería como dispositivos separados](#packs-de-batería-como-dispositivos-separados-opcional).
-7. Haga clic en **Guardar configuración**. Sus baterías aparecen en la pestaña
+7. (Instalación trifásica) En **Instalación eléctrica**, ponga **Instalación
+   eléctrica** en _Trifásica_ y coloque cada batería en **Baterías de la fase
+   L1**, **Baterías de la fase L2** o **Baterías de la fase L3**, la fase que
+   alimenta. Los widgets **Instalación Zendure** y **Energía de hoy** la leen
+   aquí (vea [Widgets del panel](#widgets-del-panel)). Una instalación
+   monofásica la deja como está.
+8. Haga clic en **Guardar configuración**. Sus baterías aparecen en la pestaña
    **Descubrir**, listas para añadirse.
 
 ### API local (zenSDK, activada por defecto)
@@ -337,8 +343,10 @@ disparan ninguna alerta.
 En el editor del panel hay cuatro widgets disponibles (Gladys 5.1 o
 posterior):
 
-- **Batería Zendure**: una batería, elegida en los ajustes del widget. Su nivel
-  y sus cuatro potencias siguen la batería en directo; debajo, su fuente
+- **Batería Zendure**: una batería, elegida en los ajustes del widget. Sus
+  cuatro potencias siguen la batería en directo; su nivel y las líneas de
+  debajo se actualizan cada dos minutos (varía como mucho un 1 % por minuto):
+  su fuente
   (local, nube, respaldo, inaccesible), la energía almacenada, los límites de
   salida y de carga, el modo AC y los niveles de carga que informa. Los botones
   **Límites de potencia** y **Modo y niveles** abren un formulario rellenado
@@ -350,9 +358,12 @@ posterior):
   coloreada según su fuente. Deje la lista de baterías vacía para tomar todas
   las baterías de la cuenta.
 - **Instalación Zendure**: toda la instalación en una tarjeta. Elija la
-  **Instalación eléctrica**: _Monofásica_ suma las baterías elegidas (ninguna:
-  todas); _Trifásica_ toma las baterías de las listas **Baterías de la fase
-  L1**, **L2** y **L3**. La tarjeta muestra los totales de la instalación
+  **Instalación eléctrica**: _Según la configuración de la integración_ (por
+  defecto, recomendado) usa la instalación y las fases de la sección
+  **Instalación eléctrica** de la configuración; _Monofásica_ suma las
+  baterías elegidas en el widget (ninguna: todas); _Trifásica_ toma las
+  baterías de las listas **Baterías de la fase L1**, **L2** y **L3** del
+  widget. La tarjeta muestra los totales de la instalación
   (nivel ponderado por la capacidad de los packs, carga, descarga, solar,
   salida al hogar, energía almacenada), luego en trifásica una línea por fase
   (`⌂` salida al hogar, `↑` carga, `↓` descarga, `☀` solar, en W) y el
@@ -378,18 +389,33 @@ posterior):
   Con una tarifa eléctrica en la configuración, también muestra la
   estimación del ahorro (vea **Ahorro (estimación)** más abajo).
 
-**Ejemplo trifásico:** 17 baterías en L1, L2 y L3. Añada un widget
-**Instalación Zendure**, ponga la **Instalación eléctrica** en _Trifásica_ y
-marque en **Baterías de la fase L1** las seis baterías conectadas a L1 (por
-ejemplo dos 2400 AC, una 2400 Pro, dos 800 Pro y un 800 sin batería), en
-**L2** las seis de L2 y en **L3** las cinco de L3. La tarjeta muestra los
-totales, una línea por fase como `L1 (6) · 60 %` —
-`⌂ 1890 · ↑ 500 · ↓ 1000 · ☀ 1400 W`, y `Equilibrio de fases` —
-`Δ 1490 W · L1 la más alta` en naranja por encima del umbral. Añada un widget
-**Energía de hoy** con las mismas tres listas para los kWh del día. Una
-instalación monofásica conserva el ajuste por defecto y deja las listas
-vacías. El widget **Grupo de baterías** sigue disponible para cualquier otra
-agrupación.
+**Ejemplo trifásico:** 18 baterías en L1, L2 y L3. En la pestaña
+**Configuración**, sección **Instalación eléctrica**, ponga la **Instalación
+eléctrica** en _Trifásica_ y marque en **Baterías de la fase L1** las seis
+baterías conectadas a L1 (por ejemplo dos 2400 AC, una 2400 Pro, dos 800 Pro y
+un 800 sin batería), en **Baterías de la fase L2** las seis de L2 y en
+**Baterías de la fase L3** las seis de L3, y guarde. Añada un widget
+**Instalación Zendure** y un widget **Energía de hoy**, y deje su
+**Instalación eléctrica** en _Según la configuración de la integración_: no
+hay nada más que elegir. La tarjeta de la instalación muestra los totales, una
+línea por fase como `L1 (6) · 60 %` — `⌂ 1890 · ↑ 500 · ↓ 1000 · ☀ 1400 W`, y
+`Equilibrio de fases` — `Δ 1490 W · L1 la más alta` en naranja por encima del
+umbral; la tarjeta de energía los kWh del día por fase. Una instalación
+monofásica conserva en todo los valores por defecto. El widget **Grupo de
+baterías** sigue disponible para cualquier otra agrupación.
+
+**Por qué las fases están en la configuración:** Gladys guarda como máximo
+1 KB de ajustes por widget, y cada batería marcada en una lista del widget
+ocupa unos 50 caracteres (su identificador). Por encima de unas 15 baterías en
+las listas del widget, el widget ya no puede mostrarse ni el panel guardarse
+(error 422 _settings: must be at most 1024 bytes_). La configuración no tiene
+ese límite, y las fases se definen allí una vez para los dos widgets. Un
+widget en _Según la configuración de la integración_ con una configuración
+trifásica sin ninguna batería asignada muestra todas las baterías en
+monofásica, con una línea de aviso **Ninguna fase asignada**; las fases
+rellenadas en una configuración monofásica se ignoran (línea **Fases
+ignoradas**). Los widgets configurados antes en _Monofásica_ o _Trifásica_
+conservan sus propias listas y siguen funcionando. Un widget que ya supera el límite: quítelo del panel y vuelva a añadirlo (o vacíe sus listas), dejando _Según la configuración de la integración_.
 
 Cada widget solo muestra lo que la batería tiene: un SolarFlow 800 usado sin
 pack de batería conserva su solar, su salida al hogar y su límite de salida

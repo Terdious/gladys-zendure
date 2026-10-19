@@ -18,7 +18,7 @@
 import { GladysIntegration, logger } from '@gladysassistant/integration-sdk';
 import { normalizeConfig } from './src/config.js';
 import { SCENE_ACTIONS } from './src/scenes.js';
-import { WIDGETS } from './src/widgets.js';
+import { WIDGETS, refreshSiteWidgets } from './src/widgets.js';
 import { ACTIONS } from './src/actions.js';
 import {
   DEVICE_BLUEPRINTS,
@@ -86,7 +86,10 @@ gladys.onDeviceCreated(async (device) => {
 // --- Configuration updated by the user ---------------------------------------
 gladys.onConfigUpdated(async (newConfig) => {
   logger.info('onConfigUpdated -> new configuration received');
+  const previous = config;
   config = normalizeConfig(newConfig);
+  // New phases: the site widgets re-pull now instead of at their TTL.
+  refreshSiteWidgets(gladys, previous, config);
   // The savings tariff applies at once, even when the sync below fails.
   applySavingsTariff(config);
   // Forget the publish dedup memory: after a config change (e.g. cloud<->local

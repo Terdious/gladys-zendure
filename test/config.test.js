@@ -111,3 +111,20 @@ test('normalizeConfig: the savings tariff fields, prices never guessed', () => {
   assert.equal(config.tariff_timezone, 'Europe/Paris');
   assert.equal(normalizeConfig({ tariff_mode: 'tempo' }).tariff_mode, 'none');
 });
+
+test('normalizeConfig: the electrical installation of the site widgets', () => {
+  const defaults = normalizeConfig();
+  assert.equal(defaults.site_layout, 'single_phase');
+  assert.deepEqual(defaults.site_phase_l1, []);
+  const config = normalizeConfig({
+    site_layout: 'three_phase',
+    site_phase_l1: ['ext:a', 'ext:a', '', 3, 'ext:b'],
+    site_phase_l2: '["ext:c"]',
+    site_phase_l3: 'not json',
+  });
+  assert.equal(config.site_layout, 'three_phase');
+  assert.deepEqual(config.site_phase_l1, ['ext:a', 'ext:b']);
+  assert.deepEqual(config.site_phase_l2, ['ext:c']);
+  assert.deepEqual(config.site_phase_l3, []);
+  assert.equal(normalizeConfig({ site_layout: 'split_phase' }).site_layout, 'single_phase');
+});

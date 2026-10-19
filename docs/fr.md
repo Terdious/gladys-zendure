@@ -194,7 +194,14 @@ l'application mobile Zendure :
 6. (Optionnel) Activez **Packs de batterie comme appareils séparés** pour un
    appareil de plus par pack (désactivé par défaut) — voir
    [Packs de batterie comme appareils séparés](#packs-de-batterie-comme-appareils-séparés-facultatif).
-7. Cliquez sur **Enregistrer la configuration**. Vos batteries apparaissent dans
+7. (Site triphasé) Dans **Installation électrique**, réglez **Installation
+   électrique** sur _Triphasée_ et placez chaque batterie dans **Batteries de
+   la phase L1**, **Batteries de la phase L2** ou **Batteries de la phase
+   L3**, la phase qu'elle alimente. Les widgets **Installation Zendure** et
+   **Énergie du jour** la lisent ici (voir
+   [Widgets du tableau de bord](#widgets-du-tableau-de-bord)). Un site
+   monophasé la laisse telle quelle.
+8. Cliquez sur **Enregistrer la configuration**. Vos batteries apparaissent dans
    l'onglet **Découverte**, prêtes à être ajoutées.
 
 ### API locale (zenSDK, activée par défaut)
@@ -339,9 +346,10 @@ déclenchent aucune alerte.
 Quatre widgets sont disponibles dans l'éditeur de tableau de bord (Gladys 5.1
 ou plus récent) :
 
-- **Batterie Zendure** : une batterie, choisie dans les réglages du widget. Son
-  niveau et ses quatre puissances suivent la batterie en direct ; en dessous,
-  sa source (locale, cloud, repli, injoignable), l'énergie stockée, les limites
+- **Batterie Zendure** : une batterie, choisie dans les réglages du widget. Ses
+  quatre puissances suivent la batterie en direct ; son niveau et les lignes
+  en dessous se rafraîchissent toutes les deux minutes (il bouge d'environ 1 %
+  par minute au plus) : sa source (locale, cloud, repli, injoignable), l'énergie stockée, les limites
   de sortie et de charge, le mode AC et les niveaux de charge qu'elle remonte.
   Les boutons **Limites de puissance** et **Mode et niveaux** ouvrent un
   formulaire pré-rempli avec les valeurs actuelles : modifiez ce qu'il faut et
@@ -352,9 +360,12 @@ ou plus récent) :
   batterie colorée selon sa source. Laissez la liste des batteries vide pour
   prendre toutes les batteries du compte.
 - **Installation Zendure** : toute l'installation sur une carte. Choisissez
-  l'**Installation électrique** : _Monophasée_ cumule les batteries choisies
-  (aucune : toutes) ; _Triphasée_ prend les batteries des listes **Batteries de
-  la phase L1**, **L2** et **L3**. La carte affiche les totaux du site (niveau
+  l'**Installation électrique** : _Selon la configuration de l'intégration_
+  (par défaut, recommandé) utilise l'installation et les phases de la section
+  **Installation électrique** de la configuration ; _Monophasée_ cumule les
+  batteries choisies dans le widget (aucune : toutes) ; _Triphasée_ prend les
+  batteries des listes **Batteries de la phase L1**, **L2** et **L3** du
+  widget. La carte affiche les totaux du site (niveau
   pondéré par la capacité des packs, charge, décharge, solaire, sortie maison,
   énergie stockée), puis en triphasé une ligne par phase (`⌂` sortie maison,
   `↑` charge, `↓` décharge, `☀` solaire, en W) et l'**Équilibre des phases** :
@@ -380,18 +391,34 @@ ou plus récent) :
   Avec un tarif d'électricité dans la configuration, il affiche aussi
   l'estimation des économies (voir **Économies (estimation)** plus bas).
 
-**Exemple triphasé :** 17 batteries sur L1, L2 et L3. Ajoutez un widget
-**Installation Zendure**, réglez l'**Installation électrique** sur
-_Triphasée_, et cochez dans **Batteries de la phase L1** les six batteries
-raccordées à L1 (par exemple deux 2400 AC, une 2400 Pro, deux 800 Pro et un
-800 sans batterie), dans **L2** les six de L2 et dans **L3** les cinq de L3.
-La carte affiche les totaux du site, une ligne comme `L1 (6) · 60 %` —
-`⌂ 1890 · ↑ 500 · ↓ 1000 · ☀ 1400 W` par phase, et `Équilibre des phases` —
-`Δ 1490 W · L1 la plus haute` en orange au-delà du seuil. Ajoutez un widget
-**Énergie du jour** avec les trois mêmes listes pour les kWh de la journée.
-Une installation monophasée garde le réglage par défaut et laisse les listes
-vides. Le widget **Groupe de batteries** reste disponible pour tout autre
-regroupement.
+**Exemple triphasé :** 18 batteries sur L1, L2 et L3. Dans l'onglet
+**Configuration**, section **Installation électrique**, réglez **Installation
+électrique** sur _Triphasée_ et cochez dans **Batteries de la phase L1** les
+six batteries raccordées à L1 (par exemple deux 2400 AC, une 2400 Pro, deux
+800 Pro et un 800 sans batterie), dans **Batteries de la phase L2** les six de
+L2 et dans **Batteries de la phase L3** les six de L3, puis enregistrez.
+Ajoutez un widget **Installation Zendure** et un widget **Énergie du jour**,
+et laissez leur **Installation électrique** sur _Selon la configuration de
+l'intégration_ : il n'y a rien d'autre à choisir. La carte du site affiche les
+totaux, une ligne comme `L1 (6) · 60 %` — `⌂ 1890 · ↑ 500 · ↓ 1000 · ☀ 1400 W`
+par phase, et `Équilibre des phases` — `Δ 1490 W · L1 la plus haute` en orange
+au-delà du seuil ; la carte d'énergie les kWh de la journée par phase. Une
+installation monophasée garde partout les réglages par défaut. Le widget
+**Groupe de batteries** reste disponible pour tout autre regroupement.
+
+**Pourquoi les phases sont dans la configuration :** Gladys garde au plus 1 Ko
+de réglages par widget, et chaque batterie cochée dans une liste du widget
+prend environ 50 caractères (son identifiant). Au-delà d'environ 15 batteries
+dans les listes du widget, le widget ne peut plus s'afficher ni le tableau de
+bord s'enregistrer (erreur 422 _settings: must be at most 1024 bytes_). La
+configuration n'a pas cette limite, et les phases y sont réglées une fois pour
+les deux widgets. Un widget réglé sur _Selon la configuration de
+l'intégration_ alors que la configuration est triphasée sans aucune batterie
+attribuée affiche toutes les batteries en monophasé, avec une ligne
+d'avertissement **Aucune phase attribuée** ; des phases remplies dans une
+configuration monophasée sont ignorées (ligne **Phases ignorées**). Les
+widgets réglés avant sur _Monophasée_ ou _Triphasée_ gardent leurs propres
+listes et continuent de fonctionner. Un widget déjà au-delà de la limite : retirez-le du tableau de bord et ajoutez-le à nouveau (ou videz ses listes), en gardant _Selon la configuration de l'intégration_.
 
 Chaque widget n'affiche que ce que la batterie possède : un SolarFlow 800
 utilisé sans pack de batterie garde son solaire, sa sortie maison et sa limite

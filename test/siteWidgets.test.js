@@ -12,11 +12,22 @@ import { readFile } from 'node:fs/promises';
 
 import { validateWidgetContent } from '@gladysassistant/integration-sdk';
 
-import { WIDGETS, SITE_WIDGET, ENERGY_TODAY_WIDGET } from '../src/widgets.js';
 import {
+  WIDGETS,
+  SITE_WIDGET,
+  ENERGY_TODAY_WIDGET,
+  BATTERY_WIDGET,
+  GROUP_WIDGET,
+  BATTERY_TTL_SECONDS,
+  refreshSiteWidgets,
+} from '../src/widgets.js';
+import {
+  CONFIG_PHASE_KEYS,
   DEFAULT_TIMEZONE,
   LAYOUTS,
   PHASE_SETTINGS,
+  SITE_LAYOUTS,
+  effectiveSiteSettings,
   resolveTimezone,
   siteSelection,
   startOfLocalDay,
@@ -35,7 +46,7 @@ import {
   resetSolarflowRuntime,
   applySavingsTariff,
 } from '../src/devices/solarflow.js';
-import { normalizeConfig } from '../src/config.js';
+import { DEFAULT_CONFIG, SITE_LAYOUT_VALUES, normalizeConfig } from '../src/config.js';
 import { buildTariff } from '../src/zendure/savings.js';
 import { createFakeGladys } from './helpers/fakeGladys.js';
 import {
@@ -197,10 +208,217 @@ test('the site widgets settings match the code: layouts, phase keys, defaults', 
       settingOf(key, 'layout').options.map((o) => o.value),
       Object.values(LAYOUTS),
     );
-    assert.equal(settingOf(key, 'layout').default, LAYOUTS.SINGLE_PHASE);
+    // New instances read the phases of the configuration (1 KB settings cap).
+    assert.equal(settingOf(key, 'layout').default, LAYOUTS.FROM_CONFIG);
   }
   assert.equal(settingOf(SITE_WIDGET, 'imbalance_threshold').default, DEFAULT_IMBALANCE_THRESHOLD);
   assert.equal(settingOf(ENERGY_TODAY_WIDGET, 'timezone').default, DEFAULT_TIMEZONE);
+});
+
+test('the electrical installation of the configuration matches the code', () => {
+  const field = (key) => manifest.config_schema.find((candidate) => candidate.key === key);
+  assert.equal(field('electrical_intro').type, 'section');
+  assert.deepEqual(SITE_LAYOUT_VALUES, SITE_LAYOUTS);
+  assert.deepEqual(
+    field('site_layout').options.map((option) => option.value),
+    SITE_LAYOUTS,
+  );
+  assert.equal(field('site_layout').default, DEFAULT_CONFIG.site_layout);
+  for (const key of Object.values(CONFIG_PHASE_KEYS)) {
+    assert.equal(field(key).type, 'multi_select', key);
+    assert.equal(field(key).source, 'devices', key);
+    // The core refuses a default on a dynamic source; none selected is [].
+    assert.equal(field(key).default, undefined, key);
+    assert.notEqual(field(key).required, true, key);
+    assert.deepEqual(DEFAULT_CONFIG[key], [], key);
+  }
+  assert.deepEqual(
+    Object.keys(CONFIG_PHASE_KEYS),
+    PHASE_SETTINGS.map((phase) => phase.key),
+  );
+});
+
+// --- Widget settings size: the core caps them at 1 KB serialized ------------------
+
+// Gladys core MAX_WIDGET_SETTINGS_BYTES (validateWidgetSettings: 422 beyond).
+const MAX_WIDGET_SETTINGS_BYTES = 1024;
+const bytesOf = (settings) => Buffer.byteLength(JSON.stringify(settings), 'utf8');
+// A real external id of this integration (selector + device type + id).
+const realId = (n) =>
+  `ext:ext-terdious-gladys-zendure:solarflow:4D701c${String(n).padStart(2, '0')}`;
+const eighteen = Array.from({ length: 18 }, (_, i) => realId(i));
+
+/** The settings of a widget instance as the core validates them, defaults applied. */
+function defaultSettings(widgetKey, overrides = {}) {
+  const settings = {};
+  for (const field of widgetOf(widgetKey).settings) {
+    if (field.default !== undefined) {
+      settings[field.key] = field.default;
+    }
+  }
+  return { ...settings, ...overrides };
+}
+
+test('from_config: the site widgets settings stay far under the 1 KB cap', () => {
+  for (const key of [SITE_WIDGET, ENERGY_TODAY_WIDGET]) {
+    // What the dashboard editor may store: every declared key, empty lists.
+    const settings = defaultSettings(key, {
+      title: 'Installation triphasée — garage',
+      devices: [],
+      phase_l1: [],
+      phase_l2: [],
+      phase_l3: [],
+    });
+    assert.equal(settings.layout, LAYOUTS.FROM_CONFIG);
+    assert.ok(bytesOf(settings) < MAX_WIDGET_SETTINGS_BYTES / 4, `${key}: ${bytesOf(settings)} B`);
+  }
+});
+
+test('widget-level phase lists of 18 batteries overflow the 1 KB cap (the field bug)', () => {
+  const settings = defaultSettings(SITE_WIDGET, {
+    layout: LAYOUTS.THREE_PHASE,
+    phase_l1: eighteen.slice(0, 6),
+    phase_l2: eighteen.slice(6, 12),
+    phase_l3: eighteen.slice(12),
+  });
+  assert.ok(bytesOf(settings) > MAX_WIDGET_SETTINGS_BYTES, `${bytesOf(settings)} B`);
+  // The same site from the configuration: the widget stores no id at all.
+  const config = normalizeConfig({
+    site_layout: 'three_phase',
+    site_phase_l1: eighteen.slice(0, 6),
+    site_phase_l2: eighteen.slice(6, 12),
+    site_phase_l3: eighteen.slice(12),
+  });
+  const effective = effectiveSiteSettings(defaultSettings(SITE_WIDGET), config);
+  assert.equal(effective.settings.layout, LAYOUTS.THREE_PHASE);
+  assert.equal(effective.settings.phase_l3.length, 6);
+  assert.ok(bytesOf(defaultSettings(SITE_WIDGET)) < 200);
+});
+
+// --- Layout from the integration configuration ------------------------------------
+
+/** The user's site, its phases in the configuration. */
+function threePhaseConfig() {
+  const { all, settings } = threePhaseSite();
+  return {
+    all,
+    config: normalizeConfig({
+      site_layout: 'three_phase',
+      site_phase_l1: settings.phase_l1,
+      site_phase_l2: settings.phase_l2,
+      site_phase_l3: settings.phase_l3,
+    }),
+    widgetSettings: settings,
+  };
+}
+
+test('from_config: the phases of the configuration, the same figures as the widget lists', () => {
+  const { all, config, widgetSettings } = threePhaseConfig();
+  const fromConfig = siteSelection(all, { layout: 'from_config' }, config);
+  const fromWidget = siteSelection(all, widgetSettings, normalizeConfig());
+  assert.equal(fromConfig.layout, LAYOUTS.THREE_PHASE);
+  assert.equal(fromConfig.fromConfig, true);
+  assert.equal(fromConfig.notice, null);
+  const a = siteContent('Site', fromConfig, { threshold: 500 });
+  const b = siteContent('Site', fromWidget, { threshold: 500 });
+  assert.deepEqual(validateWidgetContent(a), []);
+  assert.deepEqual(a, b);
+  // An unknown layout value (a newer version's) reads the configuration too.
+  assert.equal(siteSelection(all, { layout: 'four_phase' }, config).layout, LAYOUTS.THREE_PHASE);
+});
+
+test('the widget lists win over the configuration when the widget asks for them', () => {
+  const { all, config } = threePhaseConfig();
+  const single = siteSelection(
+    all,
+    { layout: 'single_phase', devices: [all[0].externalId] },
+    config,
+  );
+  assert.equal(single.layout, LAYOUTS.SINGLE_PHASE);
+  assert.equal(single.fromConfig, false);
+  assert.deepEqual(
+    single.batteries.map((b) => b.name),
+    ['AC-1'],
+  );
+  const three = siteSelection(
+    all,
+    { layout: 'three_phase', phase_l1: [all[0].externalId] },
+    config,
+  );
+  assert.deepEqual(
+    three.phases.map((phase) => phase.batteries.length),
+    [1, 0, 0],
+  );
+});
+
+test('from_config three-phase without any phase: every battery, single-phase, with a warning', () => {
+  const { all } = threePhaseSite();
+  const config = normalizeConfig({ site_layout: 'three_phase' });
+  const selection = siteSelection(all, { layout: 'from_config' }, config);
+  assert.equal(selection.layout, LAYOUTS.SINGLE_PHASE);
+  assert.equal(selection.batteries.length, all.length);
+  const content = siteContent('Site', selection);
+  assert.deepEqual(validateWidgetContent(content), []);
+  const warning = rowOf(content, 'No phase assigned');
+  assert.equal(warning.color, 'warning');
+  assert.equal(warning.value.en, 'See the integration configuration');
+  assert.equal(rowOf(content, 'L1'), undefined);
+  // First row of the alerts: never cut by the 10-row budget.
+  const energy = energyTodayContent('Today', selection, { now: Date.now(), timeZone: 'UTC' });
+  assert.deepEqual(validateWidgetContent(energy), []);
+  assert.equal(rowOf(energy, 'No phase assigned').color, 'warning');
+});
+
+test('from_config single-phase: the widget devices, phases filled in vain noted', () => {
+  const { all, settings: widgetSettings } = threePhaseSite();
+  // An instance saved before from_config: no layout key, the core applies the
+  // new default; its own device selection still holds.
+  const legacy = siteSelection(all, { devices: [all[1].externalId] }, normalizeConfig());
+  assert.equal(legacy.layout, LAYOUTS.SINGLE_PHASE);
+  assert.deepEqual(
+    legacy.batteries.map((b) => b.name),
+    ['AC-2'],
+  );
+  assert.equal(legacy.notice, null);
+  assert.equal(rowOf(siteContent('Site', legacy), 'No phase assigned'), undefined);
+
+  const ignored = siteSelection(
+    all,
+    { layout: 'from_config' },
+    normalizeConfig({ site_phase_l1: widgetSettings.phase_l1 }),
+  );
+  assert.equal(ignored.layout, LAYOUTS.SINGLE_PHASE);
+  assert.equal(ignored.batteries.length, all.length);
+  assert.equal(rowOf(siteContent('Site', ignored), 'Phases ignored').color, 'info');
+});
+
+test('the battery widget TTL keeps a large site under the core pull budget', () => {
+  // The core answers 429 past 30 cache-miss pulls a minute per integration.
+  // The user's dashboard: 18 battery widgets, one group per phase and one
+  // for the site, the site and energy widgets (TTLs of their contents).
+  const pullsPerMinute = 18 * (60 / BATTERY_TTL_SECONDS) + 4 * (60 / 30) + 60 / 30 + 60 / 120;
+  assert.ok(pullsPerMinute <= 20, `${pullsPerMinute} pulls a minute, room left for edits`);
+  assert.ok(BATTERY_TTL_SECONDS <= 120, 'the gauge and status rows stay within two minutes');
+  assert.equal(typeof WIDGETS[BATTERY_WIDGET].get, 'function');
+  assert.equal(typeof WIDGETS[GROUP_WIDGET].get, 'function');
+});
+
+test('a change of the electrical installation nudges the site widgets, nothing else does', () => {
+  const nudged = [];
+  const fake = { requestWidgetRefresh: (key) => nudged.push(key) };
+  const before = normalizeConfig();
+  assert.deepEqual(refreshSiteWidgets(fake, before, normalizeConfig({ poll_frequency: 60 })), []);
+  assert.deepEqual(
+    refreshSiteWidgets(fake, before, normalizeConfig({ site_layout: 'three_phase' })),
+    [SITE_WIDGET, ENERGY_TODAY_WIDGET],
+  );
+  refreshSiteWidgets(fake, before, normalizeConfig({ site_phase_l2: [realId(1)] }));
+  assert.deepEqual(nudged, [SITE_WIDGET, ENERGY_TODAY_WIDGET, SITE_WIDGET, ENERGY_TODAY_WIDGET]);
+  // An older SDK without the nudge: nothing thrown.
+  assert.deepEqual(
+    refreshSiteWidgets({}, before, normalizeConfig({ site_layout: 'three_phase' })),
+    [],
+  );
 });
 
 // --- Site widget, three-phase ----------------------------------------------------
@@ -516,6 +734,33 @@ test('the site handler: every battery by default, phases from the settings', asy
   });
   assert.deepEqual(validateWidgetContent(unassigned), []);
   assert.match(unassigned.components[0].text.en, /Assign the batteries of each phase/);
+
+  // The default layout, the phases in the configuration.
+  const withPhases = normalizeConfig({
+    cloud_key: FAKE_CLOUD_KEY,
+    site_layout: 'three_phase',
+    site_phase_l1: [devices[0].external_id],
+    site_phase_l2: [devices[1].external_id],
+  });
+  const fromConfig = await WIDGETS[SITE_WIDGET].get(gladys, {
+    settings: { layout: 'from_config', imbalance_threshold: 100 },
+    config: withPhases,
+  });
+  assert.deepEqual(validateWidgetContent(fromConfig), []);
+  assert.equal(rowOf(fromConfig, 'L3').value.en, 'No battery');
+  assert.ok(rowOf(fromConfig, 'L1'));
+
+  // Every configured battery gone: a message pointing to the configuration.
+  const gone = await WIDGETS[SITE_WIDGET].get(gladys, {
+    settings: { layout: 'from_config' },
+    config: normalizeConfig({
+      cloud_key: FAKE_CLOUD_KEY,
+      site_layout: 'three_phase',
+      site_phase_l1: ['ext:ext-terdious-gladys-zendure:solarflow:gone'],
+    }),
+  });
+  assert.deepEqual(validateWidgetContent(gone), []);
+  assert.match(gone.components[0].text.en, /integration configuration was found/);
 });
 
 test('the energy handler waits for the meters, then counts the local API reports', async () => {
