@@ -9,7 +9,8 @@
 // setting (Gladys gives an integration no instance timezone; empty or
 // unknown: Europe/Paris). The chart shows the home output of each slot.
 //
-// Same selection as the `site` widget (single-phase, or L1/L2/L3). The
+// Same selection as the `site` widget (from the integration configuration
+// by default, or the widget's own lists: single-phase, or L1/L2/L3). The
 // figures start when the meters saw the batteries: after a first install or
 // a day spent offline, the "Counted since" row tells from when.
 //
@@ -26,9 +27,8 @@ import { savingsComponents } from './savings.js';
 import {
   MAX_STATUS_ROWS,
   T,
-  ASSIGN_PHASES,
   LAYOUTS,
-  NO_BATTERY,
+  emptySelectionMessage,
   fitRows,
   localTime,
   messageContent,
@@ -239,9 +239,9 @@ export function energyTodayContent(title, selection, { now, timeZone, savings })
 
 export const energyTodayWidget = {
   async get(gladys, { settings = {}, config, now = Date.now() }) {
-    const selection = siteSelection(await describeBatteries(gladys, config), settings);
+    const selection = siteSelection(await describeBatteries(gladys, config), settings, config);
     if (selection.batteries.length === 0) {
-      return messageContent(selection.layout === LAYOUTS.THREE_PHASE ? ASSIGN_PHASES : NO_BATTERY);
+      return messageContent(emptySelectionMessage(selection));
     }
     if (!selection.batteries.some((battery) => battery.energyReady)) {
       return messageContent(LOADING);

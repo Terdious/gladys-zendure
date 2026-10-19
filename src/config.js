@@ -43,7 +43,40 @@ export const DEFAULT_CONFIG = {
   // The off-peak hours and the calendar days of the savings are in this
   // timezone (Gladys gives an integration no instance timezone).
   tariff_timezone: 'Europe/Paris',
+  // Electrical installation, read by the site widgets set to "From the
+  // integration configuration" (src/dashboard/common.js). The phases live
+  // here, not in the widgets: a widget's settings are capped at 1 KB by the
+  // core, about 15 battery external ids. The device lists have no manifest
+  // default (the core refuses one on a `source: "devices"` field).
+  site_layout: 'single_phase', // single_phase | three_phase
+  site_phase_l1: [],
+  site_phase_l2: [],
+  site_phase_l3: [],
 };
+
+// Values the `site_layout` option accepts; anything else is single-phase.
+export const SITE_LAYOUT_VALUES = ['single_phase', 'three_phase'];
+
+/**
+ * A device multi-select value: the unique non-empty strings of an array (a
+ * JSON-encoded array accepted), [] for anything else.
+ * @param {unknown} value raw value
+ * @returns {Array<string>}
+ */
+function toIdList(value) {
+  let list = value;
+  if (typeof list === 'string') {
+    try {
+      list = JSON.parse(list);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(list)) {
+    return [];
+  }
+  return [...new Set(list.filter((id) => typeof id === 'string' && id.trim() !== ''))];
+}
 
 // Values the `tariff_mode` option accepts; anything else is `none`.
 export const TARIFF_MODE_VALUES = ['none', 'base', 'peak_offpeak'];
@@ -130,6 +163,12 @@ export function normalizeConfig(raw = {}) {
     resale_enabled: toBoolean(raw.resale_enabled, DEFAULT_CONFIG.resale_enabled),
     resale_price: toPriceOrNull(raw.resale_price),
     tariff_timezone: String(raw.tariff_timezone ?? '').trim() || DEFAULT_CONFIG.tariff_timezone,
+    site_layout: SITE_LAYOUT_VALUES.includes(raw.site_layout)
+      ? raw.site_layout
+      : DEFAULT_CONFIG.site_layout,
+    site_phase_l1: toIdList(raw.site_phase_l1),
+    site_phase_l2: toIdList(raw.site_phase_l2),
+    site_phase_l3: toIdList(raw.site_phase_l3),
   };
 }
 

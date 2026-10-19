@@ -12,8 +12,9 @@
 //     phase (L1, L2, L3), and one more without battery selected for the whole
 //     site; a single-phase installation needs just one.
 //   - `site` (src/dashboard/site.js): the whole installation, single-phase or
-//     three-phase (batteries assigned to L1, L2, L3), with the phase balance,
-//     the sources and the alerts.
+//     three-phase (batteries assigned to L1, L2, L3 in the integration
+//     configuration by default, or in the widget's own lists), with the
+//     phase balance, the sources and the alerts.
 //   - `energy_today` (src/dashboard/energyToday.js): the energy of the day
 //     since local midnight, per site or per phase.
 //
@@ -54,6 +55,9 @@ export { SITE_WIDGET, ENERGY_TODAY_WIDGET };
 
 // Keys of the button actions of the battery widget.
 export const BATTERY_ACTIONS = { POWER_LIMITS: 'power_limits', MODE_AND_LEVELS: 'mode_and_levels' };
+
+// Content TTL of the battery widget (s), see batteryContent.
+export const BATTERY_TTL_SECONDS = 120;
 
 // Rows of a status component the core keeps (the SDK's MAX_STATUS_ITEMS).
 const GROUP_MAX_ROWS = MAX_STATUS_ROWS;
@@ -290,8 +294,14 @@ function batteryContent(battery) {
       },
     });
   }
-  // The tiles are live; the status rows and the gauge follow the TTL.
-  return { ttl_seconds: 30, components };
+  // The power tiles are bound to the device features: the core pushes their
+  // states in real time, whatever the TTL. The TTL only refreshes the gauge
+  // and the status rows (level, stored energy, remaining time, source,
+  // settings), which move by about 1 % a minute at most. Two minutes, not
+  // 30 s: a site of 18 batteries has up to 18 instances, and the core
+  // answers 429 past 30 content pulls a minute per integration (cache
+  // misses, settings edits included), which 18 x 2 pulls a minute exceeded.
+  return { ttl_seconds: BATTERY_TTL_SECONDS, components };
 }
 
 /** Status row value of a group member: level (and remaining time) or output. */
@@ -401,6 +411,33 @@ const ACTION_UNCHANGED = T(
   'Nichts zu ändern: Die Batterie läuft bereits mit diesen Werten.',
   'Nada que cambiar: la batería ya funciona con estos valores.',
 );
+
+// Configuration keys the site widgets read in their `from_config` layout.
+const SITE_CONFIG_KEYS = ['site_layout', 'site_phase_l1', 'site_phase_l2', 'site_phase_l3'];
+
+/**
+ * After a configuration change, ask the core to re-pull the site widgets
+ * when their electrical installation changed: their cached content (keyed by
+ * the widget settings, which do not change) would otherwise show the old
+ * phases until its TTL. A nudge is rate-limited core-side and costs one pull.
+ * @param {object} gladys SDK instance
+ * @param {object} previous normalized configuration before the change
+ * @param {object} next normalized configuration after the change
+ * @returns {Array<string>} the widget keys nudged
+ */
+export function refreshSiteWidgets(gladys, previous, next) {
+  const changed = SITE_CONFIG_KEYS.some(
+    (key) => JSON.stringify(previous?.[key]) !== JSON.stringify(next?.[key]),
+  );
+  if (!changed || typeof gladys.requestWidgetRefresh !== 'function') {
+    return [];
+  }
+  const keys = [SITE_WIDGET, ENERGY_TODAY_WIDGET];
+  for (const key of keys) {
+    gladys.requestWidgetRefresh(key);
+  }
+  return keys;
+}
 
 const isSet = (value) => value !== undefined && value !== null && value !== '';
 

@@ -356,6 +356,115 @@
       "default": false
     },
     {
+      "key": "electrical_intro",
+      "type": "section",
+      "label": {
+        "en": "Electrical installation",
+        "fr": "Installation électrique",
+        "de": "Elektrische Anlage",
+        "es": "Instalación eléctrica"
+      },
+      "description": {
+        "en": "Used by the \"Zendure site\" and \"Energy today\" dashboard widgets set to \"From the integration configuration\" (their default). On a three-phase site, put each battery in the phase it feeds (L1, L2, L3): once here, for every widget. The settings of a widget are limited to 1 KB by Gladys, about 15 batteries, so a large site cannot keep its phases there.",
+        "fr": "Utilisée par les widgets de tableau de bord « Installation Zendure » et « Énergie du jour » réglés sur « Selon la configuration de l'intégration » (leur valeur par défaut). Sur un site triphasé, placez chaque batterie dans la phase qu'elle alimente (L1, L2, L3) : une seule fois ici, pour tous les widgets. Les réglages d'un widget sont limités à 1 Ko par Gladys, environ 15 batteries : une grande installation ne peut pas y garder ses phases.",
+        "de": "Wird von den Dashboard-Widgets „Zendure-Anlage“ und „Energie heute“ verwendet, die auf „Aus der Konfiguration der Integration“ stehen (ihr Standard). Bei einer dreiphasigen Anlage ordne jede Batterie der Phase zu, die sie speist (L1, L2, L3): einmal hier, für alle Widgets. Die Einstellungen eines Widgets sind von Gladys auf 1 KB begrenzt, etwa 15 Batterien: Eine große Anlage kann ihre Phasen dort nicht halten.",
+        "es": "La usan los widgets del panel «Instalación Zendure» y «Energía de hoy» configurados en «Según la configuración de la integración» (su valor por defecto). En una instalación trifásica, ponga cada batería en la fase que alimenta (L1, L2, L3): una sola vez aquí, para todos los widgets. Gladys limita los ajustes de un widget a 1 KB, unas 15 baterías: una instalación grande no puede guardar allí sus fases."
+      }
+    },
+    {
+      "key": "site_layout",
+      "type": "select",
+      "label": {
+        "en": "Electrical layout",
+        "fr": "Installation électrique",
+        "de": "Elektrische Anlage",
+        "es": "Instalación eléctrica"
+      },
+      "description": {
+        "en": "Single-phase: the site widgets total every battery. Three-phase: per phase, from the three lists below.",
+        "fr": "Monophasée : les widgets du site totalisent toutes les batteries. Triphasée : par phase, selon les trois listes ci-dessous.",
+        "de": "Einphasig: Die Anlagen-Widgets summieren alle Batterien. Dreiphasig: je Phase, aus den drei Listen unten.",
+        "es": "Monofásica: los widgets de la instalación suman todas las baterías. Trifásica: por fase, según las tres listas de abajo."
+      },
+      "required": false,
+      "default": "single_phase",
+      "display": "radio",
+      "options": [
+        {
+          "value": "single_phase",
+          "label": {
+            "en": "Single-phase",
+            "fr": "Monophasée",
+            "de": "Einphasig",
+            "es": "Monofásica"
+          }
+        },
+        {
+          "value": "three_phase",
+          "label": {
+            "en": "Three-phase (L1, L2, L3)",
+            "fr": "Triphasée (L1, L2, L3)",
+            "de": "Dreiphasig (L1, L2, L3)",
+            "es": "Trifásica (L1, L2, L3)"
+          }
+        }
+      ]
+    },
+    {
+      "key": "site_phase_l1",
+      "type": "multi_select",
+      "source": "devices",
+      "label": {
+        "en": "Phase L1 batteries",
+        "fr": "Batteries de la phase L1",
+        "de": "Batterien der Phase L1",
+        "es": "Baterías de la fase L1"
+      },
+      "description": {
+        "en": "Three-phase only: each battery in the phase it feeds.",
+        "fr": "Triphasé uniquement : chaque batterie dans la phase qu'elle alimente.",
+        "de": "Nur dreiphasig: jede Batterie in der Phase, die sie speist.",
+        "es": "Solo trifásica: cada batería en la fase que alimenta."
+      },
+      "required": false
+    },
+    {
+      "key": "site_phase_l2",
+      "type": "multi_select",
+      "source": "devices",
+      "label": {
+        "en": "Phase L2 batteries",
+        "fr": "Batteries de la phase L2",
+        "de": "Batterien der Phase L2",
+        "es": "Baterías de la fase L2"
+      },
+      "description": {
+        "en": "Three-phase only: each battery in the phase it feeds.",
+        "fr": "Triphasé uniquement : chaque batterie dans la phase qu'elle alimente.",
+        "de": "Nur dreiphasig: jede Batterie in der Phase, die sie speist.",
+        "es": "Solo trifásica: cada batería en la fase que alimenta."
+      },
+      "required": false
+    },
+    {
+      "key": "site_phase_l3",
+      "type": "multi_select",
+      "source": "devices",
+      "label": {
+        "en": "Phase L3 batteries",
+        "fr": "Batteries de la phase L3",
+        "de": "Batterien der Phase L3",
+        "es": "Baterías de la fase L3"
+      },
+      "description": {
+        "en": "Three-phase only: each battery in the phase it feeds.",
+        "fr": "Triphasé uniquement : chaque batterie dans la phase qu'elle alimente.",
+        "de": "Nur dreiphasig: jede Batterie in der Phase, die sie speist.",
+        "es": "Solo trifásica: cada batería en la fase que alimenta."
+      },
+      "required": false
+    },
+    {
       "key": "savings_intro",
       "type": "section",
       "label": {
@@ -1356,9 +1465,18 @@
             "es": "Instalación eléctrica"
           },
           "required": true,
-          "default": "single_phase",
+          "default": "from_config",
           "display": "radio",
           "options": [
+            {
+              "value": "from_config",
+              "label": {
+                "en": "From the integration configuration",
+                "fr": "Selon la configuration de l'intégration",
+                "de": "Aus der Konfiguration der Integration",
+                "es": "Según la configuración de la integración"
+              }
+            },
             {
               "value": "single_phase",
               "label": {
@@ -1377,7 +1495,13 @@
                 "es": "Trifásica (L1, L2, L3)"
               }
             }
-          ]
+          ],
+          "description": {
+            "en": "Recommended: the layout and the phases set once in the integration configuration (any number of batteries). The other two use the lists below.",
+            "fr": "Recommandé : l'installation et les phases réglées une fois dans la configuration de l'intégration (tout nombre de batteries). Les deux autres utilisent les listes ci-dessous.",
+            "de": "Empfohlen: Anlage und Phasen einmal in der Konfiguration der Integration festgelegt (beliebig viele Batterien). Die beiden anderen nutzen die Listen unten.",
+            "es": "Recomendado: la instalación y las fases definidas una vez en la configuración de la integración (cualquier número de baterías). Las otras dos usan las listas de abajo."
+          }
         },
         {
           "key": "devices",
@@ -1390,10 +1514,10 @@
             "es": "Baterías (monofásica)"
           },
           "description": {
-            "en": "None selected: every battery of the account.",
-            "fr": "Aucune sélectionnée : toutes les batteries du compte.",
-            "de": "Keine ausgewählt: alle Batterien des Kontos.",
-            "es": "Ninguna seleccionada: todas las baterías de la cuenta."
+            "en": "Single-phase (also from the configuration when it is single-phase). None selected: every battery of the account. A widget holds 1 KB of settings (about 15 batteries in all): for a larger site, choose \"From the integration configuration\".",
+            "fr": "Monophasé (et selon la configuration quand elle est monophasée). Aucune sélectionnée : toutes les batteries du compte. Un widget garde 1 Ko de réglages (environ 15 batteries en tout) : pour une installation plus grande, choisissez « Selon la configuration de l'intégration ».",
+            "de": "Einphasig (auch aus der Konfiguration, wenn sie einphasig ist). Keine ausgewählt: alle Batterien des Kontos. Ein Widget speichert 1 KB Einstellungen (etwa 15 Batterien insgesamt): Wähle für eine größere Anlage „Aus der Konfiguration der Integration“.",
+            "es": "Monofásica (también según la configuración cuando es monofásica). Ninguna seleccionada: todas las baterías de la cuenta. Un widget guarda 1 KB de ajustes (unas 15 baterías en total): para una instalación mayor, elija «Según la configuración de la integración»."
           }
         },
         {
@@ -1407,10 +1531,10 @@
             "es": "Baterías de la fase L1 (trifásica)"
           },
           "description": {
-            "en": "Three-phase only: each battery in the phase it feeds.",
-            "fr": "Triphasé uniquement : chaque batterie dans la phase qu'elle alimente.",
-            "de": "Nur dreiphasig: jede Batterie in der Phase, die sie speist.",
-            "es": "Solo trifásica: cada batería en la fase que alimenta."
+            "en": "Three-phase (widget lists) only: each battery in the phase it feeds. A widget holds 1 KB of settings (about 15 batteries in all): for a larger site, choose \"From the integration configuration\".",
+            "fr": "Triphasé (listes du widget) uniquement : chaque batterie dans la phase qu'elle alimente. Un widget garde 1 Ko de réglages (environ 15 batteries en tout) : pour une installation plus grande, choisissez « Selon la configuration de l'intégration ».",
+            "de": "Nur dreiphasig (Widget-Listen): jede Batterie in der Phase, die sie speist. Ein Widget speichert 1 KB Einstellungen (etwa 15 Batterien insgesamt): Wähle für eine größere Anlage „Aus der Konfiguration der Integration“.",
+            "es": "Solo trifásica (listas del widget): cada batería en la fase que alimenta. Un widget guarda 1 KB de ajustes (unas 15 baterías en total): para una instalación mayor, elija «Según la configuración de la integración»."
           }
         },
         {
@@ -1422,6 +1546,12 @@
             "fr": "Batteries de la phase L2 (triphasé)",
             "de": "Batterien der Phase L2 (dreiphasig)",
             "es": "Baterías de la fase L2 (trifásica)"
+          },
+          "description": {
+            "en": "Three-phase (widget lists) only: each battery in the phase it feeds. A widget holds 1 KB of settings (about 15 batteries in all): for a larger site, choose \"From the integration configuration\".",
+            "fr": "Triphasé (listes du widget) uniquement : chaque batterie dans la phase qu'elle alimente. Un widget garde 1 Ko de réglages (environ 15 batteries en tout) : pour une installation plus grande, choisissez « Selon la configuration de l'intégration ».",
+            "de": "Nur dreiphasig (Widget-Listen): jede Batterie in der Phase, die sie speist. Ein Widget speichert 1 KB Einstellungen (etwa 15 Batterien insgesamt): Wähle für eine größere Anlage „Aus der Konfiguration der Integration“.",
+            "es": "Solo trifásica (listas del widget): cada batería en la fase que alimenta. Un widget guarda 1 KB de ajustes (unas 15 baterías en total): para una instalación mayor, elija «Según la configuración de la integración»."
           }
         },
         {
@@ -1433,6 +1563,12 @@
             "fr": "Batteries de la phase L3 (triphasé)",
             "de": "Batterien der Phase L3 (dreiphasig)",
             "es": "Baterías de la fase L3 (trifásica)"
+          },
+          "description": {
+            "en": "Three-phase (widget lists) only: each battery in the phase it feeds. A widget holds 1 KB of settings (about 15 batteries in all): for a larger site, choose \"From the integration configuration\".",
+            "fr": "Triphasé (listes du widget) uniquement : chaque batterie dans la phase qu'elle alimente. Un widget garde 1 Ko de réglages (environ 15 batteries en tout) : pour une installation plus grande, choisissez « Selon la configuration de l'intégration ».",
+            "de": "Nur dreiphasig (Widget-Listen): jede Batterie in der Phase, die sie speist. Ein Widget speichert 1 KB Einstellungen (etwa 15 Batterien insgesamt): Wähle für eine größere Anlage „Aus der Konfiguration der Integration“.",
+            "es": "Solo trifásica (listas del widget): cada batería en la fase que alimenta. Un widget guarda 1 KB de ajustes (unas 15 baterías en total): para una instalación mayor, elija «Según la configuración de la integración»."
           }
         },
         {
@@ -1498,9 +1634,18 @@
             "es": "Instalación eléctrica"
           },
           "required": true,
-          "default": "single_phase",
+          "default": "from_config",
           "display": "radio",
           "options": [
+            {
+              "value": "from_config",
+              "label": {
+                "en": "From the integration configuration",
+                "fr": "Selon la configuration de l'intégration",
+                "de": "Aus der Konfiguration der Integration",
+                "es": "Según la configuración de la integración"
+              }
+            },
             {
               "value": "single_phase",
               "label": {
@@ -1519,7 +1664,13 @@
                 "es": "Trifásica (L1, L2, L3)"
               }
             }
-          ]
+          ],
+          "description": {
+            "en": "Recommended: the layout and the phases set once in the integration configuration (any number of batteries). The other two use the lists below.",
+            "fr": "Recommandé : l'installation et les phases réglées une fois dans la configuration de l'intégration (tout nombre de batteries). Les deux autres utilisent les listes ci-dessous.",
+            "de": "Empfohlen: Anlage und Phasen einmal in der Konfiguration der Integration festgelegt (beliebig viele Batterien). Die beiden anderen nutzen die Listen unten.",
+            "es": "Recomendado: la instalación y las fases definidas una vez en la configuración de la integración (cualquier número de baterías). Las otras dos usan las listas de abajo."
+          }
         },
         {
           "key": "devices",
@@ -1532,10 +1683,10 @@
             "es": "Baterías (monofásica)"
           },
           "description": {
-            "en": "None selected: every battery of the account.",
-            "fr": "Aucune sélectionnée : toutes les batteries du compte.",
-            "de": "Keine ausgewählt: alle Batterien des Kontos.",
-            "es": "Ninguna seleccionada: todas las baterías de la cuenta."
+            "en": "Single-phase (also from the configuration when it is single-phase). None selected: every battery of the account. A widget holds 1 KB of settings (about 15 batteries in all): for a larger site, choose \"From the integration configuration\".",
+            "fr": "Monophasé (et selon la configuration quand elle est monophasée). Aucune sélectionnée : toutes les batteries du compte. Un widget garde 1 Ko de réglages (environ 15 batteries en tout) : pour une installation plus grande, choisissez « Selon la configuration de l'intégration ».",
+            "de": "Einphasig (auch aus der Konfiguration, wenn sie einphasig ist). Keine ausgewählt: alle Batterien des Kontos. Ein Widget speichert 1 KB Einstellungen (etwa 15 Batterien insgesamt): Wähle für eine größere Anlage „Aus der Konfiguration der Integration“.",
+            "es": "Monofásica (también según la configuración cuando es monofásica). Ninguna seleccionada: todas las baterías de la cuenta. Un widget guarda 1 KB de ajustes (unas 15 baterías en total): para una instalación mayor, elija «Según la configuración de la integración»."
           }
         },
         {
@@ -1549,10 +1700,10 @@
             "es": "Baterías de la fase L1 (trifásica)"
           },
           "description": {
-            "en": "Three-phase only: each battery in the phase it feeds.",
-            "fr": "Triphasé uniquement : chaque batterie dans la phase qu'elle alimente.",
-            "de": "Nur dreiphasig: jede Batterie in der Phase, die sie speist.",
-            "es": "Solo trifásica: cada batería en la fase que alimenta."
+            "en": "Three-phase (widget lists) only: each battery in the phase it feeds. A widget holds 1 KB of settings (about 15 batteries in all): for a larger site, choose \"From the integration configuration\".",
+            "fr": "Triphasé (listes du widget) uniquement : chaque batterie dans la phase qu'elle alimente. Un widget garde 1 Ko de réglages (environ 15 batteries en tout) : pour une installation plus grande, choisissez « Selon la configuration de l'intégration ».",
+            "de": "Nur dreiphasig (Widget-Listen): jede Batterie in der Phase, die sie speist. Ein Widget speichert 1 KB Einstellungen (etwa 15 Batterien insgesamt): Wähle für eine größere Anlage „Aus der Konfiguration der Integration“.",
+            "es": "Solo trifásica (listas del widget): cada batería en la fase que alimenta. Un widget guarda 1 KB de ajustes (unas 15 baterías en total): para una instalación mayor, elija «Según la configuración de la integración»."
           }
         },
         {
@@ -1564,6 +1715,12 @@
             "fr": "Batteries de la phase L2 (triphasé)",
             "de": "Batterien der Phase L2 (dreiphasig)",
             "es": "Baterías de la fase L2 (trifásica)"
+          },
+          "description": {
+            "en": "Three-phase (widget lists) only: each battery in the phase it feeds. A widget holds 1 KB of settings (about 15 batteries in all): for a larger site, choose \"From the integration configuration\".",
+            "fr": "Triphasé (listes du widget) uniquement : chaque batterie dans la phase qu'elle alimente. Un widget garde 1 Ko de réglages (environ 15 batteries en tout) : pour une installation plus grande, choisissez « Selon la configuration de l'intégration ».",
+            "de": "Nur dreiphasig (Widget-Listen): jede Batterie in der Phase, die sie speist. Ein Widget speichert 1 KB Einstellungen (etwa 15 Batterien insgesamt): Wähle für eine größere Anlage „Aus der Konfiguration der Integration“.",
+            "es": "Solo trifásica (listas del widget): cada batería en la fase que alimenta. Un widget guarda 1 KB de ajustes (unas 15 baterías en total): para una instalación mayor, elija «Según la configuración de la integración»."
           }
         },
         {
@@ -1575,6 +1732,12 @@
             "fr": "Batteries de la phase L3 (triphasé)",
             "de": "Batterien der Phase L3 (dreiphasig)",
             "es": "Baterías de la fase L3 (trifásica)"
+          },
+          "description": {
+            "en": "Three-phase (widget lists) only: each battery in the phase it feeds. A widget holds 1 KB of settings (about 15 batteries in all): for a larger site, choose \"From the integration configuration\".",
+            "fr": "Triphasé (listes du widget) uniquement : chaque batterie dans la phase qu'elle alimente. Un widget garde 1 Ko de réglages (environ 15 batteries en tout) : pour une installation plus grande, choisissez « Selon la configuration de l'intégration ».",
+            "de": "Nur dreiphasig (Widget-Listen): jede Batterie in der Phase, die sie speist. Ein Widget speichert 1 KB Einstellungen (etwa 15 Batterien insgesamt): Wähle für eine größere Anlage „Aus der Konfiguration der Integration“.",
+            "es": "Solo trifásica (listas del widget): cada batería en la fase que alimenta. Un widget guarda 1 KB de ajustes (unas 15 baterías en total): para una instalación mayor, elija «Según la configuración de la integración»."
           }
         },
         {

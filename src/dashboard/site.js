@@ -1,6 +1,11 @@
 // -----------------------------------------------------------------------------
 // The `site` widget: the whole Zendure installation on one card.
 //
+// Layout `from_config` (the default): the layout and the phases of the
+// integration configuration (`site_layout`, `site_phase_l1..3`), since a
+// widget's settings are capped at 1 KB and three phase lists of external ids
+// overflow it past ~15 batteries. `single_phase` / `three_phase` keep the
+// widget's own lists, for the small sites set up before.
 // Single-phase: the totals of the selected batteries (none: all of them).
 // Three-phase: the batteries assigned to L1, L2 and L3 in three device
 // multi-selects (the SDK offers `source: "devices"` selects and no other
@@ -31,11 +36,10 @@ import { formatRemainingTime } from '../zendure/battery.js';
 import {
   T,
   UNKNOWN,
-  ASSIGN_PHASES,
   LAYOUTS,
-  NO_BATTERY,
   REMAINING_LABELS,
   averageLevel,
+  emptySelectionMessage,
   fitRows,
   messageContent,
   namesOf,
@@ -367,9 +371,9 @@ function thresholdOf(settings) {
 
 export const siteWidget = {
   async get(gladys, { settings = {}, config }) {
-    const selection = siteSelection(await describeBatteries(gladys, config), settings);
+    const selection = siteSelection(await describeBatteries(gladys, config), settings, config);
     if (selection.batteries.length === 0) {
-      return messageContent(selection.layout === LAYOUTS.THREE_PHASE ? ASSIGN_PHASES : NO_BATTERY);
+      return messageContent(emptySelectionMessage(selection));
     }
     const title =
       (typeof settings.title === 'string' && settings.title.trim()) ||

@@ -10,6 +10,40 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Large three-phase sites can save their dashboard again**: Gladys keeps at
+  most 1 KB of settings per widget, and the **Zendure site** and **Energy
+  today** widgets stored their phases (L1, L2, L3) as lists of device
+  identifiers of about 50 characters each. Past about 15 batteries the widget
+  content answered 422 (_settings: must be at most 1024 bytes_) and the
+  dashboard could not be saved. The phases now live in the integration
+  configuration (see Added), and a widget set to read them stores only its
+  title, timezone, threshold and savings switch. The descriptions of the
+  widget lists tell about the limit. A widget already over the limit is removed
+  and added again (or its lists emptied) once the phases are in the
+  configuration.
+- The **Zendure battery** widget refreshes its content every 2 minutes instead
+  of 30 seconds: its power tiles still follow the battery live (real-time
+  states), only the level gauge and the status lines wait. A dashboard with one
+  such widget per battery (18 on a large site) no longer exceeds the 30 content
+  pulls a minute Gladys allows an integration (429 while editing).
+
+### Added
+
+- Configuration section **Electrical installation**: **Electrical layout**
+  (`site_layout`: single-phase by default, or three-phase) and **Phase L1 /
+  L2 / L3 batteries** (`site_phase_l1`, `site_phase_l2`, `site_phase_l3`),
+  set once for every site widget, with any number of batteries.
+- New **Electrical layout** choice on the **Zendure site** and **Energy
+  today** widgets: _From the integration configuration_ (`from_config`), the
+  default for new widgets. A three-phase configuration without any battery
+  assigned shows every battery as single-phase with a **No phase assigned**
+  warning line; phases filled in a single-phase configuration are reported as
+  ignored. Widgets set to _Single-phase_ or _Three-phase_ keep their own lists
+  and work as before; a widget saved without a layout keeps its battery
+  selection. Saving the configuration refreshes the site widgets at once.
+
 ## [1.10.0] - 2026-10-19
 
 ### Added

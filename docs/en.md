@@ -176,7 +176,13 @@ key** (a base64 token) that you generate once from the Zendure mobile app:
 6. (Optional) Turn on **Battery packs as separate devices** for one more
    device per pack (off by default) — see
    [Battery packs as separate devices](#battery-packs-as-separate-devices-optional).
-7. Click **Save configuration**. Your batteries appear in the **Discover** tab,
+7. (Three-phase site) In **Electrical installation**, set **Electrical
+   layout** to _Three-phase_ and put each battery in **Phase L1 batteries**,
+   **Phase L2 batteries** or **Phase L3 batteries**, the phase it feeds. The
+   **Zendure site** and **Energy today** widgets read it from here (see
+   [Dashboard widgets](#dashboard-widgets)). A single-phase site leaves it as
+   is.
+8. Click **Save configuration**. Your batteries appear in the **Discover** tab,
    ready to be added.
 
 ### Local API (zenSDK, on by default)
@@ -309,8 +315,9 @@ deleted in Gladys and the pack devices fire no alert.
 
 Four widgets are available in the dashboard editor (Gladys 5.1 or later):
 
-- **Zendure battery**: one battery, chosen in the widget settings. Its charge
-  level and its four powers follow the battery live; below them, its source
+- **Zendure battery**: one battery, chosen in the widget settings. Its four
+  powers follow the battery live; its charge level and the lines below
+  refresh every two minutes (it moves by about 1 % a minute at most): its source
   (local, cloud, fallback, unreachable), the energy stored, the output and
   charge limits, the AC mode and the charge levels it reports. The **Power
   limits** and **Mode & levels** buttons open a form pre-filled with the
@@ -321,9 +328,12 @@ Four widgets are available in the dashboard editor (Gladys 5.1 or later):
   known), total powers, energy stored, and one line per battery colored by its
   source. Leave the battery list empty for every battery of the account.
 - **Zendure site**: the whole installation on one card. Choose the
-  **Electrical layout**: _Single-phase_ sums the batteries selected (none: all
-  of them); _Three-phase_ takes the batteries of the **Phase L1 batteries**,
-  **L2** and **L3** lists. The card shows the site totals (state of charge
+  **Electrical layout**: _From the integration configuration_ (the default,
+  recommended) uses the layout and the phases of the **Electrical
+  installation** section of the configuration; _Single-phase_ sums the
+  batteries selected in the widget (none: all of them); _Three-phase_ takes
+  the batteries of the widget's **Phase L1 batteries**, **L2** and **L3**
+  lists. The card shows the site totals (state of charge
   weighted by the pack capacities, charging, discharging, solar, home output,
   energy stored), then in three-phase one line per phase (`⌂` home output,
   `↑` charge, `↓` discharge, `☀` solar, in W) and the **Phase balance**: the
@@ -347,17 +357,31 @@ Four widgets are available in the dashboard editor (Gladys 5.1 or later):
   With an electricity tariff in the configuration, it also shows the savings
   estimate (see **Savings (estimate)** below).
 
-**Three-phase example:** 17 batteries on L1, L2 and L3. Add a **Zendure
-site** widget, set **Electrical layout** to _Three-phase_, and tick in
-**Phase L1 batteries** the six batteries wired to L1 (say two 2400 AC, a 2400
-Pro, two 800 Pro and an 800 without battery), in **L2** the six of L2 and in
-**L3** the five of L3. The card shows the site totals, a line such as
-`L1 (6) · 60 %` — `⌂ 1890 · ↑ 500 · ↓ 1000 · ☀ 1400 W` per phase, and
+**Three-phase example:** 18 batteries on L1, L2 and L3. In the **Configuration**
+tab, section **Electrical installation**, set **Electrical layout** to
+_Three-phase_ and tick in **Phase L1 batteries** the six batteries wired to L1
+(say two 2400 AC, a 2400 Pro, two 800 Pro and an 800 without battery), in
+**Phase L2 batteries** the six of L2 and in **Phase L3 batteries** the six of
+L3, then save. Add a **Zendure site** widget and an **Energy today** widget,
+and keep their **Electrical layout** on _From the integration configuration_:
+there is nothing else to pick. The site card shows the site totals, a line
+such as `L1 (6) · 60 %` — `⌂ 1890 · ↑ 500 · ↓ 1000 · ☀ 1400 W` per phase, and
 `Phase balance` — `Δ 1490 W · L1 highest` in orange when it exceeds the
-threshold. Add an **Energy today** widget with the same three lists for the
-kWh of the day. A single-phase installation keeps the default layout and
-leaves the lists empty. The **Battery group** widget still works for any
-other grouping.
+threshold; the energy card the kWh of the day per phase. A single-phase
+installation keeps the defaults everywhere. The **Battery group** widget still
+works for any other grouping.
+
+**Why the phases live in the configuration:** Gladys keeps at most 1 KB of
+settings per widget, and each battery picked in a widget list takes about 50
+characters (its identifier). Past about 15 batteries in the widget lists, the
+widget can no longer be displayed nor the dashboard saved (error 422
+_settings: must be at most 1024 bytes_). The configuration has no such limit,
+and the phases are set once for both widgets. A widget set to _From the
+integration configuration_ while the configuration is three-phase without any
+battery assigned shows every battery as single-phase, with a **No phase
+assigned** warning line; phases filled in a single-phase configuration are
+ignored (**Phases ignored** line). Widgets set to _Single-phase_ or
+_Three-phase_ before keep their own lists and keep working. A widget already over the limit: remove it from the dashboard and add it again (or empty its lists), keeping _From the integration configuration_.
 
 Each widget only shows what the battery has: a SolarFlow 800 running
 without a battery pack keeps its solar, home output and output limit (no

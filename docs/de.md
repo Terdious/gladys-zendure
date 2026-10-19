@@ -191,7 +191,14 @@ Zendure-App erzeugst:
 6. (Optional) Schalte **Batteriepacks als eigene Geräte** ein, für ein Gerät
    mehr pro Pack (standardmäßig aus) — siehe
    [Batteriepacks als eigene Geräte](#batteriepacks-als-eigene-geräte-optional).
-7. Klicke auf **Konfiguration speichern**. Deine Batterien erscheinen im Tab
+7. (Dreiphasige Anlage) Stelle unter **Elektrische Anlage** die Option
+   **Elektrische Anlage** auf _Dreiphasig_ und ordne jede Batterie in
+   **Batterien der Phase L1**, **Batterien der Phase L2** oder **Batterien der
+   Phase L3** der Phase zu, die sie speist. Die Widgets **Zendure-Anlage** und
+   **Energie heute** lesen sie hier (siehe
+   [Dashboard-Widgets](#dashboard-widgets)). Eine einphasige Anlage lässt sie,
+   wie sie ist.
+8. Klicke auf **Konfiguration speichern**. Deine Batterien erscheinen im Tab
    **Entdecken** und können hinzugefügt werden.
 
 ### Lokale API (zenSDK, standardmäßig aktiv)
@@ -331,9 +338,10 @@ Pack-Geräte lösen keinen Alarm aus.
 
 Im Dashboard-Editor stehen vier Widgets bereit (Gladys 5.1 oder neuer):
 
-- **Zendure-Batterie**: eine Batterie, gewählt in den Widget-Einstellungen. Ihr
-  Ladestand und ihre vier Leistungen folgen der Batterie live; darunter ihre
-  Quelle (lokal, Cloud, Rückfall, nicht erreichbar), die gespeicherte Energie,
+- **Zendure-Batterie**: eine Batterie, gewählt in den Widget-Einstellungen. Ihre
+  vier Leistungen folgen der Batterie live; ihr Ladestand und die Zeilen
+  darunter werden alle zwei Minuten aktualisiert (er ändert sich um höchstens
+  etwa 1 % pro Minute): ihre Quelle (lokal, Cloud, Rückfall, nicht erreichbar), die gespeicherte Energie,
   Ausgangs- und Ladelimit, AC-Modus und die gemeldeten Ladestände. Die
   Schaltflächen **Leistungslimits** und **Modus & Stände** öffnen ein mit den
   aktuellen Werten vorausgefülltes Formular: Ändere, was nötig ist, und
@@ -344,9 +352,11 @@ Im Dashboard-Editor stehen vier Widgets bereit (Gladys 5.1 oder neuer):
   Zeile pro Batterie, gefärbt nach ihrer Quelle. Lass die Batterieliste leer,
   um alle Batterien des Kontos zu nehmen.
 - **Zendure-Anlage**: die ganze Installation auf einer Karte. Wähle die
-  **Elektrische Anlage**: _Einphasig_ summiert die gewählten Batterien (keine:
-  alle); _Dreiphasig_ nimmt die Batterien der Listen **Batterien der Phase
-  L1**, **L2** und **L3**. Die Karte zeigt die Summen der Anlage (Ladestand
+  **Elektrische Anlage**: _Aus der Konfiguration der Integration_ (Standard,
+  empfohlen) nutzt Anlage und Phasen des Abschnitts **Elektrische Anlage** der
+  Konfiguration; _Einphasig_ summiert die im Widget gewählten Batterien
+  (keine: alle); _Dreiphasig_ nimmt die Batterien der Listen **Batterien der
+  Phase L1**, **L2** und **L3** des Widgets. Die Karte zeigt die Summen der Anlage (Ladestand
   nach Pack-Kapazität gewichtet, Laden, Entladen, Solar, Leistung zum Haus,
   gespeicherte Energie), dreiphasig dann eine Zeile pro Phase (`⌂` zum Haus,
   `↑` Laden, `↓` Entladen, `☀` Solar, in W) und die **Phasenbalance**: den
@@ -372,18 +382,34 @@ Im Dashboard-Editor stehen vier Widgets bereit (Gladys 5.1 oder neuer):
   Mit einem Stromtarif in der Konfiguration zeigt es auch die geschätzte
   Ersparnis (siehe **Ersparnis (Schätzung)** unten).
 
-**Dreiphasiges Beispiel:** 17 Batterien auf L1, L2 und L3. Füge ein Widget
-**Zendure-Anlage** hinzu, stelle **Elektrische Anlage** auf _Dreiphasig_ und
-hake in **Batterien der Phase L1** die sechs an L1 angeschlossenen Batterien
-an (etwa zwei 2400 AC, eine 2400 Pro, zwei 800 Pro und ein 800 ohne
-Batterie), in **L2** die sechs von L2 und in **L3** die fünf von L3. Die Karte
-zeigt die Summen der Anlage, pro Phase eine Zeile wie `L1 (6) · 60 %` —
-`⌂ 1890 · ↑ 500 · ↓ 1000 · ☀ 1400 W` und `Phasenbalance` —
-`Δ 1490 W · L1 am höchsten`, orange oberhalb der Schwelle. Füge ein Widget
-**Energie heute** mit denselben drei Listen für die kWh des Tages hinzu. Eine
-einphasige Installation behält die Standardeinstellung und lässt die Listen
-leer. Das Widget **Batteriegruppe** bleibt für jede andere Gruppierung
-verfügbar.
+**Dreiphasiges Beispiel:** 18 Batterien auf L1, L2 und L3. Stelle im Tab
+**Konfiguration**, Abschnitt **Elektrische Anlage**, die **Elektrische Anlage**
+auf _Dreiphasig_ und hake in **Batterien der Phase L1** die sechs an L1
+angeschlossenen Batterien an (etwa zwei 2400 AC, eine 2400 Pro, zwei 800 Pro
+und ein 800 ohne Batterie), in **Batterien der Phase L2** die sechs von L2 und
+in **Batterien der Phase L3** die sechs von L3, dann speichere. Füge ein
+Widget **Zendure-Anlage** und ein Widget **Energie heute** hinzu und lasse
+ihre **Elektrische Anlage** auf _Aus der Konfiguration der Integration_: Mehr
+ist nicht zu wählen. Die Anlagenkarte zeigt die Summen, pro Phase eine Zeile
+wie `L1 (6) · 60 %` — `⌂ 1890 · ↑ 500 · ↓ 1000 · ☀ 1400 W` und
+`Phasenbalance` — `Δ 1490 W · L1 am höchsten`, orange oberhalb der Schwelle;
+die Energiekarte die kWh des Tages je Phase. Eine einphasige Installation
+behält überall die Standardwerte. Das Widget **Batteriegruppe** bleibt für
+jede andere Gruppierung verfügbar.
+
+**Warum die Phasen in der Konfiguration stehen:** Gladys speichert höchstens
+1 KB Einstellungen pro Widget, und jede in einer Widget-Liste gewählte
+Batterie belegt etwa 50 Zeichen (ihre Kennung). Ab etwa 15 Batterien in den
+Widget-Listen kann das Widget nicht mehr angezeigt und das Dashboard nicht
+mehr gespeichert werden (Fehler 422 _settings: must be at most 1024 bytes_).
+Die Konfiguration hat diese Grenze nicht, und die Phasen werden dort einmal
+für beide Widgets festgelegt. Ein Widget auf _Aus der Konfiguration der
+Integration_ zeigt bei einer dreiphasigen Konfiguration ohne zugeordnete
+Batterie alle Batterien einphasig, mit einer Warnzeile **Keine Phase
+zugeordnet**; in einer einphasigen Konfiguration ausgefüllte Phasen werden
+ignoriert (Zeile **Phasen ignoriert**). Widgets, die zuvor auf _Einphasig_
+oder _Dreiphasig_ standen, behalten ihre eigenen Listen und funktionieren
+weiter. Ein Widget, das schon über der Grenze liegt: Entferne es vom Dashboard und füge es neu hinzu (oder leere seine Listen), mit _Aus der Konfiguration der Integration_.
 
 Jedes Widget zeigt nur, was die Batterie hat: Ein SolarFlow 800 ohne
 Batteriepack behält Solar, Leistung zum Haus und Ausgangslimit (kein
