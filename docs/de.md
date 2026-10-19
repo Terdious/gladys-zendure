@@ -300,6 +300,33 @@ Batterie auf keiner Quelle mehr meldet oder wieder meldet (lokale API oder lokal
 Seine Variablen liefern den Namen der Batterie, den neuen Zustand und die
 Telemetriequelle.
 
+Der Auslöser **Batteriealarm** startet eine Szene, wenn ein Statuscode einer
+Batterie beginnt oder endet. Seine Filter, alle optional (leer: jeder Wert):
+
+- **Batterie**: eine Batterie;
+- **Alarm**: _Störung_ (Fehlerflag `is_error` oder Störungsstufe `faultLevel`
+  über 0), _Heizung_ (die Pack-Heizung läuft, `heatState`), _Kalibrierung_ (die
+  Kalibrierung des Ladezustands läuft, `socStatus`), _Niedrige Temperatur_
+  (`lowTemperature`), _Rückfluss_ (`reverseState`);
+- **Änderung**: _Beginnt_ oder _Endet_.
+
+Seine Variablen liefern den Namen der Batterie, den Alarm, die Änderung
+(`started` / `ended`), den gemeldeten Code (bei einer Störung die
+Störungsstufe) und die Telemetriequelle (`local` / `cloud`). Beispiele:
+
+- benachrichtigt werden, wenn eine Batterie heizt: Auslöser **Batteriealarm**,
+  Alarm _Heizung_, Änderung _Beginnt_, dann eine Aktion **Nachricht senden**,
+  die die Batterie über die Variablen nennt;
+- über eine Störung und ihr Ende benachrichtigt werden: eine Szene mit Alarm
+  _Störung_ und Änderung _Beginnt_, eine weitere mit Änderung _Endet_.
+
+Ein Alarm wird nur bei einer Änderung ausgelöst: der Zustand einer Batterie
+beim Start der Integration (oder bei ihrer Neuanlage) ist ihr Anfangszustand,
+kein Ereignis. Ein neuer Zustand muss 30 Sekunden lang über mindestens zwei
+Meldungen bestehen, bevor die Szene startet: ein Code, der für eine Meldung
+aufblinkt, löst sie nie aus. Eine in Gladys gelöschte Batterie und die
+Pack-Geräte lösen keinen Alarm aus.
+
 ## Dashboard-Widgets
 
 Im Dashboard-Editor stehen vier Widgets bereit (Gladys 5.1 oder neuer):

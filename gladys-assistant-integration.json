@@ -718,6 +718,197 @@
           }
         }
       ]
+    },
+    {
+      "key": "battery_alert",
+      "label": {
+        "en": "Battery alert",
+        "fr": "Alerte batterie",
+        "de": "Batteriealarm",
+        "es": "Alerta de batería"
+      },
+      "description": {
+        "en": "A battery status starts or ends: fault, heating, calibration, low temperature, reverse flow.",
+        "fr": "Un état de la batterie commence ou se termine : défaut, chauffage, calibrage, température basse, flux inverse.",
+        "de": "Ein Batteriezustand beginnt oder endet: Störung, Heizung, Kalibrierung, niedrige Temperatur, Rückfluss.",
+        "es": "Un estado de la batería empieza o termina: fallo, calefacción, calibración, temperatura baja, flujo inverso."
+      },
+      "fields": [
+        {
+          "key": "device",
+          "type": "select",
+          "source": "devices",
+          "label": {
+            "en": "Battery",
+            "fr": "Batterie",
+            "de": "Batterie",
+            "es": "Batería"
+          }
+        },
+        {
+          "key": "kind",
+          "type": "select",
+          "label": {
+            "en": "Alert",
+            "fr": "Alerte",
+            "de": "Alarm",
+            "es": "Alerta"
+          },
+          "options": [
+            {
+              "value": "fault",
+              "label": {
+                "en": "Fault",
+                "fr": "Défaut",
+                "de": "Störung",
+                "es": "Fallo"
+              }
+            },
+            {
+              "value": "heating",
+              "label": {
+                "en": "Heating",
+                "fr": "Chauffage",
+                "de": "Heizung",
+                "es": "Calefacción"
+              }
+            },
+            {
+              "value": "calibration",
+              "label": {
+                "en": "Calibration",
+                "fr": "Calibrage",
+                "de": "Kalibrierung",
+                "es": "Calibración"
+              }
+            },
+            {
+              "value": "low_temperature",
+              "label": {
+                "en": "Low temperature",
+                "fr": "Température basse",
+                "de": "Niedrige Temperatur",
+                "es": "Temperatura baja"
+              }
+            },
+            {
+              "value": "reverse_flow",
+              "label": {
+                "en": "Reverse flow",
+                "fr": "Flux inverse",
+                "de": "Rückfluss",
+                "es": "Flujo inverso"
+              }
+            }
+          ]
+        },
+        {
+          "key": "state",
+          "type": "select",
+          "label": {
+            "en": "Change",
+            "fr": "Changement",
+            "de": "Änderung",
+            "es": "Cambio"
+          },
+          "options": [
+            {
+              "value": "started",
+              "label": {
+                "en": "Started",
+                "fr": "Commence",
+                "de": "Beginnt",
+                "es": "Empieza"
+              }
+            },
+            {
+              "value": "ended",
+              "label": {
+                "en": "Ended",
+                "fr": "Se termine",
+                "de": "Endet",
+                "es": "Termina"
+              }
+            }
+          ]
+        }
+      ],
+      "variables": [
+        {
+          "key": "device_name",
+          "type": "string",
+          "label": {
+            "en": "Battery name",
+            "fr": "Nom de la batterie",
+            "de": "Name der Batterie",
+            "es": "Nombre de la batería"
+          }
+        },
+        {
+          "key": "kind",
+          "type": "string",
+          "label": {
+            "en": "Alert",
+            "fr": "Alerte",
+            "de": "Alarm",
+            "es": "Alerta"
+          },
+          "description": {
+            "en": "fault, heating, calibration, low_temperature or reverse_flow.",
+            "fr": "fault, heating, calibration, low_temperature ou reverse_flow.",
+            "de": "fault, heating, calibration, low_temperature oder reverse_flow.",
+            "es": "fault, heating, calibration, low_temperature o reverse_flow."
+          }
+        },
+        {
+          "key": "state",
+          "type": "string",
+          "label": {
+            "en": "Change",
+            "fr": "Changement",
+            "de": "Änderung",
+            "es": "Cambio"
+          },
+          "description": {
+            "en": "started or ended.",
+            "fr": "started ou ended.",
+            "de": "started oder ended.",
+            "es": "started o ended."
+          }
+        },
+        {
+          "key": "value",
+          "type": "number",
+          "label": {
+            "en": "Reported code",
+            "fr": "Code remonté",
+            "de": "Gemeldeter Code",
+            "es": "Código informado"
+          },
+          "description": {
+            "en": "Raw value reported by the battery (the fault level for a fault).",
+            "fr": "Valeur brute remontée par la batterie (le niveau de défaut pour un défaut).",
+            "de": "Rohwert der Batterie (bei einer Störung die Störungsstufe).",
+            "es": "Valor bruto informado por la batería (el nivel de fallo para un fallo)."
+          }
+        },
+        {
+          "key": "source",
+          "type": "string",
+          "label": {
+            "en": "Telemetry source",
+            "fr": "Source de télémétrie",
+            "de": "Telemetriequelle",
+            "es": "Fuente de telemetría"
+          },
+          "description": {
+            "en": "local or cloud.",
+            "fr": "local ou cloud.",
+            "de": "local oder cloud.",
+            "es": "local o cloud."
+          }
+        }
+      ]
     }
   ],
   "scene_actions": [

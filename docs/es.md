@@ -303,6 +303,35 @@ batería deja de informar en todas las fuentes, o vuelve a hacerlo (API local o
 MQTT local). Sus variables dan el nombre de la batería, el nuevo estado y la fuente
 de telemetría.
 
+El disparador **Alerta de batería** inicia una escena cuando un estado de una
+batería empieza o termina. Sus filtros, todos opcionales (vacíos: cualquier
+valor):
+
+- **Batería**: una batería;
+- **Alerta**: _Fallo_ (indicador de error `is_error`, o nivel de fallo
+  `faultLevel` mayor que 0), _Calefacción_ (la calefacción de los packs
+  funciona, `heatState`), _Calibración_ (la calibración del estado de carga
+  está en curso, `socStatus`), _Temperatura baja_ (`lowTemperature`), _Flujo
+  inverso_ (`reverseState`);
+- **Cambio**: _Empieza_ o _Termina_.
+
+Sus variables dan el nombre de la batería, la alerta, el cambio (`started` /
+`ended`), el código informado (el nivel de fallo para un fallo) y la fuente de
+telemetría (`local` / `cloud`). Ejemplos:
+
+- recibir un aviso cuando una batería se calienta: disparador **Alerta de
+  batería**, Alerta _Calefacción_, Cambio _Empieza_, y luego una acción
+  **Enviar un mensaje** que nombra la batería con las variables;
+- recibir un aviso de un fallo, y de su fin: una escena con Alerta _Fallo_ y
+  Cambio _Empieza_, otra con Cambio _Termina_.
+
+Una alerta solo se dispara con un cambio: el estado de una batería al iniciar
+la integración (o al volver a crearla) es su estado inicial, no un evento. Un
+nuevo estado debe mantenerse 30 segundos, en al menos dos informes, antes de
+que la escena empiece: un código que parpadea durante un informe nunca la
+dispara. Una batería eliminada en Gladys y los dispositivos de pack no
+disparan ninguna alerta.
+
 ## Widgets del panel
 
 En el editor del panel hay cuatro widgets disponibles (Gladys 5.1 o
