@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-10-19
+
 ### Fixed
 
 - **Large three-phase sites can save their dashboard again**: Gladys keeps at
@@ -435,7 +437,8 @@ the notes of the version's GitHub Release.
   read-only telemetry (battery level, battery input and output power, home
   output power, solar input power), polling and real-time MQTT push.
 
-[Unreleased]: https://github.com/Terdious/gladys-zendure/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/Terdious/gladys-zendure/compare/v1.11.0...HEAD
+[1.11.0]: https://github.com/Terdious/gladys-zendure/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/Terdious/gladys-zendure/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/Terdious/gladys-zendure/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/Terdious/gladys-zendure/compare/v1.7.0...v1.8.0
