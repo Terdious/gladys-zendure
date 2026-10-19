@@ -361,6 +361,36 @@ function createBaseMqttRuntime({
     }
   }
 
+  /**
+   * Stop following one device: forget it (a reconnection no longer
+   * resubscribes it), unsubscribe its topics and drop its cached payload, so
+   * its last values never count as fresh again. A device deleted in Gladys
+   * goes through here.
+   * @param {object} rawCloudDevice device from the cloud deviceList
+   * @returns {boolean} true when the device was followed
+   */
+  function unsubscribeDevice(rawCloudDevice) {
+    const deviceKey = rawCloudDevice ? getDeviceKey(rawCloudDevice) : null;
+    if (!deviceKey) {
+      return false;
+    }
+    const wasTracked = trackedDevices.delete(deviceKey);
+    latestPayloadByKey.delete(deviceKey);
+    lastPayloadAtByKey.delete(deviceKey);
+    const topics = topicsForDevice(rawCloudDevice).filter((topic) => subscribedTopics.has(topic));
+    for (const topic of topics) {
+      subscribedTopics.delete(topic);
+    }
+    if (client && connected && topics.length > 0) {
+      client.unsubscribe(topics, (error) => {
+        if (error) {
+          logger.debug(`Zendure MQTT unsubscribe failed: ${error.message}`);
+        }
+      });
+    }
+    return wasTracked;
+  }
+
   function refreshSubscriptions() {
     trackedDevices.forEach((rawCloudDevice) => subscribeDevice(rawCloudDevice));
   }
@@ -580,6 +610,8 @@ function createBaseMqttRuntime({
 
     /** Subscribe the per-device topics of one raw cloud device. */
     subscribeDevice,
+
+    unsubscribeDevice,
 
     /**
      * Ask the device for fresh properties (cloud only; a no-op returning false
@@ -818,10 +850,17 @@ export function createZendureLocalMqtt({ mqttLibrary = mqtt, clientId, connectTi
       const parsedTopic = parseLocalSensorTopic(topic);
       if (parsedTopic) {
         // Native flat format, one metric or setting per message: build a flat partial
-        // `{ [metric]: value }` that merges into the per-serial payload.
+        // `{ [metric]: value }` that merges into the per-serial payload. A
+        // battery pack prefixes its metrics with its own serial
+        // (`Zendure/sensor/{packSn}/{packSn}_socLevel`): the prefix is dropped
+        // so a pack payload reads like a `packData` entry.
+        const packPrefix = `${parsedTopic.serial}_`;
+        const metric = parsedTopic.metric.startsWith(packPrefix)
+          ? parsedTopic.metric.slice(packPrefix.length)
+          : parsedTopic.metric;
         return {
           key: parsedTopic.serial,
-          partialPayload: { [parsedTopic.metric]: parseLocalStateValue(parsedTopic, payload) },
+          partialPayload: { [metric]: parseLocalStateValue({ ...parsedTopic, metric }, payload) },
         };
       }
 
@@ -866,10 +905,16 @@ export function createZendureLocalMqtt({ mqttLibrary = mqtt, clientId, connectTi
           : Object.fromEntries(
               Object.entries(decodedPayload).filter(([, value]) => Number.isFinite(value)),
             );
-      if (Object.keys(properties).length === 0) {
+      // The pack list rides next to `properties` (cloud report format): kept,
+      // it names the packs and carries their raw values.
+      const packData = Array.isArray(decodedPayload.packData) ? decodedPayload.packData : null;
+      if (Object.keys(properties).length === 0 && !packData) {
         return null;
       }
-      return { key: serial, partialPayload: { ...properties } };
+      return {
+        key: serial,
+        partialPayload: packData ? { ...properties, packData } : { ...properties },
+      };
     },
   });
 }

@@ -85,6 +85,8 @@ Je nach Modell erhält eine Batterie zusätzlich diese Funktionen:
 | Aus dem Netz geladene Energie  | Netzsensor             | kWh     | alle Modelle                                                        |
 | Gerätetemperatur               | Gerätetemperatursensor | °C      | alle Modelle, falls gemeldet                                        |
 | Temperatur des wärmsten Packs  | Gerätetemperatursensor | °C      | alle Modelle, falls gemeldet                                        |
+| Verbleibende Entladezeit       | Dauer                  | min     | alle Modelle mit Batterie, falls geschätzt                          |
+| Verbleibende Ladezeit          | Dauer                  | min     | alle Modelle mit Batterie, falls geschätzt                          |
 
 - **Off-Grid-Ausgang**: die Leistung an der Off-Grid-Steckdose (Notstrom) der
   Batterie (`gridOffPower`). Ein negativer Wert bedeutet, dass die Steckdose
@@ -99,6 +101,14 @@ Je nach Modell erhält eine Batterie zusätzlich diese Funktionen:
   Temperatur der Packs (`maxTemp`), von Zendure in Zehntel-Kelvin gemeldet und
   in °C umgerechnet. Eine Batterie, die sie nicht meldet, lässt sie leer; ein
   unmöglicher Wert (unter −40 °C oder über 120 °C) wird ignoriert.
+- **Restzeit**: die Zeit bis zur Entladegrenze (`remainOutTime`) und bis zum
+  Ladeziel (`remainInputTime`), wie die Batterie sie schätzt, in Minuten. Hat
+  die Batterie keine Schätzung (im Ruhezustand, oder beim Laden für die
+  Entladezeit), meldet Zendure 999 h: Dieser Wert wird nicht veröffentlicht,
+  die Funktion behält ihre letzte Schätzung und ihr Aktualisierungszeitpunkt
+  zeigt, wie alt sie ist (0 hieße „jetzt leer“ und würde deine Szenen
+  auslösen, 999 h würde die Diagramme plattdrücken). Ein SolarFlow 800 oder
+  Hyper 2000 ganz ohne Pack veröffentlicht nichts.
 
 **Energie-Hierarchie — Doppelzählung vermeiden.** Die Ladeleistung aus dem
 Netz ist ein **Netzsensor**: Hat dein Zuhause bereits einen Hauptzähler (P1-
@@ -110,6 +120,47 @@ Kind), nicht daneben, sonst würde die bezogene Energie doppelt gezählt.
 Eine mit einer älteren Version angelegte Batterie erhält diese Funktionen mit
 demselben **Aktualisieren** im Tab **Entdecken**: Die bestehenden Funktionen,
 ihr Verlauf, deine Szenen und Dashboards bleiben erhalten.
+
+### Batteriepacks als eigene Geräte (optional)
+
+Standardmäßig aus. Mit **Batteriepacks als eigene Geräte** an (Tab
+Konfiguration) listet der Tab **Entdecken** zusätzlich ein Gerät pro
+Batteriepack, nach seiner Batterie benannt: `Dachboden-Batterie — Pack 1`,
+`Dachboden-Batterie — Pack 2`… Jedes Pack-Gerät wird über die Seriennummer des
+Packs selbst identifiziert: seine Kennungen kollidieren nie mit denen der
+Batterie.
+
+| Funktion             | Gladys-Kategorie       | Einheit | Quelle                                 |
+| -------------------- | ---------------------- | ------- | -------------------------------------- |
+| Ladestand des Packs  | Batterie               | %       | `socLevel`                             |
+| Temperatur des Packs | Gerätetemperatursensor | °C      | `maxTemp` (wärmste Zelle)              |
+| Spannung des Packs   | Energiesensor          | V       | `totalVol`                             |
+| Strom des Packs      | Energiesensor          | A       | `batcur`, mit dem Vorzeichen des Packs |
+| Leistung des Packs   | Energiesensor          | W       | `power`, wenn das Pack sie meldet      |
+
+- Ein Pack erscheint, sobald seine Batterie es aufgeführt hat: in ihren
+  Berichten (lokale API, Zendure-Cloud, lokaler Broker) oder in der
+  Zendure-Geräteliste. Fehlt ein Pack, öffne den Tab **Entdecken** ein paar
+  Minuten später erneut.
+- Die Werte kommen von der Quelle, die die Batterie bedient: der Pack-Liste
+  des Berichts der lokalen API oder der Cloud (Rohwerte, umgerechnet:
+  Hundertstel Volt, Zehntel Ampere, Zehntel Kelvin) oder den eigenen lokalen
+  MQTT-Topics des Packs `Zendure/sensor/<Pack-Seriennummer>/…` (Werte schon in
+  V, A, °C). Sie laufen über denselben getakteten Kanal wie die der Batterie.
+- Die Batterie bleibt das Gerät, das in den Energie-Funktionen von Gladys
+  zählt. Deshalb ist der Ladestand des Packs ein einfacher **Batterie**-Stand,
+  kein Hausbatterie-Stand (der der Batterie ist schon einer: jedes Pack noch
+  einmal zu zählen, würde dieselbe Ladung doppelt zählen), und deshalb sind
+  Spannung, Strom und Leistung einfache Messwerte: lass die Pack-Geräte
+  **außerhalb der Energie-Hierarchie** von Gladys. Einzige Nebenwirkung: wenn
+  du die Gladys-Benachrichtigung bei schwacher Batterie aktiviert hast,
+  erscheint darin ein Pack, das zum Prüfzeitpunkt unter der Schwelle liegt.
+- Der Gesundheitszustand der Packs bleibt in der Diagnose.
+- **Ausschalten erstellt nichts Neues und löscht nichts**: bereits erstellte
+  Pack-Geräte bleiben mit ihrem Verlauf in Gladys, werden aber nicht mehr
+  aktualisiert. Lösche sie in Gladys, wenn du sie nicht mehr willst (siehe
+  [Eine Batterie löschen](#eine-batterie-löschen)): die Integration ignoriert
+  sie dann.
 
 ## Deinen Zendure-Cloud-Schlüssel erhalten
 
@@ -137,7 +188,10 @@ Zendure-App erzeugst:
 4. (Optional) Aktiviere **Lokales MQTT aktivieren (zenSDK)** — siehe unten.
 5. (Optional) Wähle die Sprache der **Namen der Funktionen** (standardmäßig
    Englisch): Sie gilt für die Batterien, die du ab jetzt anlegst.
-6. Klicke auf **Konfiguration speichern**. Deine Batterien erscheinen im Tab
+6. (Optional) Schalte **Batteriepacks als eigene Geräte** ein, für ein Gerät
+   mehr pro Pack (standardmäßig aus) — siehe
+   [Batteriepacks als eigene Geräte](#batteriepacks-als-eigene-geräte-optional).
+7. Klicke auf **Konfiguration speichern**. Deine Batterien erscheinen im Tab
    **Entdecken** und können hinzugefügt werden.
 
 ### Lokale API (zenSDK, standardmäßig aktiv)
@@ -429,6 +483,23 @@ dem Zendure-Cloud-Broker, wenn eine Batterie ihn braucht, und trennt sich
 lokalen Quelle ist: Antworten
 deine Batterien lokal, streiten Home Assistant und Gladys nicht mehr um die
 Cloud-Verbindung.
+
+## Eine Batterie löschen
+
+Eine in Gladys gelöschte Batterie (ihre Geräteseite, **Löschen**) beendet
+sofort und ohne Neustart alles, was die Integration für sie tut: ihre lokale API
+wird nicht mehr abgefragt, ihre Broker-Topics werden abbestellt, sie zählt nicht
+mehr für den Cloud-Rückfall (der Cloud-Broker wird sofort freigegeben, wenn
+keine andere Batterie ihn braucht: Home Assistant bekommt die Cloud-Sitzung des
+Kontos zurück), und sie verschwindet aus den Watchdog-Logs, den
+Dashboard-Widgets, den Szenenaktionen und der Diagnose (die sie einmal als
+ignoriert aufführt). Die Logs sagen es in einer Zeile:
+`1 device(s) ignored (deleted in Gladys): …`.
+
+Die Liste der gelöschten Batterien wird mit der Konfiguration der Integration in
+Gladys gespeichert: ein Neustart oder ein Update bringt sie nicht zurück. Die
+Batterie bleibt im Tab **Entdecken**: dort neu erstellt, wird sie sofort wieder
+verfolgt, unter denselben Kennungen.
 
 ## Die Integration aktualisieren
 

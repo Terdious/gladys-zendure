@@ -12,7 +12,10 @@ import {
   getFeaturesForModel,
   decikelvinToCelsius,
   hottestPackTemperature,
+  remainingMinutesOf,
+  REMAINING_TIME_NO_ESTIMATE_IN_MIN,
 } from '../../src/zendure/deviceMapping.js';
+import { REMAINING_TIME_UNKNOWN_IN_MIN } from '../../src/zendure/battery.js';
 import {
   canonicalProductModelOf,
   MODEL_CAPABILITIES,
@@ -50,6 +53,10 @@ const TEMPERATURES = {
   deviceTemperature: ['device-temperature-sensor', 'decimal', 'celsius'],
   batteryMaxTemperature: ['device-temperature-sensor', 'decimal', 'celsius'],
 };
+const REMAINING_TIMES = {
+  remainingDischargeTime: ['duration', 'integer', 'minutes'],
+  remainingChargeTime: ['duration', 'integer', 'minutes'],
+};
 
 test('every model maps the Zendure metrics to the Gladys energy categories', () => {
   for (const [model, features] of Object.entries(MODEL_FEATURES)) {
@@ -61,6 +68,7 @@ test('every model maps the Zendure metrics to the Gladys energy categories', () 
         ...(capabilities.offGrid ? OFF_GRID : {}),
         ...(capabilities.acCharge ? AC_CHARGE : {}),
         ...TEMPERATURES,
+        ...REMAINING_TIMES,
       },
       model,
     );
@@ -204,6 +212,39 @@ test('temperatures: decikelvin to Celsius, absurd values ignored', () => {
   assert.equal(featureValueOf(pack, { properties: { packData: [{ maxTemp: 2961 }] } }), 23);
   assert.equal(featureValueOf(pack, { packData: [{ maxTemp: 0 }] }), null);
   assert.equal(featureValueOf(pack, {}), null);
+});
+
+test('remaining times: zenSDK minutes, the 999 h sentinel never published', () => {
+  assert.equal(REMAINING_TIME_NO_ESTIMATE_IN_MIN, 59940, '999 h in minutes');
+  assert.equal(REMAINING_TIME_UNKNOWN_IN_MIN, REMAINING_TIME_NO_ESTIMATE_IN_MIN, 'same as widgets');
+  assert.equal(remainingMinutesOf(135), 135);
+  assert.equal(remainingMinutesOf(12.6), 13);
+  assert.equal(remainingMinutesOf(0), 0, 'a real reading: nothing left');
+  assert.equal(remainingMinutesOf(59939), 59939);
+  assert.equal(remainingMinutesOf(59940), null, 'no estimate');
+  assert.equal(remainingMinutesOf(65535), null);
+  assert.equal(remainingMinutesOf(-1), null);
+  assert.equal(remainingMinutesOf(null), null);
+
+  const [discharge, charge] = ['remainingDischargeTime', 'remainingChargeTime'].map((key) =>
+    getFeaturesForModel('SolarFlow 800 Pro').find((f) => f.key === key),
+  );
+  assert.equal(featureValueOf(discharge, { properties: { remainOutTime: 135 } }), 135);
+  assert.equal(featureValueOf(discharge, { remainOutTime: 59940 }), null);
+  assert.equal(featureValueOf(charge, { remainInputTime: 42, remainOutTime: 59940 }), 42);
+  assert.equal(featureValueOf(charge, { properties: { remainInputTime: 59940 } }), null);
+  assert.equal(featureValueOf(charge, {}), null, 'not reported: nothing published');
+  // Built-in pack: published even when the telemetry says packNum 0.
+  assert.equal(featureValueOf(discharge, { packNum: 0, remainOutTime: 20 }), 20);
+
+  // Hubs whose pack is optional: nothing once the telemetry says there is none.
+  for (const model of ['SolarFlow 800', 'SolarFlow 800 Plus', 'Hyper 2000']) {
+    const hub = getFeaturesForModel(model).find((f) => f.key === 'remainingDischargeTime');
+    assert.equal(featureValueOf(hub, { packNum: 2, remainOutTime: 60 }), 60, model);
+    assert.equal(featureValueOf(hub, { remainOutTime: 60 }), 60, `${model}: presence unknown`);
+    assert.equal(featureValueOf(hub, { properties: { packNum: 0, remainOutTime: 0 } }), null);
+    assert.equal(featureValueOf(hub, { packData: [], remainOutTime: 0 }), null, model);
+  }
 });
 
 test('the zenSDK pack flows land on the right side: packInputPower is the discharge', () => {

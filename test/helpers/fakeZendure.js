@@ -181,6 +181,12 @@ class FakeMqttClient extends EventEmitter {
     callback?.(null);
   }
 
+  unsubscribe(topics, callback) {
+    this.unsubscriptions = [...(this.unsubscriptions || []), ...[].concat(topics)];
+    this.subscriptions = this.subscriptions.filter((topic) => ![].concat(topics).includes(topic));
+    callback?.(null);
+  }
+
   publish(topic, payload, callback) {
     this.published.push({ topic, payload });
     callback?.(null);

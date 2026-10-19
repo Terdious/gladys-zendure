@@ -79,6 +79,8 @@ Depending on the model, a battery also gets these features:
 | Grid charging energy     | Grid sensor               | kWh  | every model                                                         |
 | Device temperature       | Device temperature sensor | °C   | every model, when reported                                          |
 | Hottest pack temperature | Device temperature sensor | °C   | every model, when reported                                          |
+| Remaining discharge time | Duration                  | min  | every model with a battery, when estimated                          |
+| Remaining charge time    | Duration                  | min  | every model with a battery, when estimated                          |
 
 - **Off-grid output**: the power on the battery's off-grid (backup) socket
   (`gridOffPower`). A negative value means the socket feeds power in (a solar
@@ -91,6 +93,14 @@ Depending on the model, a battery also gets these features:
   temperature of the packs (`maxTemp`), reported by Zendure in tenths of a
   kelvin and converted to °C. A battery that does not report them leaves them
   empty; an impossible value (below −40 °C or above 120 °C) is ignored.
+- **Remaining time**: the time to the discharge floor (`remainOutTime`) and
+  to the charge target (`remainInputTime`), as the battery estimates it, in
+  minutes. When the battery has no estimate (idle, or charging for the
+  discharge time), Zendure reports 999 h: that value is not published, the
+  feature keeps its last estimate and its last update time shows how old it
+  is (0 would read "empty now" and trigger your scenes, 999 h would flatten
+  the charts). A SolarFlow 800 or Hyper 2000 without any pack publishes
+  nothing.
 
 **Energy hierarchy — avoid double counting.** The grid charging power is a
 **grid sensor**: if your home already has a main meter (Linky, a P1 or
@@ -102,6 +112,44 @@ draws would be counted twice.
 A battery created with an earlier version gets these features with the same
 **Update** in the **Discover** tab: the existing features, their history,
 scenes and dashboards are kept.
+
+### Battery packs as separate devices (optional)
+
+Off by default. With **Battery packs as separate devices** on (Configuration
+tab), the **Discover** tab also lists one device per battery pack, named after
+its battery: `Attic battery — pack 1`, `Attic battery — pack 2`… Each pack
+device is identified by the pack's own serial number, so its identifiers never
+collide with the battery's.
+
+| Feature          | Gladys category           | Unit | Source                                  |
+| ---------------- | ------------------------- | ---- | --------------------------------------- |
+| Pack level       | Battery                   | %    | `socLevel`                              |
+| Pack temperature | Device temperature sensor | °C   | `maxTemp` (hottest cell)                |
+| Pack voltage     | Energy sensor             | V    | `totalVol`                              |
+| Pack current     | Energy sensor             | A    | `batcur`, signed as the pack reports it |
+| Pack power       | Energy sensor             | W    | `power`, when the pack reports it       |
+
+- A pack appears once its battery has listed it: in its reports (local API,
+  Zendure cloud, local broker) or in the Zendure device list. If a pack is
+  missing, open the **Discover** tab again after a few minutes.
+- The values come from the source serving the battery: the pack list of the
+  local API or cloud report (raw values, converted: hundredths of a volt,
+  tenths of an ampere, tenths of a kelvin), or the pack's own local MQTT
+  topics `Zendure/sensor/<pack serial>/…` (values already in V, A, °C). They
+  go through the same paced channel as the battery's.
+- The battery itself stays the device that counts in the Gladys energy
+  features. That is why the pack level is a plain **Battery** level, not a
+  home battery level (the battery's own level already is one: counting each
+  pack again would count the same charge twice), and why the voltage, current
+  and power are plain measurements: keep the pack devices **out of the energy
+  hierarchy** of Gladys. The one side effect: if you enabled the Gladys
+  low-battery notification, a pack below its threshold at check time is
+  mentioned in it.
+- The state of health of the packs stays in the diagnostic.
+- **Turning the option off creates nothing new and deletes nothing**: the pack
+  devices already created stay in Gladys with their history, but no longer
+  update. Delete them in Gladys if you no longer want them (see
+  [Deleting a battery](#deleting-a-battery)): the integration then ignores them.
 
 ## Getting your Zendure cloud key
 
@@ -125,7 +173,10 @@ key** (a base64 token) that you generate once from the Zendure mobile app:
 4. (Optional) Enable **local MQTT (zenSDK)** — see below.
 5. (Optional) Choose the language of the **Feature names** (English by default):
    it applies to the batteries you create from now on.
-6. Click **Save configuration**. Your batteries appear in the **Discover** tab,
+6. (Optional) Turn on **Battery packs as separate devices** for one more
+   device per pack (off by default) — see
+   [Battery packs as separate devices](#battery-packs-as-separate-devices-optional).
+7. Click **Save configuration**. Your batteries appear in the **Discover** tab,
    ready to be added.
 
 ### Local API (zenSDK, on by default)
@@ -396,6 +447,22 @@ With the **local API** on (the default), the integration only connects to the
 Zendure cloud broker while a battery needs it, and disconnects again 5 minutes
 after the last battery that needed it is back on a local source: if your batteries answer
 locally, Home Assistant and Gladys no longer fight over the cloud connection.
+
+## Deleting a battery
+
+Deleting a battery in Gladys (its device page, **Delete**) stops everything the
+integration does for it, at once and without a restart: its local API is no
+longer polled, its broker topics are unsubscribed, it no longer counts for the
+cloud fallback (the cloud broker is released right away when no other battery
+needs it, so Home Assistant gets the account's cloud session back), and it
+leaves the watchdog logs, the dashboard widgets, the scene actions and the
+diagnostic (which lists it once as ignored). The logs say it in one line:
+`1 device(s) ignored (deleted in Gladys): …`.
+
+The list of deleted batteries is saved with the integration configuration in
+Gladys, so a restart or an update does not bring them back. The battery stays in
+the **Discover** tab: create it again there and it is tracked again at once, under
+the same identifiers.
 
 ## Updating the integration
 

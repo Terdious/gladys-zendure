@@ -11,6 +11,9 @@
 //   - onPoll(gladys, config, device)  (optional): periodic read
 //   - onSetValue(gladys, {...})       (optional): run a user command
 //   - startPush(gladys, config)       (optional): subscribe to a real-time stream
+//   - restoreIgnoredDevices(gladys, rawConfig)       (optional): on connection
+//   - onDeviceDeleted / onDeviceCreated(gladys, config, device) (optional):
+//     the user deleted / created one of the blueprint's devices in Gladys
 // -----------------------------------------------------------------------------
 
 import { createLogger } from '@gladysassistant/integration-sdk';
@@ -158,4 +161,48 @@ export function findBlueprintByDevice(gladys, device) {
       ? bp.ownsDevice(gladys, device)
       : bp.deviceExternalId(gladys) === device.external_id,
   );
+}
+
+/**
+ * Restore the per-blueprint lifecycle state (the devices deleted in Gladys)
+ * when the integration connects, before the discovery and the push start.
+ * @param {object} gladys Gladys SDK instance
+ * @param {object} rawConfig configuration returned by getConfig()
+ */
+export async function restoreDeviceLifecycle(gladys, rawConfig) {
+  for (const bp of DEVICE_BLUEPRINTS) {
+    if (typeof bp.restoreIgnoredDevices === 'function') {
+      await bp.restoreIgnoredDevices(gladys, rawConfig);
+    }
+  }
+}
+
+/**
+ * The user deleted a device in Gladys: its blueprint stops tracking it.
+ * @returns {Promise<boolean>} true when something changed
+ */
+export async function handleDeviceDeleted(gladys, config, device) {
+  const blueprint = findBlueprintByDevice(gladys, device);
+  if (!blueprint || typeof blueprint.onDeviceDeleted !== 'function') {
+    return false;
+  }
+  return blueprint.onDeviceDeleted(gladys, config, device);
+}
+
+/**
+ * The user created a device in Gladys (from the Discover tab). When it was
+ * deleted before, its blueprint tracks it again and its transport badge is
+ * published; the caller restarts the push subscriptions.
+ * @returns {Promise<boolean>} true when a deleted device is tracked again
+ */
+export async function handleDeviceCreated(gladys, config, device) {
+  const blueprint = findBlueprintByDevice(gladys, device);
+  if (!blueprint || typeof blueprint.onDeviceCreated !== 'function') {
+    return false;
+  }
+  const resumed = await blueprint.onDeviceCreated(gladys, config, device);
+  if (resumed) {
+    await reportTransports(gladys, config);
+  }
+  return resumed;
 }

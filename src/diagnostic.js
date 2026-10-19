@@ -229,6 +229,7 @@ function sensitiveValuesOf(snapshot) {
     }
   }
   identifiers.push(...(snapshot.config?.addressOverrides?.unmatched || []));
+  identifiers.push(...(snapshot.ignored || []).map((device) => device.id));
   return { identifiers, hosts };
 }
 
@@ -597,6 +598,7 @@ export function buildFleetDiagnostic(
   );
   lines.push(`Local MQTT: ${cfg.enableLocalMqtt ? 'on' : 'off'}`);
   lines.push(`Feature names: ${cfg.featureNames}`);
+  lines.push(`Battery packs as separate devices: ${cfg.packDevices ? 'on' : 'off'}`);
   if (cfg.savings) {
     const savings = cfg.savings;
     lines.push(
@@ -644,6 +646,19 @@ export function buildFleetDiagnostic(
   );
 
   lines.push('');
+  const ignored = snapshot.ignored || [];
+  if (ignored.length > 0) {
+    // Listed once, not diagnosed: nothing follows them until they are created
+    // again from the Discover tab.
+    lines.push(
+      `Ignored (deleted in Gladys): ${ignored.length} battery(ies): ` +
+        ignored
+          .map(({ name, id }) => (name ? `${name} (${redactor.id(id)})` : redactor.id(id)))
+          .join(', ') +
+        ' - create it again from the Discover tab to track it again',
+      '',
+    );
+  }
   if (snapshot.filter && snapshot.devices.length === 0) {
     lines.push(
       `== Batteries: none matches "${snapshot.filter}" ==`,

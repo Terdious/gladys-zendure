@@ -52,6 +52,20 @@ import {
 } from '../zendure/energy.js';
 import { tariffFromConfig } from '../zendure/savings.js';
 import {
+  PACK_DEVICE_TYPE,
+  PACK_FEATURES,
+  packDeviceNameOf,
+  packFeatureNameFor,
+  packListOf,
+  packValuesOf,
+} from '../zendure/packs.js';
+import {
+  IGNORED_DEVICES_CONFIG_KEY,
+  ignoreEntryOf,
+  parseIgnoredDevices,
+  serializeIgnoredDevices,
+} from './ignored.js';
+import {
   buildWriteCommand,
   createWriteThrottle,
   ControlRefusedError,
@@ -92,8 +106,37 @@ const localRuntimeStartedAt = new Map(); // broker url -> creation time (ms)
 let zenSdkRuntime = null;
 // When the polling (re)started: start of the startup grace (see localHttpStateOf).
 let zenSdkStartedAt = 0;
-// Last time a device needed the cloud broker (see CLOUD_HOLD_TIME_IN_MS).
-let cloudLastNeededAt = 0;
+// Last time each device needed the cloud broker (see CLOUD_HOLD_TIME_IN_MS),
+// per device so that a device deleted in Gladys stops holding it at once.
+const cloudNeededAtByDeviceKey = new Map(); // deviceKey -> ms timestamp
+
+/** Last time any tracked device needed the cloud broker (0: never). */
+function cloudLastNeededAtOf() {
+  return Math.max(0, ...cloudNeededAtByDeviceKey.values());
+}
+
+/** Record that a device needs the cloud broker now. */
+function markCloudNeeded(rawCloudDevice, now) {
+  const deviceKey = deviceKeyOf(rawCloudDevice);
+  cloudNeededAtByDeviceKey.set(
+    deviceKey,
+    Math.max(cloudNeededAtByDeviceKey.get(deviceKey) || 0, now),
+  );
+}
+
+// --- Devices deleted in Gladys (src/devices/ignored.js) -----------------------
+// Entries `solarflow:<deviceKey>`: such a device stays in the discovery (so it
+// can be created again) but nothing else follows it.
+let ignoredDevices = new Set();
+// Whether the set was loaded from the configuration by this process.
+let ignoredDevicesRestored = false;
+
+// --- Battery packs (opt-in `enable_pack_devices`, src/zendure/packs.js) -------
+// The packs each battery reported (`packData`), learned from its reports and
+// from the cloud device list: parent deviceKey -> Map(pack serial -> 1-based
+// position, the `pack <n>` of its name), and the way back.
+const packSerialsByDeviceKey = new Map();
+const parentKeyByPackSerial = new Map();
 
 // --- Per-device effective telemetry source (local mode) -----------------------
 // In local mode a device can silently stop publishing on its LOCAL broker
@@ -481,7 +524,11 @@ export function resetSolarflowRuntime() {
   }
   cloudMqttRuntime = null;
   cloudRuntimeStartedAt = 0;
-  cloudLastNeededAt = 0;
+  cloudNeededAtByDeviceKey.clear();
+  ignoredDevices = new Set();
+  ignoredDevicesRestored = false;
+  packSerialsByDeviceKey.clear();
+  parentKeyByPackSerial.clear();
   for (const runtime of localMqttRuntimes.values()) {
     runtime.disconnect();
   }
@@ -561,6 +608,25 @@ function supportedDevices(data) {
   );
 }
 
+/** Whether a device was deleted in Gladys (see src/devices/ignored.js). */
+function isIgnored(rawCloudDevice) {
+  return ignoredDevices.has(`${DEVICE_TYPE}:${deviceKeyOf(rawCloudDevice)}`);
+}
+
+/** Whether a pack device was deleted in Gladys. */
+function isPackIgnored(packSerial) {
+  return ignoredDevices.has(`${PACK_DEVICE_TYPE}:${packSerial}`);
+}
+
+/**
+ * The devices the integration follows: the supported devices of the account
+ * minus the ones deleted in Gladys. Everything but the discovery (which keeps
+ * listing them, so they can be created again) works on this list.
+ */
+function trackedDevices(data) {
+  return supportedDevices(data).filter((rawCloudDevice) => !isIgnored(rawCloudDevice));
+}
+
 async function ensureCloudData(config, { refresh = false } = {}) {
   if (!cloudData || refresh) {
     try {
@@ -579,9 +645,11 @@ async function ensureCloudData(config, { refresh = false } = {}) {
   return cloudData;
 }
 
-async function ensureCloudRuntime(config, now = Date.now()) {
+async function ensureCloudRuntime(config, now = Date.now(), neededBy = null) {
   const data = await ensureCloudData(config);
-  cloudLastNeededAt = Math.max(cloudLastNeededAt, now);
+  if (neededBy) {
+    markCloudNeeded(neededBy, now);
+  }
   if (!cloudMqttRuntime) {
     cloudMqttRuntime = createZendureMqtt({ mqttLibrary: dependencies.mqttLibrary });
     // Creation time drives the startup grace window of the freshness checks.
@@ -590,7 +658,7 @@ async function ensureCloudRuntime(config, now = Date.now()) {
     cloudRuntimeStartedAt = now;
   }
   await cloudMqttRuntime.connect(data.mqtt);
-  supportedDevices(data).forEach((rawCloudDevice) =>
+  trackedDevices(data).forEach((rawCloudDevice) =>
     cloudMqttRuntime.subscribeDevice(rawCloudDevice),
   );
   return cloudMqttRuntime;
@@ -748,16 +816,143 @@ async function ensureLocalRuntime(config, rawCloudDevice) {
   }
   await runtime.connect(brokerConfig);
   // Subscribe every locally-reachable device that publishes to this broker.
-  for (const otherDevice of supportedDevices(cloudData)) {
+  for (const otherDevice of trackedDevices(cloudData)) {
     if (!isDeviceLocallyReachable(config, otherDevice)) {
       continue;
     }
     const otherBroker = buildLocalBrokerConfig(otherDevice);
     if (otherBroker && otherBroker.url === key) {
       runtime.subscribeDevice(otherDevice);
+      subscribeLocalPacks(config, otherDevice, runtime);
     }
   }
   return runtime;
+}
+
+/**
+ * Subscribe the native local topics of the known packs of a device
+ * (`Zendure/sensor/{packSn}/...`) on its local broker, when the pack devices
+ * are on. A pack serial is followed like a device serial (same cache).
+ * @param {object} config normalized configuration
+ * @param {object} rawCloudDevice device from the cloud deviceList
+ * @param {object} [runtime] its local MQTT runtime (looked up when omitted)
+ */
+function subscribeLocalPacks(config, rawCloudDevice, runtime) {
+  if (config.enable_pack_devices !== true || !isDeviceLocallyReachable(config, rawCloudDevice)) {
+    return;
+  }
+  const localRuntime = runtime || localMqttRuntimes.get(buildLocalBrokerConfig(rawCloudDevice).url);
+  for (const packSerial of packSerialsByDeviceKey.get(deviceKeyOf(rawCloudDevice))?.keys() || []) {
+    if (!isPackIgnored(packSerial)) {
+      localRuntime?.subscribeDevice({ snNumber: packSerial });
+    }
+  }
+}
+
+/**
+ * Learn the packs a payload lists for a device (new ones get the next
+ * position). With the pack devices on, a new pack of a locally reachable
+ * device gets its native local topics subscribed.
+ * @param {object} config normalized configuration
+ * @param {object} rawCloudDevice device from the cloud deviceList
+ * @param {object|null} payload report, cached payload or deviceList entry
+ */
+function rememberPacks(config, rawCloudDevice, payload) {
+  const deviceKey = deviceKeyOf(rawCloudDevice);
+  let known = packSerialsByDeviceKey.get(deviceKey);
+  let added = false;
+  for (const pack of packListOf(payload)) {
+    if (!known) {
+      known = new Map();
+      packSerialsByDeviceKey.set(deviceKey, known);
+    }
+    if (!known.has(pack.sn)) {
+      known.set(pack.sn, known.size + 1);
+      parentKeyByPackSerial.set(pack.sn, deviceKey);
+      added = true;
+    }
+  }
+  if (added) {
+    subscribeLocalPacks(config, rawCloudDevice);
+  }
+}
+
+/**
+ * The states of the pack devices of one battery, from the payload of the
+ * source serving it: the native local topics of each pack (scaled values)
+ * when the local broker serves it, else the `packData` of the report (raw
+ * values). Never from the cloud device list (a bootstrap snapshot, not
+ * telemetry). Nothing when the option is off or for a deleted pack.
+ * @param {object} gladys Gladys SDK instance
+ * @param {object} config normalized configuration
+ * @param {object} rawCloudDevice device from the cloud deviceList
+ * @param {'http'|'local'|'cloud'} source source of the payload
+ * @param {object|null} payload cached payload of that source
+ * @returns {Array<{ device_feature_external_id: string, state: number }>}
+ */
+function buildPackStates(gladys, config, rawCloudDevice, source, payload) {
+  if (config.enable_pack_devices !== true) {
+    return [];
+  }
+  rememberPacks(config, rawCloudDevice, payload);
+  const rawBySerial = new Map(packListOf(payload).map((pack) => [pack.sn, pack]));
+  const localRuntime =
+    source === 'local'
+      ? localMqttRuntimes.get(buildLocalBrokerConfig(rawCloudDevice)?.url) || null
+      : null;
+  const states = [];
+  for (const packSerial of packSerialsByDeviceKey.get(deviceKeyOf(rawCloudDevice))?.keys() || []) {
+    // The native topics (one value per message) win value by value over the
+    // `packData` of the battery's own report.
+    const native = localRuntime?.getLatestPayload(packSerial) || null;
+    const raw = rawBySerial.get(packSerial) || null;
+    if (!native && !raw) {
+      continue;
+    }
+    const values = raw ? packValuesOf(raw, { scaled: false }) : {};
+    if (native) {
+      for (const [key, value] of Object.entries(packValuesOf(native, { scaled: true }))) {
+        if (value !== null || !(key in values)) {
+          values[key] = value;
+        }
+      }
+    }
+    states.push(...packStatesOf(gladys, packSerial, values));
+  }
+  return states;
+}
+
+/** The states of one pack from its values (deleted pack: none). */
+function packStatesOf(gladys, packSerial, values) {
+  if (!values || isPackIgnored(packSerial)) {
+    return [];
+  }
+  const ids = gladys.externalIds(PACK_DEVICE_TYPE, packSerial);
+  return Object.entries(values)
+    .filter(([, value]) => value !== null)
+    .map(([key, value]) => ({ device_feature_external_id: ids.feature(key), state: value }));
+}
+
+/**
+ * A native local message of a pack (`Zendure/sensor/{packSn}/...`): its
+ * states, while its battery is served by the local broker (on another source,
+ * that source's `packData` is the one published).
+ * @returns {Array<object>|null} null when the serial is not a known pack
+ */
+function nativePackStates(gladys, config, packSerial, payload) {
+  const parentKey = parentKeyByPackSerial.get(packSerial);
+  if (config.enable_pack_devices !== true || !parentKey) {
+    return null;
+  }
+  const rawCloudDevice = findSupportedDevice(cloudData, parentKey);
+  if (!rawCloudDevice) {
+    return [];
+  }
+  const effective = effectiveSourceByDeviceKey.get(parentKey)?.source;
+  if ((effective ?? staticSourceOf(config, rawCloudDevice)) !== 'local') {
+    return [];
+  }
+  return packStatesOf(gladys, packSerial, packValuesOf(payload, { scaled: true }));
 }
 
 /**
@@ -784,7 +979,7 @@ async function selectSourceRuntime(config, rawCloudDevice) {
   if (httpState === 'pending') {
     return { runtime: zenSdkRuntime, source: 'http' };
   }
-  const runtime = await ensureCloudRuntime(config);
+  const runtime = await ensureCloudRuntime(config, Date.now(), rawCloudDevice);
   return { runtime, source: 'cloud' };
 }
 
@@ -811,7 +1006,7 @@ async function selectPollRuntime(config, rawCloudDevice) {
     if (effective && effective.source === 'cloud') {
       // Fallback in progress: poll the cloud runtime, with the cloud payload
       // logic (its `properties` reports are complete, no local merge needed).
-      const runtime = await ensureCloudRuntime(config);
+      const runtime = await ensureCloudRuntime(config, Date.now(), rawCloudDevice);
       return { runtime, source: 'cloud' };
     }
   }
@@ -1005,7 +1200,11 @@ export async function controlDevice(gladys, config, deviceExternalId, command) {
   const data = await ensureCloudData(config);
   const rawCloudDevice = deviceKey ? findSupportedDevice(data, deviceKey) : null;
   if (!rawCloudDevice) {
-    throw new ControlRefusedError(`unknown Zendure battery "${deviceExternalId}"`);
+    throw new ControlRefusedError(
+      ignoredDevices.has(`${DEVICE_TYPE}:${deviceKey}`)
+        ? `Zendure battery "${deviceExternalId}" was deleted in Gladys`
+        : `unknown Zendure battery "${deviceExternalId}"`,
+    );
   }
 
   const { runtime, source } = await selectPollRuntime(config, rawCloudDevice);
@@ -1075,6 +1274,11 @@ function createPushListener(gladys, config, source) {
         ? findSupportedDevice(cloudData, key)
         : findSupportedDeviceBySerial(cloudData, key);
     if (!rawCloudDevice) {
+      // A pack of a battery, on the local broker (pack devices on).
+      const packStates = source === 'local' ? nativePackStates(gladys, config, key, payload) : null;
+      if (packStates?.length) {
+        queueStates(gladys, packStates);
+      }
       return;
     }
     // Default to the static preference when the evaluator has no state yet.
@@ -1104,6 +1308,7 @@ function createPushListener(gladys, config, source) {
     const states = [
       ...buildStates(gladys, rawCloudDevice, payload),
       ...buildEnergyStates(gladys, rawCloudDevice, payload, { integrate: true }),
+      ...buildPackStates(gladys, config, rawCloudDevice, source, payload),
     ];
     if (states.length === 0) {
       return;
@@ -1151,7 +1356,7 @@ export async function evaluateTelemetrySources(gladys, config, now = Date.now())
   if (!localTransportsEnabled(config) || !cloudData) {
     return;
   }
-  const allDevices = supportedDevices(cloudData);
+  const allDevices = trackedDevices(cloudData);
   const localModeDevices = allDevices.filter((rawCloudDevice) =>
     hasLocalCandidate(config, rawCloudDevice),
   );
@@ -1198,8 +1403,8 @@ export async function evaluateTelemetrySources(gladys, config, now = Date.now())
     }
     locallySilent.push({ rawCloudDevice, localActivityAt });
   }
-  if (locallySilent.length > 0) {
-    cloudLastNeededAt = Math.max(cloudLastNeededAt, now);
+  for (const { rawCloudDevice } of locallySilent) {
+    markCloudNeeded(rawCloudDevice, now);
   }
 
   // Lazy cloud fallback connection (one consumer per account: connect only
@@ -1254,13 +1459,13 @@ export async function evaluateTelemetrySources(gladys, config, now = Date.now())
     allLocalEvaluationStreak >= 2 &&
     cloudMqttRuntime &&
     !cloudStaticallyNeeded &&
-    now - cloudLastNeededAt >= CLOUD_HOLD_TIME_IN_MS
+    now - cloudLastNeededAtOf() >= CLOUD_HOLD_TIME_IN_MS
   ) {
     cloudMqttRuntime.disconnect();
     cloudMqttRuntime = null;
     cloudRuntimeStartedAt = 0;
     logger.info(
-      `fallback: all devices back on local for ${formatDuration(now - cloudLastNeededAt)} ` +
+      `fallback: all devices back on local for ${formatDuration(now - cloudLastNeededAtOf())} ` +
         '-> cloud broker disconnected',
     );
   }
@@ -1269,7 +1474,7 @@ export async function evaluateTelemetrySources(gladys, config, now = Date.now())
 function findSupportedDevice(data, deviceKey) {
   const normalized = String(deviceKey || '').toLowerCase();
   return (
-    supportedDevices(data).find(
+    trackedDevices(data).find(
       (rawCloudDevice) => String(deviceKeyOf(rawCloudDevice)).toLowerCase() === normalized,
     ) || null
   );
@@ -1282,7 +1487,7 @@ function findSupportedDeviceBySerial(data, serial) {
     return null;
   }
   return (
-    supportedDevices(data).find(
+    trackedDevices(data).find(
       (rawCloudDevice) => String(rawCloudDevice.snNumber || '') === normalized,
     ) || null
   );
@@ -1442,7 +1647,7 @@ function currentPayloadOf(config, rawCloudDevice, effective) {
  */
 export async function describeBatteries(gladys, config) {
   const data = cloudData || (await ensureCloudData(config));
-  return supportedDevices(data).map((rawCloudDevice) => {
+  return trackedDevices(data).map((rawCloudDevice) => {
     const deviceKey = deviceKeyOf(rawCloudDevice);
     const ids = gladys.externalIds(DEVICE_TYPE, deviceKey);
     const effective = hasLocalCandidate(config, rawCloudDevice)
@@ -1719,11 +1924,13 @@ export async function describeDiagnostics(gladys, config, { filter = '', now = D
   }
   const allDevices = cloudData?.deviceList || [];
   const supported = supportedDevices(cloudData);
+  // The batteries deleted in Gladys are listed once, not diagnosed.
+  const tracked = trackedDevices(cloudData);
   const { overrides, invalid } = parseAddressOverridesDetailed(config.local_http_addresses);
   const knownSerials = new Set(supported.map((d) => String(d.snNumber || '').toUpperCase()));
 
   const filterText = String(filter || '').trim();
-  const selected = filterText === '' ? supported : findDevicesByReference(supported, filterText);
+  const selected = filterText === '' ? tracked : findDevicesByReference(tracked, filterText);
 
   const brokers = [];
   if (cloudMqttRuntime) {
@@ -1844,7 +2051,7 @@ export async function describeDiagnostics(gladys, config, { filter = '', now = D
     };
   });
 
-  const currentSources = supported.map((rawCloudDevice) => {
+  const currentSources = tracked.map((rawCloudDevice) => {
     const tracked = hasLocalCandidate(config, rawCloudDevice)
       ? effectiveSourceByDeviceKey.get(deviceKeyOf(rawCloudDevice))?.source
       : undefined;
@@ -1861,6 +2068,7 @@ export async function describeDiagnostics(gladys, config, { filter = '', now = D
       enableLocalHttp: config.enable_local_http === true,
       enableLocalMqtt: config.enable_local_mqtt === true,
       featureNames: config.feature_names,
+      packDevices: config.enable_pack_devices === true,
       savings: savingsDiagnosticOf(config),
       addressOverrides: {
         count: overrides.size,
@@ -1886,7 +2094,7 @@ export async function describeDiagnostics(gladys, config, { filter = '', now = D
         .map(({ rawCloudDevice }) => rawCloudDevice.deviceName || modelOf(rawCloudDevice)),
       allLocal:
         currentSources.length > 0 && currentSources.every(({ source }) => isLocalSource(source)),
-      lastNeededAt: cloudLastNeededAt || null,
+      lastNeededAt: cloudLastNeededAtOf() || null,
       holdMs: CLOUD_HOLD_TIME_IN_MS,
     },
     brokers,
@@ -1901,7 +2109,8 @@ export async function describeDiagnostics(gladys, config, { filter = '', now = D
         }
       : null,
     filter: filterText,
-    availableNames: supported.map((d) => d.deviceName || modelOf(d)),
+    availableNames: tracked.map((d) => d.deviceName || modelOf(d)),
+    ignored: ignoredLabelsOf(cloudData),
     devices,
     secrets: diagnosticSecretsOf(config),
   };
@@ -2005,7 +2214,7 @@ function refreshLocalHttpDevices(config) {
   if (!zenSdkRuntime || config.enable_local_http !== true) {
     return;
   }
-  const entries = localHttpEntriesOf(config, supportedDevices(cloudData));
+  const entries = localHttpEntriesOf(config, trackedDevices(cloudData));
   for (const { rawCloudDevice, address } of entries) {
     const previous = zenSdkRuntime.getDeviceHealth(rawCloudDevice.snNumber);
     if (previous && previous.host !== address.host) {
@@ -2145,6 +2354,313 @@ function watchdogGroups(config, devices) {
   return groups;
 }
 
+/**
+ * The discovery payloads of the pack devices of one battery (pack devices
+ * on): one per pack serial its reports or the cloud device list gave, named
+ * `<battery name> — pack <n>`, not polled (their states come with the
+ * battery's, through the same paced channel).
+ * @param {object} gladys Gladys SDK instance
+ * @param {object} config normalized configuration
+ * @param {object} rawCloudDevice device from the cloud deviceList
+ * @returns {Array<object>}
+ */
+function buildPackDevices(gladys, config, rawCloudDevice) {
+  // Every cached report first, then the device list entry.
+  rememberPacks(config, rawCloudDevice, zenSdkRuntime?.getLatestPayload(rawCloudDevice.snNumber));
+  rememberPacks(
+    config,
+    rawCloudDevice,
+    localMqttRuntimes
+      .get(buildLocalBrokerConfig(rawCloudDevice)?.url)
+      ?.getLatestPayload(rawCloudDevice.snNumber),
+  );
+  rememberPacks(
+    config,
+    rawCloudDevice,
+    cloudMqttRuntime?.getLatestPayload(deviceKeyOf(rawCloudDevice)),
+  );
+  rememberPacks(config, rawCloudDevice, rawCloudDevice);
+  const parentName = rawCloudDevice.deviceName || rawCloudDevice.name || modelOf(rawCloudDevice);
+  const parentSelector = deviceSelectorOf(rawCloudDevice);
+  return [...(packSerialsByDeviceKey.get(deviceKeyOf(rawCloudDevice)) || [])].map(
+    ([packSerial, index]) => {
+      const ids = gladys.externalIds(PACK_DEVICE_TYPE, packSerial);
+      const selector = `${parentSelector}-pack-${slugify(packSerial)}`;
+      return {
+        name: packDeviceNameOf(parentName, index, config.feature_names),
+        external_id: ids.device,
+        selector,
+        should_poll: false,
+        features: PACK_FEATURES.map((featureMapping) => ({
+          name: packFeatureNameFor(featureMapping, config.feature_names),
+          external_id: ids.feature(featureMapping.key),
+          selector: `${selector}-${featureMapping.key}`,
+          category: featureMapping.category,
+          type: featureMapping.type,
+          unit: featureMapping.unit,
+          min: featureMapping.min,
+          max: featureMapping.max,
+          read_only: true,
+          has_feedback: false,
+          keep_history: true,
+        })),
+      };
+    },
+  );
+}
+
+// --- Device lifecycle: deleted / created again in Gladys ----------------------
+// See src/devices/ignored.js. Deleting a battery in Gladys stops everything
+// the integration does for it (local API polling, broker subscriptions,
+// source evaluation, cloud need, watchdog, widgets, scenes, diagnostic); the
+// discovery keeps listing it, and creating it again from the Discover tab
+// resumes it without a restart.
+
+/**
+ * The ignored devices, sorted, with their name when the account still has
+ * them (`id` is the device key, an identifier the diagnostic masks).
+ * @param {object|null} data cloud data
+ * @returns {Array<{ entry: string, name: string|null, id: string }>}
+ */
+function ignoredDevicesOf(data) {
+  const byEntry = new Map(
+    supportedDevices(data).map((rawCloudDevice) => [
+      `${DEVICE_TYPE}:${deviceKeyOf(rawCloudDevice)}`,
+      rawCloudDevice,
+    ]),
+  );
+  return [...ignoredDevices].sort().map((entry) => {
+    const id = entry.slice(entry.indexOf(':') + 1);
+    let rawCloudDevice = byEntry.get(entry);
+    if (entry.startsWith(`${PACK_DEVICE_TYPE}:`)) {
+      // A pack: named after its battery when it is known.
+      const parentKey = parentKeyByPackSerial.get(id);
+      rawCloudDevice = byEntry.get(`${DEVICE_TYPE}:${parentKey}`);
+      const index = packSerialsByDeviceKey.get(parentKey)?.get(id);
+      return {
+        entry,
+        name: rawCloudDevice
+          ? packDeviceNameOf(rawCloudDevice.deviceName || modelOf(rawCloudDevice), index, 'en')
+          : null,
+        id,
+      };
+    }
+    return {
+      entry,
+      name: rawCloudDevice ? rawCloudDevice.deviceName || modelOf(rawCloudDevice) : null,
+      id,
+    };
+  });
+}
+
+/** The ignored devices for the diagnostic snapshot. */
+function ignoredLabelsOf(data) {
+  return ignoredDevicesOf(data).map(({ name, id }) => ({ name, id }));
+}
+
+/** Log the ignored devices in one line (start, discovery, change). */
+function logIgnoredDevices(data) {
+  if (ignoredDevices.size === 0) {
+    return;
+  }
+  const labels = ignoredDevicesOf(data).map(({ name, id }) => (name ? `${name} (${id})` : id));
+  logger.info(
+    `${labels.length} device(s) ignored (deleted in Gladys): ${labels.join(', ')} ` +
+      '- create it again from the Discover tab to track it again',
+  );
+}
+
+/** Save the ignore-set in the integration configuration (free key). */
+async function persistIgnoredDevices(gladys) {
+  if (typeof gladys.setConfig !== 'function') {
+    return;
+  }
+  try {
+    await gladys.setConfig({
+      [IGNORED_DEVICES_CONFIG_KEY]: serializeIgnoredDevices(ignoredDevices),
+    });
+  } catch (e) {
+    // Still applied in memory: only a restart before the next save would
+    // track the device again.
+    logger.warn(`ignored devices: the list could not be saved (${e.message})`);
+  }
+}
+
+/**
+ * Forget what the publish channel holds for one Gladys device: its pending
+ * states and its dedup memory, so a device created (again) gets every value
+ * at once instead of after the 30-min keep-alive.
+ * @param {string} deviceExternalId Gladys device external_id
+ */
+function forgetDeviceStates(deviceExternalId) {
+  const prefix = `${deviceExternalId}:`;
+  for (const store of [pendingStates, lastPublishedByFeature, lastPublishedAtByFeature]) {
+    for (const featureId of [...store.keys()]) {
+      if (featureId.startsWith(prefix)) {
+        store.delete(featureId);
+      }
+    }
+  }
+}
+
+/**
+ * Restore the ignore-set when the integration connects: from the saved
+ * configuration on the first connection of the process (merged with what a
+ * deletion may already have added), the in-memory set on a reconnection.
+ * A device present again in Gladys (created while the integration was not
+ * connected, its creation event missed) leaves the set.
+ * @param {object} gladys Gladys SDK instance (`gladys.devices`: the created devices)
+ * @param {object} rawConfig configuration returned by getConfig()
+ */
+export async function restoreIgnoredDevices(gladys, rawConfig = {}) {
+  const stored = parseIgnoredDevices(rawConfig?.[IGNORED_DEVICES_CONFIG_KEY]);
+  if (!ignoredDevicesRestored) {
+    ignoredDevices = new Set([...stored, ...ignoredDevices]);
+    ignoredDevicesRestored = true;
+  }
+  for (const device of Array.isArray(gladys.devices) ? gladys.devices : []) {
+    const entry = ignoreEntryOf(gladys, device);
+    if (entry && ignoredDevices.delete(entry)) {
+      logger.info(`${entry}: present in Gladys again -> tracked again`);
+    }
+  }
+  if (serializeIgnoredDevices(ignoredDevices) !== serializeIgnoredDevices(stored)) {
+    await persistIgnoredDevices(gladys);
+  }
+}
+
+/**
+ * Release the cloud broker when no tracked device needs it any more: none
+ * served by the cloud (statically or on a fallback) and none needed it within
+ * CLOUD_HOLD_TIME_IN_MS. Used after a deletion, which must never leave the
+ * cloud session held for a battery that is gone.
+ * @param {object} config normalized configuration
+ * @param {number} now current time (ms)
+ */
+function releaseCloudIfUnneeded(config, now) {
+  if (!cloudMqttRuntime) {
+    return;
+  }
+  const needed = trackedDevices(cloudData).some((rawCloudDevice) => {
+    if (!hasLocalCandidate(config, rawCloudDevice)) {
+      return true;
+    }
+    const effective = effectiveSourceByDeviceKey.get(deviceKeyOf(rawCloudDevice))?.source;
+    return !isLocalSource(effective ?? staticSourceOf(config, rawCloudDevice));
+  });
+  if (needed || now - cloudLastNeededAtOf() < CLOUD_HOLD_TIME_IN_MS) {
+    return;
+  }
+  cloudMqttRuntime.disconnect();
+  cloudMqttRuntime = null;
+  cloudRuntimeStartedAt = 0;
+  logger.info('fallback: no remaining device needs the cloud broker -> disconnected');
+}
+
+/**
+ * Stop following the ignored devices right now: their broker topics, their
+ * local API polling, their effective source and cloud need, their queued
+ * states; then re-evaluate the sources, so a deleted device never keeps the
+ * cloud fallback alive.
+ * @param {object} gladys Gladys SDK instance
+ * @param {object} config normalized configuration
+ * @param {number} [now] current time (ms)
+ */
+async function stopTrackingIgnoredDevices(gladys, config, now = Date.now()) {
+  for (const rawCloudDevice of supportedDevices(cloudData).filter(isIgnored)) {
+    const deviceKey = deviceKeyOf(rawCloudDevice);
+    cloudMqttRuntime?.unsubscribeDevice(rawCloudDevice);
+    for (const runtime of localMqttRuntimes.values()) {
+      runtime.unsubscribeDevice(rawCloudDevice);
+    }
+    effectiveSourceByDeviceKey.delete(deviceKey);
+    cloudNeededAtByDeviceKey.delete(deviceKey);
+    forgetDeviceStates(gladys.externalIds(DEVICE_TYPE, deviceKey).device);
+  }
+  // Packs: the deleted ones, and every pack of a deleted battery.
+  for (const [packSerial, parentKey] of parentKeyByPackSerial) {
+    if (!isPackIgnored(packSerial) && !ignoredDevices.has(`${DEVICE_TYPE}:${parentKey}`)) {
+      continue;
+    }
+    for (const runtime of localMqttRuntimes.values()) {
+      runtime.unsubscribeDevice({ snNumber: packSerial });
+    }
+    forgetDeviceStates(gladys.externalIds(PACK_DEVICE_TYPE, packSerial).device);
+  }
+  for (const [url, runtime] of localMqttRuntimes) {
+    if (runtime.getStats().trackedDevices === 0) {
+      runtime.disconnect();
+      localMqttRuntimes.delete(url);
+      localRuntimeStartedAt.delete(url);
+      logger.info(`push: local broker ${url} no longer needed -> disconnected`);
+    }
+  }
+  if (zenSdkRuntime) {
+    zenSdkRuntime.setDevices(
+      toZenSdkDevices(localHttpEntriesOf(config, trackedDevices(cloudData))),
+    );
+  }
+  await evaluateTelemetrySources(gladys, config, now);
+  releaseCloudIfUnneeded(config, now);
+}
+
+/**
+ * The user deleted one of our devices in Gladys: ignore it from now on.
+ * @param {object} gladys Gladys SDK instance
+ * @param {object} config normalized configuration
+ * @param {{ external_id: string }} device the deleted Gladys device
+ * @param {{ now?: number }} [options]
+ * @returns {Promise<boolean>} true when the device was not ignored yet
+ */
+export async function ignoreDeletedDevice(gladys, config, device, { now = Date.now() } = {}) {
+  const entry = ignoreEntryOf(gladys, device);
+  if (!entry || ignoredDevices.has(entry)) {
+    return false;
+  }
+  ignoredDevices.add(entry);
+  logger.info(
+    `${device.name || entry}: deleted in Gladys -> no longer tracked ` +
+      '(telemetry, local API polling, broker subscriptions, cloud fallback)',
+  );
+  await persistIgnoredDevices(gladys);
+  if (cloudData) {
+    await stopTrackingIgnoredDevices(gladys, config, now);
+  }
+  logIgnoredDevices(cloudData);
+  return true;
+}
+
+/**
+ * The user created one of our devices in Gladys: its values are re-sent at
+ * once, and a device deleted before leaves the ignore-set. The caller then
+ * restarts the push subscriptions (same path as a configuration change).
+ * @param {object} gladys Gladys SDK instance
+ * @param {object} config normalized configuration
+ * @param {{ external_id: string }} device the created Gladys device
+ * @returns {Promise<boolean>} true when an ignored device is tracked again
+ */
+export async function trackCreatedDevice(gladys, config, device) {
+  const entry = ignoreEntryOf(gladys, device);
+  if (!entry) {
+    return false;
+  }
+  forgetDeviceStates(device.external_id);
+  if (!ignoredDevices.delete(entry)) {
+    return false;
+  }
+  logger.info(`${device.name || entry}: created again in Gladys -> tracked again`);
+  await persistIgnoredDevices(gladys);
+  // A cloud broker serving other devices: subscribe this one at once (the
+  // push restart only subscribes it there when it is served by the cloud).
+  const rawCloudDevice = cloudData
+    ? findSupportedDevice(cloudData, entry.slice(entry.indexOf(':') + 1))
+    : null;
+  if (rawCloudDevice && cloudMqttRuntime) {
+    cloudMqttRuntime.subscribeDevice(rawCloudDevice);
+  }
+  return true;
+}
+
 export const solarflow = {
   key: DEVICE_TYPE,
 
@@ -2152,11 +2668,18 @@ export const solarflow = {
   // first sync after a change must re-publish every value immediately.
   resetPublishDedup,
 
+  // Device lifecycle hooks (registry: restoreDeviceLifecycle,
+  // handleDeviceDeleted, handleDeviceCreated).
+  restoreIgnoredDevices,
+  onDeviceDeleted: ignoreDeletedDevice,
+  onDeviceCreated: trackCreatedDevice,
+
   /** Registry dispatch: does this blueprint own the given Gladys device? */
   ownsDevice(gladys, device) {
     return (
       typeof device?.external_id === 'string' &&
-      device.external_id.startsWith(gladys.externalId(`${DEVICE_TYPE}:`))
+      (device.external_id.startsWith(gladys.externalId(`${DEVICE_TYPE}:`)) ||
+        device.external_id.startsWith(gladys.externalId(`${PACK_DEVICE_TYPE}:`)))
     );
   },
 
@@ -2166,8 +2689,11 @@ export const solarflow = {
    */
   async buildDevices(gladys, config) {
     const data = await ensureCloudData(config, { refresh: true });
+    // Every supported device, the ones deleted in Gladys included: the
+    // Discover tab is where they are created again.
     const devices = supportedDevices(data);
     logger.info(`Found ${devices.length} supported Zendure device(s) in the cloud account`);
+    logIgnoredDevices(data);
     // The exact cloud string is what a new model entry needs (several model
     // spellings are still unverified): log it so users can report it as is.
     for (const rawCloudDevice of data?.deviceList || []) {
@@ -2179,7 +2705,7 @@ export const solarflow = {
       }
     }
 
-    return devices.map((rawCloudDevice) => {
+    const discovered = devices.map((rawCloudDevice) => {
       const ids = gladys.externalIds(DEVICE_TYPE, deviceKeyOf(rawCloudDevice));
       return {
         name: rawCloudDevice.deviceName || rawCloudDevice.name || modelOf(rawCloudDevice),
@@ -2210,6 +2736,12 @@ export const solarflow = {
         })),
       };
     });
+    if (config.enable_pack_devices === true) {
+      for (const rawCloudDevice of devices) {
+        discovered.push(...buildPackDevices(gladys, config, rawCloudDevice));
+      }
+    }
+    return discovered;
   },
 
   /**
@@ -2222,7 +2754,7 @@ export const solarflow = {
    */
   async buildTransports(gladys, config) {
     const data = await ensureCloudData(config);
-    return supportedDevices(data).map((rawCloudDevice) => {
+    return trackedDevices(data).map((rawCloudDevice) => {
       // Effective source: the one the evaluator tracked (local / cloud
       // fallback / unreachable), the static 'local' when a locally-reachable
       // device has no effective state yet, 'cloud' otherwise. The degraded
@@ -2243,6 +2775,10 @@ export const solarflow = {
    * the cache is stale.
    */
   async onPoll(gladys, config, device) {
+    if (String(device?.external_id || '').startsWith(gladys.externalId(`${PACK_DEVICE_TYPE}:`))) {
+      // Pack devices are not polled: their states come with their battery's.
+      return;
+    }
     const deviceKey = String(device?.external_id || '')
       .split(':')
       .pop();
@@ -2254,7 +2790,11 @@ export const solarflow = {
     const data = await ensureCloudData(config);
     const rawCloudDevice = findSupportedDevice(data, deviceKey);
     if (!rawCloudDevice) {
-      logger.warn(`onPoll: Zendure device "${deviceKey}" not found in the cloud account`);
+      if (ignoredDevices.has(`${DEVICE_TYPE}:${deviceKey}`)) {
+        logger.debug(`onPoll: Zendure device "${deviceKey}" ignored (deleted in Gladys)`);
+      } else {
+        logger.warn(`onPoll: Zendure device "${deviceKey}" not found in the cloud account`);
+      }
       return;
     }
 
@@ -2290,6 +2830,7 @@ export const solarflow = {
       // The totals only: a cached payload is not a new interval to integrate.
       states.push(...buildEnergyStates(gladys, rawCloudDevice, payload, { integrate: false }));
     }
+    states.push(...buildPackStates(gladys, config, rawCloudDevice, source, latestPayload));
     if (states.length === 0) {
       logger.debug(`onPoll: no telemetry available yet for ${deviceKey}`);
       return;
@@ -2313,7 +2854,8 @@ export const solarflow = {
     (async () => {
       try {
         const data = await ensureCloudData(config);
-        const devices = supportedDevices(data);
+        const devices = trackedDevices(data);
+        logIgnoredDevices(data);
         applySavingsTariff(config);
         await ensureEnergyLoaded();
         stopEnergySaveTimer();
@@ -2408,7 +2950,7 @@ export const solarflow = {
           const effective = effectiveSourceByDeviceKey.get(deviceKeyOf(rawCloudDevice));
           return effective !== undefined && !isLocalSource(effective.source);
         });
-        const cloudHeld = Date.now() - cloudLastNeededAt < CLOUD_HOLD_TIME_IN_MS;
+        const cloudHeld = Date.now() - cloudLastNeededAtOf() < CLOUD_HOLD_TIME_IN_MS;
         if (
           cloudMqttRuntime &&
           !runtimesBySource.has(cloudMqttRuntime) &&
@@ -2488,7 +3030,10 @@ export const solarflow = {
                 `${stats.connectCount - baseline} (re)connection(s) in the last 5 min`,
             );
           }
-          for (const { source, runtime, ownedDevices } of watchdogGroups(config, devices)) {
+          // Re-read at every report: a device deleted in Gladys since the
+          // start is no longer reported as silent.
+          const watched = trackedDevices(cloudData);
+          for (const { source, runtime, ownedDevices } of watchdogGroups(config, watched)) {
             const entries = ownedDevices.map((rawCloudDevice) => {
               const health =
                 source === 'http' ? runtime?.getDeviceHealth(rawCloudDevice.snNumber) : null;

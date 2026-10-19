@@ -338,6 +338,24 @@
       ]
     },
     {
+      "key": "enable_pack_devices",
+      "type": "boolean",
+      "label": {
+        "en": "Battery packs as separate devices",
+        "fr": "Packs de batterie comme appareils séparés",
+        "de": "Batteriepacks als eigene Geräte",
+        "es": "Packs de batería como dispositivos separados"
+      },
+      "description": {
+        "en": "Off by default. On: the Discover tab also lists one device per battery pack (level, temperature, voltage, current, power), named after its battery. Turning it off creates nothing new and deletes nothing: pack devices already created stay, and stop updating.",
+        "fr": "Désactivé par défaut. Activé : l'onglet Découverte liste aussi un appareil par pack de batterie (niveau, température, tension, courant, puissance), nommé d'après sa batterie. Le désactiver ne crée rien et ne supprime rien : les appareils de pack déjà créés restent, et ne sont plus mis à jour.",
+        "de": "Standardmäßig aus. An: der Tab Entdecken listet zusätzlich ein Gerät pro Batteriepack (Ladestand, Temperatur, Spannung, Strom, Leistung), nach seiner Batterie benannt. Ausschalten erstellt nichts Neues und löscht nichts: bereits erstellte Pack-Geräte bleiben und werden nicht mehr aktualisiert.",
+        "es": "Desactivado por defecto. Activado: la pestaña Descubrir también lista un dispositivo por pack de batería (nivel, temperatura, tensión, corriente, potencia), con el nombre de su batería. Desactivarlo no crea nada nuevo ni elimina nada: los dispositivos de pack ya creados se quedan y dejan de actualizarse."
+      },
+      "required": false,
+      "default": false
+    },
+    {
       "key": "savings_intro",
       "type": "section",
       "label": {

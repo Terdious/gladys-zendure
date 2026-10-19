@@ -10,6 +10,50 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Added
+
+- **Battery packs as separate devices** (#16), opt-in (new option, off by
+  default): the Discover tab also lists one device per battery pack, named
+  `<battery name> — pack <n>`, identified by the pack serial in its own
+  namespace (`solarflow-pack:<serial>`: the battery's device and features are
+  unchanged). Each pack has its level (`battery` / `integer`, %, so the home
+  battery level the Gladys energy dashboards aggregate is not counted twice),
+  its hottest cell temperature (`device-temperature-sensor`, °C), its voltage,
+  signed current and power (`energy-sensor` / `voltage`, `current`, `power`).
+  Values from the pack list of the local API, cloud and legacy local reports
+  (raw: hundredths of a volt, signed tenths of an ampere, tenths of a kelvin)
+  or from the packs' native local topics `Zendure/sensor/<pack serial>/…`
+  (already scaled), through the same paced channel. Turning the option off
+  creates nothing new and deletes nothing (the pack devices already created
+  stay and stop updating). A deleted pack device is ignored like a deleted
+  battery.
+- The local broker's legacy JSON reports keep their `packData` (pack list and
+  hottest pack temperature on the local MQTT path too).
+
+- **Remaining discharge time** (`remainOutTime`) and **Remaining charge
+  time** (`remainInputTime`) as features (`duration`, minutes), as the battery
+  estimates them, on every model. The "no estimate" value (999 h, idle
+  battery) is never published, so the feature keeps its last estimate instead
+  of reading 0 ("empty now") or flattening the charts; a SolarFlow 800 or
+  Hyper 2000 reporting no pack publishes nothing. Batteries created before get
+  them with **Update** in the Discover tab; the existing features and their
+  ids are unchanged.
+
+### Fixed
+
+- A battery **deleted in Gladys** is no longer tracked (#21): its local API
+  polling stops, its broker topics are unsubscribed, its effective source and
+  cloud need are dropped, and the sources are re-evaluated at once, so a
+  deleted battery never keeps the Zendure cloud fallback connected (the cloud
+  broker is released right away when no remaining battery needs it). It also
+  leaves the watchdog, the dashboard widgets, the scene actions and the
+  diagnostic, which lists the ignored batteries once; the logs say
+  `N device(s) ignored (deleted in Gladys): …`. The list is saved in a free
+  key of the integration configuration (`ignored_devices`, not shown in the
+  form), so it survives restarts and updates. The discovery keeps listing the
+  battery: creating it again from the Discover tab tracks it again at once,
+  without a restart, and re-sends its values immediately.
+
 ## [1.8.0] - 2026-10-18
 
 ### Added
