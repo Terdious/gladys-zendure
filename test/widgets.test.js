@@ -144,7 +144,8 @@ test('the group widget sums the selected batteries, every battery when none is s
   });
   assert.deepEqual(validateWidgetContent(one), []);
   assert.equal(tile(one, 'Solar'), 90);
-  assert.equal(one.components[0].text.en, 'Batteries');
+  // No default heading: the card already shows the widget name.
+  assert.ok(!one.components.some((c) => c.type === 'text'));
   // Plain average without known packs: (47 + 62) / 2 for both, 62 for one.
   assert.equal(all.components.find((c) => c.type === 'gauge').value, 55);
   assert.equal(one.components.find((c) => c.type === 'gauge').value, 62);
@@ -350,7 +351,7 @@ test('the group leaves battery-less devices out of the level and the stored ener
   );
   assert.deepEqual(
     tiles(inverters).map((c) => c.label.en),
-    ['Solar', 'To the home'],
+    ['To the home', 'Solar'],
   );
   stop();
 });

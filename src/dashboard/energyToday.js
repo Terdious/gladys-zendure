@@ -3,11 +3,14 @@
 //
 // Zendure reports powers only; the integration integrates them into energy
 // meters (src/zendure/energy.js, /data/energy.json), which also keep the
-// totals at the start of every 30-minute slot of the last 26 hours. The
+// totals at the start of every 30-minute slot of the last 8 days. The
 // energy of today is the totals now minus the snapshot of the first slot at
 // or after the local midnight, the midnight of the widget's `timezone`
 // setting (Gladys gives an integration no instance timezone; empty or
-// unknown: Europe/Paris). The chart follows the `chart` setting: the energy
+// unknown: Europe/Paris). The Period / Previous / Next buttons
+// (src/dashboard/period.js) show a past day or 7 days (bars per day) of the
+// last 8 days; the savings estimate is today's, shown on today only. The
+// chart follows the `chart` setting: the energy
 // of each slot to the home (default), charged, discharged or solar, per phase
 // on a three-phase site, or the four flows of the whole site.
 //
@@ -27,6 +30,17 @@ import { describeBatteries } from '../devices/index.js';
 import { tariffFromConfig, TARIFF_MODES } from '../zendure/savings.js';
 import { savingsComponents } from './savings.js';
 import {
+  ENERGY_VIEW,
+  dateLabel,
+  fitTiles,
+  hasPrevious,
+  labelText,
+  sharedViews,
+  viewButtons,
+  viewMessage,
+  windowOf,
+} from './period.js';
+import {
   MAX_STATUS_ROWS,
   T,
   LAYOUTS,
@@ -37,7 +51,6 @@ import {
   resolveTimezone,
   selectionAlerts,
   siteSelection,
-  startOfLocalDay,
   withPacksOf,
 } from './common.js';
 
@@ -108,19 +121,19 @@ const FLOW_LABELS = { charge: 'charged', discharge: 'discharged', solar: 'solar'
 const round = (kwh, digits) => Math.round(kwh * 10 ** digits) / 10 ** digits;
 
 /**
- * Energy of some batteries since a moment: kWh per flow (charge figures
- * from the devices with a pack), per slot and flow, and the earliest
- * counting start.
+ * Energy of some batteries since a moment (up to another one, or now): kWh
+ * per flow (charge figures from the devices with a pack), per slot and
+ * flow, and the earliest counting start.
  * @param {Array<object>} batteries battery snapshots
  * @param {number} since timestamp (ms), the local midnight
  */
-export function energyOf(batteries, since) {
+export function energyOf(batteries, since, until = Infinity) {
   const packIds = new Set(withPacksOf(batteries).map((battery) => battery.externalId));
   const kwh = { charge: 0, discharge: 0, solar: 0, home: 0 };
   const slots = new Map(); // slot start -> { flow: kWh }
   let countingSince = null;
   for (const battery of batteries) {
-    const energy = battery.energySince(since);
+    const energy = battery.energySince(since, until);
     if (!energy) {
       continue;
     }
@@ -163,22 +176,101 @@ function pointsOf(slots, flow = 'home') {
     .map(([at, kwh]) => ({ t: new Date(at).toISOString(), v: Math.round(kwh[flow] * 1000) }));
 }
 
+/** The end of a range for energySince: none (now) when it reaches now. */
+const untilOf = (range, now) => (range.to >= now ? Infinity : range.to);
+
+/**
+ * Energy of some batteries over the days of a week window: kWh per flow
+ * over the window, and per day.
+ */
+function energyOfDays(batteries, days, now) {
+  const perDay = days.map((day) => ({
+    at: day.from,
+    energy: energyOf(batteries, day.from, untilOf(day, now)),
+  }));
+  const kwh = { charge: 0, discharge: 0, solar: 0, home: 0 };
+  let countingSince = null;
+  for (const { energy } of perDay) {
+    for (const flow of Object.keys(kwh)) {
+      kwh[flow] += energy.kwh[flow];
+    }
+    if (energy.countingSince !== null && countingSince === null) {
+      countingSince = energy.countingSince;
+    }
+  }
+  return { kwh, perDay, countingSince, slots: new Map() };
+}
+
+/** Chart points of one flow per day of a week (kWh, at noon UTC of the local day). */
+function dayPoints(perDay, flow, timeZone) {
+  return perDay.map(({ at, energy }) => ({
+    t: `${dayKeyOf(at, timeZone)}T12:00:00.000Z`,
+    v: round(energy.kwh[flow], 2),
+  }));
+}
+
+/** `YYYY-MM-DD` of the local day of an instant. */
+function dayKeyOf(at, timeZone) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(at));
+}
+
+const DAY_CHART_TITLES = {
+  home: T(
+    'To the home, per day',
+    'Vers la maison, par jour',
+    'Zum Haus, je Tag',
+    'Al hogar, por día',
+  ),
+  charge: T('Charged, per day', 'Chargée, par jour', 'Geladen, je Tag', 'Cargada, por día'),
+  discharge: T(
+    'Discharged, per day',
+    'Déchargée, par jour',
+    'Entladen, je Tag',
+    'Descargada, por día',
+  ),
+  solar: T('Solar, per day', 'Solaire, par jour', 'Solar, je Tag', 'Solar, por día'),
+  flows: T(
+    'Site flows, per day',
+    'Flux du site, par jour',
+    'Anlagenflüsse, je Tag',
+    'Flujos, por día',
+  ),
+};
+
 /**
  * Content of the energy widget.
- * @param {string|object} title heading
+ * @param {string|object|null} title heading, none without
  * @param {ReturnType<typeof siteSelection>} selection
- * @param {{ now: number, timeZone: string, chart?: string, savings?: { tariff: object|null, tariffError: string|null } }} options
- *   `chart`: an ENERGY_CHARTS value (home by default), `savings` absent: no savings shown
+ * @param {{ now: number, timeZone: string, chart?: string, savings?: { tariff: object|null, tariffError: string|null }, window?: object, buttons?: Array<object> }} options
+ *   `chart`: an ENERGY_CHARTS value (home by default), `savings` absent: no
+ *   savings shown (the current day only), `window`: the day or the 7 days
+ *   shown (src/dashboard/period.js windowOf, today by default), `buttons`:
+ *   the period buttons
  * @returns {object} widget content
  */
 export function energyTodayContent(
   title,
   selection,
-  { now, timeZone, chart = ENERGY_CHARTS.HOME, savings },
+  {
+    now,
+    timeZone,
+    chart = ENERGY_CHARTS.HOME,
+    savings,
+    window = windowOf('day', 0, now, timeZone),
+    buttons = [],
+  },
 ) {
   const { batteries } = selection;
-  const since = startOfLocalDay(now, timeZone);
-  const site = energyOf(batteries, since);
+  const week = window.period === 'week';
+  const since = window.from;
+  const rangeEnergy = (members) =>
+    week ? energyOfDays(members, window.days, now) : energyOf(members, since, untilOf(window, now));
+  const site = rangeEnergy(batteries);
   const hasPacks = withPacksOf(batteries).length > 0;
   const hasSolar = batteries.some((battery) => battery.hasSolar);
   const tile = (kwh, label, icon) => ({
@@ -189,30 +281,38 @@ export function energyTodayContent(
     icon,
   });
 
-  const components = [{ type: 'text', variant: 'heading', text: title }];
+  // Tiles, the most useful first: the room the heading, the chart, the
+  // status and the period buttons leave goes to the first ones, the others
+  // become the first status rows (src/dashboard/period.js fitTiles).
+  const candidates = [];
   if (hasPacks) {
-    components.push(
+    candidates.push(
       tile(site.kwh.charge, LABELS.charged, 'battery-charging'),
       tile(site.kwh.discharge, LABELS.discharged, 'zap'),
     );
   }
+  candidates.push(tile(site.kwh.home, LABELS.home, 'home'));
+  // The savings estimate is the one of today: shown on the current day only.
+  const savingsParts =
+    savings && window.current && !week
+      ? savingsComponents(selection, { now, ...savings })
+      : { tiles: [], rows: [] };
+  candidates.push(...savingsParts.tiles);
   if (hasSolar) {
-    components.push(tile(site.kwh.solar, LABELS.solar, 'sun'));
+    candidates.push(tile(site.kwh.solar, LABELS.solar, 'sun'));
   }
-  components.push(tile(site.kwh.home, LABELS.home, 'home'));
-  const savingsParts = savings
-    ? savingsComponents(selection, { now, ...savings })
-    : { tiles: [], rows: [] };
-  components.push(...savingsParts.tiles);
 
   const rows = [];
   const series = [];
   // One flow charted: per phase on a three-phase site, else the site's.
   const oneFlow = chart in FLOW_LABELS;
+  const pointsOfEnergy = (energy, flow) =>
+    week ? dayPoints(energy.perDay, flow, timeZone) : pointsOf(energy.slots, flow);
+  const hasPoints = (energy) => (week ? energy.countingSince !== null : energy.slots.size > 0);
   if (selection.layout === LAYOUTS.THREE_PHASE) {
     const phases = selection.phases.map((phase) => ({
       ...phase,
-      energy: energyOf(phase.batteries, since),
+      energy: rangeEnergy(phase.batteries),
     }));
     for (const phase of phases) {
       rows.push({
@@ -224,8 +324,8 @@ export function energyTodayContent(
             : phaseFlows(phase.batteries, phase.energy.kwh),
         color: WIDGET_COLORS.NEUTRAL,
       });
-      if (phase.energy.slots.size > 0 && oneFlow) {
-        series.push({ name: phase.label, points: pointsOf(phase.energy.slots, chart) });
+      if (phase.batteries.length > 0 && hasPoints(phase.energy) && oneFlow) {
+        series.push({ name: phase.label, points: pointsOfEnergy(phase.energy, chart) });
       }
     }
     const homes = phases
@@ -250,10 +350,10 @@ export function energyTodayContent(
         color: WIDGET_COLORS.NEUTRAL,
       });
     }
-  } else if (site.slots.size > 0 && oneFlow) {
-    series.push({ name: LABELS[FLOW_LABELS[chart]], points: pointsOf(site.slots, chart) });
+  } else if (hasPoints(site) && oneFlow) {
+    series.push({ name: LABELS[FLOW_LABELS[chart]], points: pointsOfEnergy(site, chart) });
   }
-  if (chart === ENERGY_CHARTS.FLOWS && site.slots.size > 0) {
+  if (chart === ENERGY_CHARTS.FLOWS && hasPoints(site)) {
     // The flows the site has: no charge figures without a pack, no solar
     // without a PV input.
     const flows = [
@@ -262,30 +362,57 @@ export function energyTodayContent(
       'home',
     ];
     for (const flow of flows) {
-      series.push({ name: LABELS[FLOW_LABELS[flow]], points: pointsOf(site.slots, flow) });
+      series.push({ name: LABELS[FLOW_LABELS[flow]], points: pointsOfEnergy(site, flow) });
     }
   }
 
-  if (series.length > 0) {
-    components.push({
-      type: 'chart',
-      chart_type: 'line',
-      title: CHART_TITLES[chart],
-      unit: 'Wh',
-      series,
+  const chartComponent =
+    series.length > 0
+      ? {
+          type: 'chart',
+          chart_type: week ? 'bar' : 'line',
+          title: (week ? DAY_CHART_TITLES : CHART_TITLES)[chart],
+          unit: week ? 'kWh' : 'Wh',
+          series,
+        }
+      : null;
+  // No chart, nothing to navigate.
+  const navigation = chartComponent ? buttons : [];
+  const heading = title ? [{ type: 'text', variant: 'heading', text: title }] : [];
+  const fitted = fitTiles(
+    candidates,
+    heading.length + (chartComponent ? 1 : 0) + 1 + navigation.length,
+  );
+  const components = [...heading, ...fitted.tiles];
+  if (chartComponent) {
+    components.push(chartComponent);
+  }
+  rows.unshift(...fitted.rows);
+  // A past day or a week says which, the current day needs no reminder.
+  if (!window.current || week) {
+    rows.unshift({
+      label: T('Shown', 'Affiché', 'Angezeigt', 'Mostrado'),
+      icon: 'calendar',
+      value: labelText(window.label),
+      color: WIDGET_COLORS.INFO,
     });
   }
 
-  // From when the figures count: the local midnight, or later when the
-  // meters first saw a battery today (first install, offline morning).
+  // From when the figures count: the start of the window, or later when the
+  // meters first saw a battery (first install, offline morning).
   const startedLate = site.countingSince !== null && site.countingSince > since;
-  const from = `${localTime(site.countingSince ?? since, timeZone)} · ${timeZone}`;
+  const from = `${week ? `${dateLabel(site.countingSince ?? since, timeZone)} ` : ''}${localTime(
+    site.countingSince ?? since,
+    timeZone,
+  )} · ${timeZone}`;
   const countedSince = {
     label: T('Counted since', 'Compté depuis', 'Gezählt seit', 'Contado desde'),
     icon: 'clock',
     value:
       site.countingSince === null
-        ? T('No data today', "Rien aujourd'hui", 'Heute keine Daten', 'Sin datos hoy')
+        ? window.current && !week
+          ? T('No data today', "Rien aujourd'hui", 'Heute keine Daten', 'Sin datos hoy')
+          : T('No data', 'Aucune donnée', 'Keine Daten', 'Sin datos')
         : from,
     color: startedLate || site.countingSince === null ? WIDGET_COLORS.INFO : WIDGET_COLORS.NEUTRAL,
   };
@@ -294,7 +421,7 @@ export function energyTodayContent(
   // (the end of the breakdown) dropped first.
   const room = Math.max(1, MAX_STATUS_ROWS - rows.length - 1 - alerts.length);
   rows.push(...savingsParts.rows.slice(0, room), countedSince, ...alerts);
-  components.push({ type: 'status', items: fitRows(rows) });
+  components.push({ type: 'status', items: fitRows(rows) }, ...navigation);
 
   // Energy moves slowly: two minutes.
   return { ttl_seconds: 120, components };
@@ -309,9 +436,8 @@ export const energyTodayWidget = {
     if (!selection.batteries.some((battery) => battery.energyReady)) {
       return messageContent(LOADING);
     }
-    const title =
-      (typeof settings.title === 'string' && settings.title.trim()) ||
-      T('Energy today', 'Énergie du jour', 'Energie heute', 'Energía de hoy');
+    // No default heading: the card already shows the widget name.
+    const title = (typeof settings.title === 'string' && settings.title.trim()) || null;
     // The savings: on unless the instance turns them off, and only with a
     // tariff in the configuration (none: nothing shown).
     const showSavings = settings.show_savings !== false && settings.show_savings !== 'false';
@@ -320,13 +446,27 @@ export const energyTodayWidget = {
       const { tariff, error } = tariffFromConfig(config);
       savings = { tariff, tariffError: error };
     }
+    const timeZone = resolveTimezone(settings.timezone);
+    const view = sharedViews.get(ENERGY_TODAY_WIDGET, settings, ENERGY_VIEW);
+    const window = windowOf(view.period, view.offset, now, timeZone);
     return energyTodayContent(title, selection, {
       now,
-      timeZone: resolveTimezone(settings.timezone),
+      timeZone,
       chart: Object.values(ENERGY_CHARTS).includes(settings.chart)
         ? settings.chart
         : ENERGY_CHARTS.HOME,
       savings,
+      window,
+      buttons: viewButtons(view, ENERGY_VIEW.periods, hasPrevious(window, now)),
     });
+  },
+
+  // The period buttons (src/dashboard/period.js): the core refreshes the
+  // widget after the action.
+  async action(gladys, { actionKey, settings = {}, values }) {
+    const view = sharedViews.apply(ENERGY_TODAY_WIDGET, settings, ENERGY_VIEW, actionKey, values);
+    return viewMessage(
+      windowOf(view.period, view.offset, Date.now(), resolveTimezone(settings.timezone)),
+    );
   },
 };

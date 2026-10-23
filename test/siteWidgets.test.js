@@ -555,7 +555,7 @@ test('single-phase site: one total, no phase rows; AC-only and pack-less rules',
   const acOnly = siteContent('Site', siteSelection([batteries[0]], {}));
   assert.ok(!('Solar' in tilesOf(acOnly)));
   const inverters = siteContent('Site', siteSelection([batteries[1]], {}));
-  assert.deepEqual(Object.keys(tilesOf(inverters)), ['Solar', 'To the home']);
+  assert.deepEqual(Object.keys(tilesOf(inverters)), ['To the home', 'Solar']);
   assert.equal(rowOf(inverters, 'Stored'), undefined);
   assert.deepEqual(validateWidgetContent(inverters), []);
 });
@@ -709,7 +709,8 @@ test('the site handler: every battery by default, phases from the settings', asy
   const devices = await buildDiscoveredDevices(gladys, config);
   const all = await WIDGETS[SITE_WIDGET].get(gladys, { settings: {}, config });
   assert.deepEqual(validateWidgetContent(all), []);
-  assert.equal(all.components[0].text.en, 'Zendure site');
+  // No default heading: the card already shows the widget name.
+  assert.ok(!all.components.some((c) => c.type === 'text'));
   assert.equal(tilesOf(all).Solar, 560);
 
   const three = await WIDGETS[SITE_WIDGET].get(gladys, {
@@ -789,7 +790,7 @@ test('the energy handler waits for the meters, then counts the local API reports
     config,
   });
   assert.deepEqual(validateWidgetContent(content), []);
-  assert.equal(content.components[0].text.en, 'Energy today');
+  assert.ok(!content.components.some((c) => c.type === 'text'));
   assert.match(rowOf(content, 'Counted since').value, / · UTC$/);
   stop();
 });

@@ -1753,8 +1753,8 @@ export async function describeBatteries(gladys, config) {
       // saved totals are loaded (the first push start), `energySince(ms)`
       // the energy since a moment, null when nothing was integrated since.
       energyReady: energyLoaded,
-      energySince: (since) =>
-        energyLoaded ? getEnergyMeters().energySince(deviceKey, since) : null,
+      energySince: (since, until) =>
+        energyLoaded ? getEnergyMeters().energySince(deviceKey, since, until) : null,
       // Live history (5-minute steps of the last day), [] before the load.
       historySince: (since) =>
         energyLoaded ? getEnergyMeters().historySince(deviceKey, since) : [],

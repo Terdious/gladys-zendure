@@ -383,7 +383,7 @@ posterior):
   horaria** del widget (un nombre IANA, `Europe/Paris` por defecto: Gladys no
   da su zona horaria a una integración). Las cifras vienen de los contadores
   de energía de la integración (guardados en `/data` con una instantánea cada
-  30 minutos, conservada 26 horas): cuentan desde el primer informe del día,
+  30 minutos, conservada 8 días): cuentan desde el primer informe del día,
   que indica la línea **Contado desde** (por ejemplo tras una primera
   instalación por la mañana).
   Con una tarifa eléctrica en la configuración, también muestra la
@@ -416,6 +416,37 @@ monofásica, con una línea de aviso **Ninguna fase asignada**; las fases
 rellenadas en una configuración monofásica se ignoran (línea **Fases
 ignoradas**). Los widgets configurados antes en _Monofásica_ o _Trifásica_
 conservan sus propias listas y siguen funcionando. Un widget que ya supera el límite: quítelo del panel y vuelva a añadirlo (o vacíe sus listas), dejando _Según la configuración de la integración_.
+
+**Curvas, periodos y orden:** los widgets **Grupo de baterías** e
+**Instalación Zendure** trazan una curva en directo de las últimas horas,
+elegida en su ajuste **Curva**: _Potencias_ (carga, descarga, solar y hogar
+sumadas), _Potencia al hogar_, _Nivel de carga_ (ponderado por la capacidad de
+los packs) o _Sin curva_, sobre el **Periodo de la curva** (3, 6, 12 o 24
+horas, 6 por defecto). En trifásica, _Potencia al hogar_ (el defecto de la
+instalación) y _Nivel de carga_ trazan una curva por fase (L1, L2, L3). La
+integración registra estos valores cada 5 minutos durante las últimas 48 horas
+(en `/data`, con los contadores de energía): tras una actualización, las
+curvas se llenan a partir de ese momento. La curva de **Energía de hoy**
+ofrece _Al hogar_, _Cargada_, _Descargada_, _Solar_ (una por fase en
+trifásica), _Todos los flujos_ o _Sin curva_. Las líneas de baterías de un
+grupo siguen su **Orden de la lista**: _Por nombre_ (por defecto, en orden
+natural: `L1.2` antes de `L1.10`, igual en cada fase), _Según la selección_,
+mayor _Nivel de carga_ o mayor _Potencia al hogar_ primero.
+
+Cada widget con curva lleva un botón **Periodo** y botones **Anterior** /
+**Siguiente**, como los gráficos de Gladys. En **Grupo de baterías** e
+**Instalación Zendure**, el periodo es de 3, 6, 12 o 24 horas, y **Anterior**
+retrocede un periodo, hasta las últimas 48 horas. En **Energía de hoy**, el
+periodo es un día o 7 días (una barra por día): **Anterior** retrocede día a
+día, o semana a semana, durante los últimos 8 días, y un periodo pasado
+muestra una línea **Mostrado** con sus fechas. Las tarjetas y líneas siguen el
+periodo mostrado; la estimación del ahorro solo aparece para hoy. Gladys
+guarda 8 elementos por widget, botones incluidos: las tarjetas que no caben se
+convierten en las primeras líneas. Un widget solo muestra su nombre como
+título si su **Título** está relleno. El periodo se conserva por widget hasta
+el reinicio de la integración. Zendure no guarda un historial más largo: sin
+vista por mes ni por año. Coloque **Instalación Zendure** y **Energía de hoy**
+en una sección del panel de una o dos columnas.
 
 Cada widget solo muestra lo que la batería tiene: un SolarFlow 800 usado sin
 pack de batería conserva su solar, su salida al hogar y su límite de salida
