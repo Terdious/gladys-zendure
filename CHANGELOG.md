@@ -10,6 +10,30 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Added
+
+- **Live charts in the Battery group and Zendure site widgets**: a new
+  **Chart** setting draws the last hours (3, 6, 12 or 24, set in **Chart
+  period**): the powers summed up (charge, discharge, solar, home), the power
+  to the home, or the charge level, one curve per phase (L1, L2, L3) on a
+  three-phase site for the last two. The integration records these values
+  every 5 minutes for the last 24 hours, under `/data` with the energy
+  counters: the curves fill in from the update on.
+- **Energy today chart choice**: the **Chart** setting shows the energy per
+  30 minutes to the home (the default), charged, discharged or solar (one
+  curve per phase in three-phase), or all the flows of the site.
+- **Order of the battery group list**: by name by default, in natural order
+  (`L1.2` before `L1.10`, the same on every phase), or as selected, or by
+  charge level or power to the home.
+
+### Changed
+
+- The battery lines of a **Battery group** are now sorted by name: they
+  followed the order the devices were found in, which differed from one
+  phase to the next.
+- The documentation recommends a one- or two-column dashboard section for the
+  **Zendure site** and **Energy today** widgets.
+
 ## [1.11.0] - 2026-10-19
 
 ### Fixed

@@ -332,9 +332,11 @@ test('the group leaves battery-less devices out of the level and the stored ener
   assert.equal(tile(both, 'Stored'), 1.23);
   assert.equal(tile(both, 'Solar'), 430);
   assert.equal(tile(both, 'To the home'), 670);
+  // Natural order of the names by default: "Inverter only" first.
   const rows = both.components.find((c) => c.type === 'status').items;
-  assert.equal(rows[0].value, '64 % · ↓ 2 h 15');
-  assert.equal(rows[1].value, '190 W');
+  assert.equal(rows[0].label, 'Inverter only');
+  assert.equal(rows[0].value, '190 W');
+  assert.equal(rows[1].value, '64 % · ↓ 2 h 15');
 
   // A group of battery-less devices only: no battery figure at all.
   const inverters = await WIDGETS[GROUP_WIDGET].get(gladys, {

@@ -356,9 +356,10 @@ ou plus récent) :
   validez. Les mêmes protections que pour les actions de scène s'appliquent.
 - **Groupe de batteries** : plusieurs batteries cumulées sous le nom de votre
   choix : niveau moyen (pondéré par la capacité des packs quand elles sont
-  toutes connues), puissances totales, énergie stockée, et une ligne par
-  batterie colorée selon sa source. Laissez la liste des batteries vide pour
-  prendre toutes les batteries du compte.
+  toutes connues), puissances totales, énergie stockée, une courbe en direct,
+  et une ligne par batterie colorée selon sa source, triées par nom (voir
+  **Courbes et ordre de la liste** plus bas). Laissez la liste des batteries
+  vide pour prendre toutes les batteries du compte.
 - **Installation Zendure** : toute l'installation sur une carte. Choisissez
   l'**Installation électrique** : _Selon la configuration de l'intégration_
   (par défaut, recommandé) utilise l'installation et les phases de la section
@@ -380,8 +381,8 @@ ou plus récent) :
 - **Énergie du jour** : l'énergie de la journée depuis minuit, avec le même
   choix d'installation et les mêmes listes de phases : chargée, déchargée,
   solaire et sortie maison (kWh), une ligne par phase en triphasé avec l'écart
-  entre les phases, et un graphique de la sortie maison par 30 minutes (une
-  courbe par phase). La journée commence au minuit du **Fuseau horaire** du
+  entre les phases, et un graphique par 30 minutes du flux choisi dans
+  **Courbe** (la sortie maison par défaut, une courbe par phase). La journée commence au minuit du **Fuseau horaire** du
   widget (un nom IANA, `Europe/Paris` par défaut : Gladys ne donne pas son
   fuseau à une intégration). Les chiffres viennent des compteurs d'énergie de
   l'intégration (enregistrés sous `/data` avec un instantané toutes les 30
@@ -419,6 +420,32 @@ d'avertissement **Aucune phase attribuée** ; des phases remplies dans une
 configuration monophasée sont ignorées (ligne **Phases ignorées**). Les
 widgets réglés avant sur _Monophasée_ ou _Triphasée_ gardent leurs propres
 listes et continuent de fonctionner. Un widget déjà au-delà de la limite : retirez-le du tableau de bord et ajoutez-le à nouveau (ou videz ses listes), en gardant _Selon la configuration de l'intégration_.
+
+**Courbes et ordre de la liste :** les widgets **Groupe de batteries** et
+**Installation Zendure** tracent une courbe en direct des dernières heures,
+choisie dans leur réglage **Courbe** : _Puissances_ (charge, décharge,
+solaire et sortie maison cumulées), _Puissance vers la maison_, _Niveau de
+charge_ (pondéré par la capacité des packs) ou _Pas de courbe_, sur la
+**Période de la courbe** (3, 6, 12 ou 24 heures, 6 par défaut). En triphasé,
+_Puissance vers la maison_ (le défaut du widget d'installation) et _Niveau de
+charge_ tracent une courbe par phase (L1, L2, L3). L'intégration enregistre
+elle-même ces valeurs toutes les 5 minutes sur les dernières 24 heures (sous
+`/data`, avec les compteurs d'énergie) : après une mise à jour, les courbes se
+remplissent à partir de ce moment. Avec une courbe, la carte d'installation
+garde l'énergie stockée dans la ligne **Stockée / capacité**, et un groupe
+avec une tuile solaire la passe en première ligne (Gladys garde 8 éléments par
+widget). La courbe de **Énergie du jour** propose _Vers la maison_,
+_Chargée_, _Déchargée_, _Solaire_ (une courbe par phase en triphasé), _Tous
+les flux du site_ ou _Pas de courbe_. Les lignes de batteries d'un groupe
+suivent son **Ordre de la liste** : _Par nom_ (le défaut, dans l'ordre
+naturel : `L1.2` avant `L1.10`, le même sur chaque phase), _Ordre de
+sélection_, _Niveau de charge_ ou _Puissance maison_, la plus haute d'abord.
+
+**Où les placer :** les widgets d'installation et d'énergie sont faits pour
+afficher toute l'installation : mettez-les dans une section du tableau de bord
+à une ou deux colonnes, où la courbe et les lignes par phase ont la largeur
+qu'il leur faut. Les widgets batterie et groupe tiennent dans une section à
+trois colonnes (un groupe par phase, par exemple).
 
 Chaque widget n'affiche que ce que la batterie possède : un SolarFlow 800
 utilisé sans pack de batterie garde son solaire, sa sortie maison et sa limite
