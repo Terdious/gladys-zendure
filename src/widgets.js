@@ -10,7 +10,9 @@
 //   - `battery_group`: several batteries summed up under a name of your
 //     choice. One instance per group: a three-phase installation adds one per
 //     phase (L1, L2, L3), and one more without battery selected for the whole
-//     site; a single-phase installation needs just one.
+//     site; a single-phase installation needs just one. Its list follows the
+//     `sort` setting (natural order of the names by default), and a live
+//     chart of the last hours (src/dashboard/charts.js) follows `chart`.
 //   - `site` (src/dashboard/site.js): the whole installation, single-phase or
 //     three-phase (batteries assigned to L1, L2, L3 in the integration
 //     configuration by default, or in the widget's own lists), with the
@@ -44,6 +46,13 @@ import {
   withPacksOf,
   withUnit,
 } from './dashboard/common.js';
+import {
+  LIVE_CHARTS,
+  chartHoursOf,
+  chartOf,
+  liveChart,
+  sortBatteries,
+} from './dashboard/charts.js';
 import { SITE_WIDGET, siteWidget } from './dashboard/site.js';
 import { ENERGY_TODAY_WIDGET, energyTodayWidget } from './dashboard/energyToday.js';
 
@@ -318,7 +327,18 @@ function groupRowValue(battery) {
   return `${battery.values.batteryLevel} %${time}`;
 }
 
-function groupContent(title, batteries) {
+/**
+ * Content of the battery group widget.
+ * @param {string|object} title heading
+ * @param {Array<object>} batteries battery snapshots, in list order
+ * @param {{ chart?: string, hours?: number, now?: number }} [options] live chart
+ * @returns {object} widget content
+ */
+export function groupContent(
+  title,
+  batteries,
+  { chart = LIVE_CHARTS.NONE, hours = 6, now = Date.now() } = {},
+) {
   // Devices known to have no pack (micro-inverter mode) count for the powers
   // only, never in the state of charge nor in the stored energy.
   const withPacks = withPacksOf(batteries);
@@ -368,21 +388,40 @@ function groupContent(title, batteries) {
   components.push(
     tile('homeOutputPower', T('To the home', 'Vers la maison', 'Zum Haus', 'Al hogar'), 'home'),
   );
-  if (withPacks.length > 0) {
+  const chartComponent = liveChart(chart, { batteries, hours, now });
+  const storedValue = stored === null ? UNKNOWN : Math.round(stored * 100) / 100;
+  const storedLabel = T('Stored', 'Stockée', 'Gespeichert', 'Almacenada');
+  // The core keeps 8 components: with a chart and a solar tile, the stored
+  // energy moves from its tile to the first status row.
+  const storedAsRow = chartComponent !== null && components.length + 3 > 8;
+  if (withPacks.length > 0 && !storedAsRow) {
     components.push({
       type: 'value',
-      value: stored === null ? UNKNOWN : Math.round(stored * 100) / 100,
+      value: storedValue,
       unit: 'kWh',
-      label: T('Stored', 'Stockée', 'Gespeichert', 'Almacenada'),
+      label: storedLabel,
       icon: 'battery',
     });
   }
-  const rows = batteries.map((battery) => ({
+  if (chartComponent) {
+    components.push(chartComponent);
+  }
+  const rows = [];
+  if (withPacks.length > 0 && storedAsRow) {
+    rows.push({
+      label: storedLabel,
+      icon: 'battery',
+      value: storedValue === UNKNOWN ? UNKNOWN : `${storedValue} kWh`,
+      color: WIDGET_COLORS.NEUTRAL,
+    });
+  }
+  const memberRows = batteries.map((battery) => ({
     label: battery.name.slice(0, 40),
     icon: battery.hasBattery === false ? 'sun' : 'battery',
     value: groupRowValue(battery),
     color: sourceStatus(battery).color,
   }));
+  rows.push(...memberRows);
   // The core keeps GROUP_MAX_ROWS rows: past that, the last one tells how
   // many batteries are not listed instead of dropping them silently.
   if (rows.length > GROUP_MAX_ROWS) {
@@ -485,18 +524,25 @@ export const WIDGETS = {
   },
 
   [GROUP_WIDGET]: {
-    async get(gladys, { settings, config }) {
+    async get(gladys, { settings, config, now = Date.now() }) {
       const all = await describeBatteries(gladys, config);
       const selected = Array.isArray(settings?.devices) ? settings.devices : [];
-      const batteries =
+      const batteries = sortBatteries(
         selected.length === 0
           ? all
-          : all.filter((battery) => selected.includes(battery.externalId));
+          : all.filter((battery) => selected.includes(battery.externalId)),
+        settings?.sort,
+        selected,
+      );
       if (batteries.length === 0) {
         return messageContent(NO_BATTERY);
       }
       const title = settings?.title?.trim() || T('Batteries', 'Batteries', 'Batterien', 'Baterías');
-      return groupContent(title, batteries);
+      return groupContent(title, batteries, {
+        chart: chartOf(settings, LIVE_CHARTS.POWER),
+        hours: chartHoursOf(settings),
+        now,
+      });
     },
   },
 

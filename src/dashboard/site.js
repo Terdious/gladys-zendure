@@ -19,7 +19,9 @@
 // the sources serving the batteries, with alert rows (unreachable, cloud
 // fallback, assignment mistakes). The content budget of the core (8
 // components, 6 tiles, 1 status of 10 rows) caps it at: 1 heading, 6 tiles,
-// 1 status.
+// 1 status. With the live chart of the `chart` setting (home output per
+// phase by default, src/dashboard/charts.js), the stored energy tile makes
+// room for it: the "Stored / capacity" row keeps the figure.
 //
 // The 1.6.0 rules hold: a device without a pack counts for the powers only
 // (never in the level, the charge figures nor the stored energy), a site
@@ -33,6 +35,7 @@ import { WIDGET_COLORS } from '@gladysassistant/integration-sdk';
 
 import { describeBatteries } from '../devices/index.js';
 import { formatRemainingTime } from '../zendure/battery.js';
+import { LIVE_CHARTS, chartHoursOf, chartOf, liveChart } from './charts.js';
 import {
   T,
   UNKNOWN,
@@ -289,10 +292,20 @@ function sourceRows(batteries) {
  * Content of the site widget.
  * @param {string|object} title heading
  * @param {ReturnType<typeof siteSelection>} selection
- * @param {{ threshold: number }} options
+ * @param {{ threshold?: number, chart?: string, hours?: number, now?: number }} [options]
+ *   `chart`: the live chart (src/dashboard/charts.js), none by default
  * @returns {object} widget content
  */
-export function siteContent(title, selection, { threshold = DEFAULT_IMBALANCE_THRESHOLD } = {}) {
+export function siteContent(
+  title,
+  selection,
+  {
+    threshold = DEFAULT_IMBALANCE_THRESHOLD,
+    chart = LIVE_CHARTS.NONE,
+    hours = 6,
+    now = Date.now(),
+  } = {},
+) {
   const { batteries } = selection;
   const packs = withPacksOf(batteries);
   const powers = powersOf(batteries);
@@ -325,7 +338,15 @@ export function siteContent(title, selection, { threshold = DEFAULT_IMBALANCE_TH
     components.push(tile(powers.solar, LABELS.solar, 'sun'));
   }
   components.push(tile(powers.home, LABELS.home, 'home'));
-  if (packs.length > 0) {
+  const chartComponent = liveChart(chart, {
+    batteries,
+    phases: selection.layout === LAYOUTS.THREE_PHASE ? selection.phases : [],
+    hours,
+    now,
+  });
+  // The core keeps 8 components: with a chart, the stored energy tile goes
+  // (the "Stored / capacity" row keeps the figure).
+  if (packs.length > 0 && !chartComponent) {
     components.push(
       tile(round2(sum(packs, (battery) => battery.remainingKwh)), LABELS.stored, 'battery', 'kWh'),
     );
@@ -352,6 +373,9 @@ export function siteContent(title, selection, { threshold = DEFAULT_IMBALANCE_TH
     }
   }
   rows.push(...sourceRows(batteries), ...selectionAlerts(selection));
+  if (chartComponent) {
+    components.push(chartComponent);
+  }
   components.push({ type: 'status', items: fitRows(rows) });
 
   // Computed sums: refreshed by the TTL.
@@ -370,7 +394,7 @@ function thresholdOf(settings) {
 }
 
 export const siteWidget = {
-  async get(gladys, { settings = {}, config }) {
+  async get(gladys, { settings = {}, config, now = Date.now() }) {
     const selection = siteSelection(await describeBatteries(gladys, config), settings, config);
     if (selection.batteries.length === 0) {
       return messageContent(emptySelectionMessage(selection));
@@ -378,6 +402,13 @@ export const siteWidget = {
     const title =
       (typeof settings.title === 'string' && settings.title.trim()) ||
       T('Zendure site', 'Installation Zendure', 'Zendure-Anlage', 'Instalación Zendure');
-    return siteContent(title, selection, { threshold: thresholdOf(settings) });
+    // The home output of each phase by default: what a three-phase site
+    // watches (single-phase: the site's).
+    return siteContent(title, selection, {
+      threshold: thresholdOf(settings),
+      chart: chartOf(settings, LIVE_CHARTS.HOME),
+      hours: chartHoursOf(settings),
+      now,
+    });
   },
 };

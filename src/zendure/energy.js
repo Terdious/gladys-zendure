@@ -29,6 +29,15 @@
 // official Home Assistant integration Zendure/Zendure-HA (MIT License, (c) 2024
 // peteS-UK). Only those factual constants are reused; the code is our own.
 //
+// Live history (the dashboard charts, src/dashboard/charts.js): each device
+// also keeps the totals and the state of charge at the start of every
+// 5-minute UTC step over the last HISTORY_RETENTION_IN_MS, taken like the
+// slot snapshots (first payload of the step, interval split at the
+// boundary). The average power of a step is its energy over its length: the
+// charts read the powers of the last day without one more sample loop. A
+// 30-minute boundary is a 5-minute one, and an integrated interval is at most
+// 5 minutes long: it crosses one boundary at most, the same for both.
+//
 // Savings estimate (src/zendure/savings.js): each device also keeps the totals
 // at the start of its open slot, the stored energy with its average cost and
 // the day / month / year accumulators, in a `savings` object of its entry
@@ -92,6 +101,14 @@ const SLOT_FIELDS = [
   'homeOutputEnergy',
 ];
 
+// History steps: 5 minutes, kept 24 h (288 steps, within the 300 points of a
+// chart series). Saved as `[stepStart, ...kWh (SLOT_FIELDS order), level]`.
+export const HISTORY_STEP_IN_MS = 5 * 60 * 1000;
+export const HISTORY_RETENTION_IN_MS = 24 * 60 * 60 * 1000;
+// The open step gets a power once it covers this much: a few seconds of
+// telemetry would read as a spike.
+const MIN_OPEN_STEP_IN_MS = 60 * 1000;
+
 /**
  * Start (ms) of the 30-minute UTC slot holding a timestamp.
  * @param {number} at timestamp (ms)
@@ -102,6 +119,17 @@ export function slotStartOf(at) {
 }
 
 const roundWh = (kwh) => Math.round(kwh * 1000) / 1000;
+// 0.1 Wh: a 1 Wh rounding over a 5-minute step would be a 12 W step.
+const roundHistory = (kwh) => Math.round(kwh * 10000) / 10000;
+
+/**
+ * Start (ms) of the 5-minute UTC history step holding a timestamp.
+ * @param {number} at timestamp (ms)
+ * @returns {number}
+ */
+export function stepStartOf(at) {
+  return Math.floor(at / HISTORY_STEP_IN_MS) * HISTORY_STEP_IN_MS;
+}
 
 /**
  * Capacity (kWh) of one battery pack, from its serial number prefix (and pack
@@ -181,6 +209,11 @@ export function createEnergyMeters({ dataDir = process.env.ZENDURE_DATA_DIR || '
           kwh: { ...meter.kwh },
           slots: meter.slots.map((slot) => [slot.at, ...SLOT_FIELDS.map((key) => slot.kwh[key])]),
           savings: serializeSavings(meter.savings),
+          history: meter.history.map((step) => [
+            step.at,
+            ...SLOT_FIELDS.map((key) => step.kwh[key]),
+            step.level,
+          ]),
         },
       ]),
     );
@@ -188,7 +221,8 @@ export function createEnergyMeters({ dataDir = process.env.ZENDURE_DATA_DIR || '
     const temporaryPath = `${filePath}.${process.pid}.${saveCount}.tmp`;
     try {
       await mkdir(dataDir, { recursive: true });
-      // Version 1 still: `slots`, `slot_fields` and `savings` are additive,
+      // Version 1 still: `slots`, `slot_fields`, `savings` and `history`
+      // are additive,
       // an older release reads the totals and ignores them.
       await writeFile(
         temporaryPath,
@@ -213,6 +247,7 @@ export function createEnergyMeters({ dataDir = process.env.ZENDURE_DATA_DIR || '
         power: {},
         kwh: {},
         slots: [],
+        history: [],
         savings: createSavingsState(),
         storedKwh: null,
       });
@@ -249,6 +284,51 @@ export function createEnergyMeters({ dataDir = process.env.ZENDURE_DATA_DIR || '
     dirty = true;
   }
 
+  /**
+   * Snapshot the totals and the level at the first payload of a new step.
+   * `from` is when the step's integration starts: its boundary when the
+   * interval before crossed it, else this payload (back from a silence).
+   */
+  function snapshotStep(meter, at, level, from) {
+    const stepAt = stepStartOf(at);
+    const last = meter.history[meter.history.length - 1];
+    if (last && last.at >= stepAt) {
+      return;
+    }
+    meter.history.push({
+      at: stepAt,
+      kwh: Object.fromEntries(SLOT_FIELDS.map((key) => [key, roundHistory(meter.kwh[key] || 0)])),
+      level: Number.isFinite(level) ? level : null,
+      // In memory only: it sizes the open step, and a reload has none.
+      from,
+    });
+    const keepFrom = at - HISTORY_RETENTION_IN_MS;
+    if (meter.history[0].at < keepFrom) {
+      meter.history = meter.history.filter((step) => step.at >= keepFrom);
+    }
+    dirty = true;
+  }
+
+  /** Saved history of a device, read with the field order the file declares. */
+  function loadHistory(savedHistory, fields) {
+    if (!Array.isArray(savedHistory) || !Array.isArray(fields)) {
+      return [];
+    }
+    return savedHistory
+      .filter((step) => Array.isArray(step) && Number.isFinite(step[0]))
+      .map(([at, ...values]) => ({
+        at,
+        kwh: Object.fromEntries(
+          SLOT_FIELDS.map((key) => {
+            const value = values[fields.indexOf(key)];
+            return [key, Number.isFinite(value) ? value : 0];
+          }),
+        ),
+        level: Number.isFinite(values[fields.length]) ? values[fields.length] : null,
+      }))
+      .sort((a, b) => a.at - b.at);
+  }
+
   /** Saved slots of a device, read with the field order the file declares. */
   function loadSlots(savedSlots, fields) {
     if (!Array.isArray(savedSlots) || !Array.isArray(fields)) {
@@ -283,6 +363,7 @@ export function createEnergyMeters({ dataDir = process.env.ZENDURE_DATA_DIR || '
               power: {},
               kwh: { ...meter.kwh },
               slots: loadSlots(meter.slots, saved.slot_fields),
+              history: loadHistory(meter.history, saved.slot_fields),
               savings: deserializeSavings(meter.savings),
               storedKwh: Number.isFinite(meter.savings?.stock?.kwh)
                 ? meter.savings.stock.kwh
@@ -303,23 +384,24 @@ export function createEnergyMeters({ dataDir = process.env.ZENDURE_DATA_DIR || '
      * @param {string} deviceKey Zendure device key
      * @param {Record<string, number>} powers power feature key -> W (missing keys keep their last value)
      * @param {number} at timestamp of the payload (ms)
-     * @param {{ storedKwh?: number|null }} [measures] energy in the packs now (state of charge x capacity), when known
+     * @param {{ storedKwh?: number|null, level?: number|null }} [measures] energy in the packs now (state of charge x capacity) and state of charge (%), when known
      * @returns {Record<string, number>} index feature key -> kWh
      */
-    update(deviceKey, powers, at, { storedKwh = null } = {}) {
+    update(deviceKey, powers, at, { storedKwh = null, level = null } = {}) {
       const meter = meterOf(deviceKey);
       const elapsed = at - meter.lastAt;
       const integrable = meter.lastAt > 0 && elapsed > 0 && elapsed <= MAX_INTEGRATION_GAP_IN_MS;
-      // An interval crossing a slot boundary (at most one: the gap is shorter
-      // than a slot) is split there, so the snapshot holds exactly the energy
-      // before the boundary.
+      // An interval crossing a step boundary (at most one: the gap is at most
+      // a step; a slot boundary is a step boundary too) is split there, so
+      // the snapshots hold exactly the energy before the boundary.
       let from = meter.lastAt;
-      const boundary = slotStartOf(at);
+      const boundary = stepStartOf(at);
       if (integrable && from < boundary) {
         integrate(meter, boundary - from);
         from = boundary;
       }
       snapshotSlot(meter, at);
+      snapshotStep(meter, at, level, integrable ? boundary : at);
       if (integrable) {
         integrate(meter, at - from);
       }
@@ -378,6 +460,38 @@ export function createEnergyMeters({ dataDir = process.env.ZENDURE_DATA_DIR || '
           kwh: delta(slot.kwh, slots[index + 1]?.kwh ?? now),
         })),
       };
+    },
+
+    /**
+     * Live history of a device since a moment: per 5-minute step, the
+     * average power (W) of each flow and the state of charge at its start.
+     * A step's energy runs to the next snapshot (none was integrated over a
+     * silence); the open step gets its power once it covers a minute.
+     * @param {string} deviceKey Zendure device key
+     * @param {number} since timestamp (ms)
+     * @returns {Array<{ at: number, watts: Record<string, number>|null, level: number|null }>}
+     */
+    historySince(deviceKey, since) {
+      const meter = meters.get(deviceKey);
+      const steps = (meter?.history || []).filter((step) => step.at >= since);
+      return steps.map((step, index) => {
+        const next = steps[index + 1];
+        // The open step averages over what it covered so far.
+        const duration = next ? HISTORY_STEP_IN_MS : meter.lastAt - (step.from ?? step.at);
+        if (!next && duration < MIN_OPEN_STEP_IN_MS) {
+          return { at: step.at, watts: null, level: step.level };
+        }
+        const end = next ? next.kwh : meter.kwh;
+        const watts = Object.fromEntries(
+          SLOT_FIELDS.map((key) => [
+            key,
+            Math.round(
+              (Math.max(0, (end[key] || 0) - step.kwh[key]) * 3600 * 1000 * 1000) / duration,
+            ),
+          ]),
+        );
+        return { at: step.at, watts, level: step.level };
+      });
     },
 
     /**

@@ -1617,10 +1617,9 @@ function buildEnergyStates(gladys, rawCloudDevice, payload, { integrate, at = Da
   const capacity = deviceCapacityKwh(payload);
   const levelMapping = features.find((featureMapping) => featureMapping.key === 'batteryLevel');
   const level = levelMapping ? extractMetricValue(payload, levelMapping.metricPaths) : null;
+  const levelPercent = level === null ? null : normalizeMetricValue('batteryLevel', level);
   const storedKwh =
-    capacity !== null && level !== null
-      ? Math.round(normalizeMetricValue('batteryLevel', level) * capacity) / 100
-      : null;
+    capacity !== null && levelPercent !== null ? Math.round(levelPercent * capacity) / 100 : null;
   let totals;
   if (integrate) {
     const powers = {};
@@ -1632,7 +1631,10 @@ function buildEnergyStates(gladys, rawCloudDevice, payload, { integrate, at = Da
         }
       }
     }
-    totals = meters.update(deviceKeyOf(rawCloudDevice), powers, at, { storedKwh });
+    totals = meters.update(deviceKeyOf(rawCloudDevice), powers, at, {
+      storedKwh,
+      level: levelPercent,
+    });
   } else {
     totals = meters.totals(deviceKeyOf(rawCloudDevice));
   }
@@ -1753,6 +1755,9 @@ export async function describeBatteries(gladys, config) {
       energyReady: energyLoaded,
       energySince: (since) =>
         energyLoaded ? getEnergyMeters().energySince(deviceKey, since) : null,
+      // Live history (5-minute steps of the last day), [] before the load.
+      historySince: (since) =>
+        energyLoaded ? getEnergyMeters().historySince(deviceKey, since) : [],
       // Savings estimate (src/zendure/savings.js): null without a tariff.
       savingsAt: (now) => (energyLoaded ? getEnergyMeters().savingsOf(deviceKey, now) : null),
     };

@@ -1420,6 +1420,159 @@
             "de": "Keine ausgewählt: alle Batterien des Kontos.",
             "es": "Ninguna seleccionada: todas las baterías de la cuenta."
           }
+        },
+        {
+          "key": "sort",
+          "type": "select",
+          "label": {
+            "en": "Order of the list",
+            "fr": "Ordre de la liste",
+            "de": "Reihenfolge der Liste",
+            "es": "Orden de la lista"
+          },
+          "default": "name",
+          "options": [
+            {
+              "value": "name",
+              "label": {
+                "en": "By name",
+                "fr": "Par nom",
+                "de": "Nach Name",
+                "es": "Por nombre"
+              }
+            },
+            {
+              "value": "selection",
+              "label": {
+                "en": "As selected",
+                "fr": "Ordre de sélection",
+                "de": "Wie ausgewählt",
+                "es": "Según la selección"
+              }
+            },
+            {
+              "value": "level",
+              "label": {
+                "en": "Charge level, highest first",
+                "fr": "Niveau de charge, plus haut d'abord",
+                "de": "Ladestand, höchster zuerst",
+                "es": "Nivel de carga, mayor primero"
+              }
+            },
+            {
+              "value": "power",
+              "label": {
+                "en": "Power to the home, highest first",
+                "fr": "Puissance maison, plus haute d'abord",
+                "de": "Leistung zum Haus, höchste zuerst",
+                "es": "Potencia al hogar, mayor primero"
+              }
+            }
+          ]
+        },
+        {
+          "key": "chart",
+          "type": "select",
+          "label": {
+            "en": "Chart",
+            "fr": "Courbe",
+            "de": "Kurve",
+            "es": "Curva"
+          },
+          "default": "power",
+          "options": [
+            {
+              "value": "power",
+              "label": {
+                "en": "Powers (charge, discharge, solar, home)",
+                "fr": "Puissances (charge, décharge, solaire, maison)",
+                "de": "Leistungen (Laden, Entladen, Solar, Haus)",
+                "es": "Potencias (carga, descarga, solar, hogar)"
+              }
+            },
+            {
+              "value": "home",
+              "label": {
+                "en": "Power to the home",
+                "fr": "Puissance vers la maison",
+                "de": "Leistung zum Haus",
+                "es": "Potencia al hogar"
+              }
+            },
+            {
+              "value": "level",
+              "label": {
+                "en": "Charge level",
+                "fr": "Niveau de charge",
+                "de": "Ladestand",
+                "es": "Nivel de carga"
+              }
+            },
+            {
+              "value": "none",
+              "label": {
+                "en": "No chart",
+                "fr": "Pas de courbe",
+                "de": "Keine Kurve",
+                "es": "Sin curva"
+              }
+            }
+          ],
+          "description": {
+            "en": "Summed over the batteries of the group, per 5 minutes, recorded by the integration (up to 24 hours).",
+            "fr": "Cumulée sur les batteries du groupe, par 5 minutes, enregistrée par l'intégration (jusqu'à 24 heures).",
+            "de": "Über die Batterien der Gruppe summiert, je 5 Minuten, von der Integration aufgezeichnet (bis zu 24 Stunden).",
+            "es": "Sumada sobre las baterías del grupo, cada 5 minutos, registrada por la integración (hasta 24 horas)."
+          }
+        },
+        {
+          "key": "chart_hours",
+          "type": "select",
+          "label": {
+            "en": "Chart period",
+            "fr": "Période de la courbe",
+            "de": "Zeitraum der Kurve",
+            "es": "Periodo de la curva"
+          },
+          "default": "6",
+          "options": [
+            {
+              "value": "3",
+              "label": {
+                "en": "Last 3 hours",
+                "fr": "3 dernières heures",
+                "de": "Letzte 3 Stunden",
+                "es": "Últimas 3 horas"
+              }
+            },
+            {
+              "value": "6",
+              "label": {
+                "en": "Last 6 hours",
+                "fr": "6 dernières heures",
+                "de": "Letzte 6 Stunden",
+                "es": "Últimas 6 horas"
+              }
+            },
+            {
+              "value": "12",
+              "label": {
+                "en": "Last 12 hours",
+                "fr": "12 dernières heures",
+                "de": "Letzte 12 Stunden",
+                "es": "Últimas 12 horas"
+              }
+            },
+            {
+              "value": "24",
+              "label": {
+                "en": "Last 24 hours",
+                "fr": "24 dernières heures",
+                "de": "Letzte 24 Stunden",
+                "es": "Últimas 24 horas"
+              }
+            }
+          ]
         }
       ]
     },
@@ -1570,6 +1723,110 @@
             "de": "Nur dreiphasig (Widget-Listen): jede Batterie in der Phase, die sie speist. Ein Widget speichert 1 KB Einstellungen (etwa 15 Batterien insgesamt): Wähle für eine größere Anlage „Aus der Konfiguration der Integration“.",
             "es": "Solo trifásica (listas del widget): cada batería en la fase que alimenta. Un widget guarda 1 KB de ajustes (unas 15 baterías en total): para una instalación mayor, elija «Según la configuración de la integración»."
           }
+        },
+        {
+          "key": "chart",
+          "type": "select",
+          "label": {
+            "en": "Chart",
+            "fr": "Courbe",
+            "de": "Kurve",
+            "es": "Curva"
+          },
+          "default": "home",
+          "options": [
+            {
+              "value": "power",
+              "label": {
+                "en": "Powers (charge, discharge, solar, home)",
+                "fr": "Puissances (charge, décharge, solaire, maison)",
+                "de": "Leistungen (Laden, Entladen, Solar, Haus)",
+                "es": "Potencias (carga, descarga, solar, hogar)"
+              }
+            },
+            {
+              "value": "home",
+              "label": {
+                "en": "Power to the home",
+                "fr": "Puissance vers la maison",
+                "de": "Leistung zum Haus",
+                "es": "Potencia al hogar"
+              }
+            },
+            {
+              "value": "level",
+              "label": {
+                "en": "Charge level",
+                "fr": "Niveau de charge",
+                "de": "Ladestand",
+                "es": "Nivel de carga"
+              }
+            },
+            {
+              "value": "none",
+              "label": {
+                "en": "No chart",
+                "fr": "Pas de courbe",
+                "de": "Keine Kurve",
+                "es": "Sin curva"
+              }
+            }
+          ],
+          "description": {
+            "en": "Per 5 minutes, up to 24 hours. Three-phase: \"Power to the home\" and \"Charge level\" draw one line per phase (L1, L2, L3), \"Powers\" the four flows of the whole site.",
+            "fr": "Par 5 minutes, jusqu'à 24 heures. Triphasé : « Puissance vers la maison » et « Niveau de charge » tracent une courbe par phase (L1, L2, L3), « Puissances » les quatre flux du site.",
+            "de": "Je 5 Minuten, bis zu 24 Stunden. Dreiphasig: „Leistung zum Haus“ und „Ladestand“ zeichnen eine Linie je Phase (L1, L2, L3), „Leistungen“ die vier Flüsse der Anlage.",
+            "es": "Cada 5 minutos, hasta 24 horas. Trifásica: «Potencia al hogar» y «Nivel de carga» trazan una curva por fase (L1, L2, L3), «Potencias» los cuatro flujos de la instalación."
+          }
+        },
+        {
+          "key": "chart_hours",
+          "type": "select",
+          "label": {
+            "en": "Chart period",
+            "fr": "Période de la courbe",
+            "de": "Zeitraum der Kurve",
+            "es": "Periodo de la curva"
+          },
+          "default": "6",
+          "options": [
+            {
+              "value": "3",
+              "label": {
+                "en": "Last 3 hours",
+                "fr": "3 dernières heures",
+                "de": "Letzte 3 Stunden",
+                "es": "Últimas 3 horas"
+              }
+            },
+            {
+              "value": "6",
+              "label": {
+                "en": "Last 6 hours",
+                "fr": "6 dernières heures",
+                "de": "Letzte 6 Stunden",
+                "es": "Últimas 6 horas"
+              }
+            },
+            {
+              "value": "12",
+              "label": {
+                "en": "Last 12 hours",
+                "fr": "12 dernières heures",
+                "de": "Letzte 12 Stunden",
+                "es": "Últimas 12 horas"
+              }
+            },
+            {
+              "value": "24",
+              "label": {
+                "en": "Last 24 hours",
+                "fr": "24 dernières heures",
+                "de": "Letzte 24 Stunden",
+                "es": "Últimas 24 horas"
+              }
+            }
+          ]
         },
         {
           "key": "imbalance_threshold",
@@ -1738,6 +1995,79 @@
             "fr": "Triphasé (listes du widget) uniquement : chaque batterie dans la phase qu'elle alimente. Un widget garde 1 Ko de réglages (environ 15 batteries en tout) : pour une installation plus grande, choisissez « Selon la configuration de l'intégration ».",
             "de": "Nur dreiphasig (Widget-Listen): jede Batterie in der Phase, die sie speist. Ein Widget speichert 1 KB Einstellungen (etwa 15 Batterien insgesamt): Wähle für eine größere Anlage „Aus der Konfiguration der Integration“.",
             "es": "Solo trifásica (listas del widget): cada batería en la fase que alimenta. Un widget guarda 1 KB de ajustes (unas 15 baterías en total): para una instalación mayor, elija «Según la configuración de la integración»."
+          }
+        },
+        {
+          "key": "chart",
+          "type": "select",
+          "label": {
+            "en": "Chart",
+            "fr": "Courbe",
+            "de": "Kurve",
+            "es": "Curva"
+          },
+          "default": "home",
+          "options": [
+            {
+              "value": "home",
+              "label": {
+                "en": "To the home",
+                "fr": "Vers la maison",
+                "de": "Zum Haus",
+                "es": "Al hogar"
+              }
+            },
+            {
+              "value": "charge",
+              "label": {
+                "en": "Charged",
+                "fr": "Chargée",
+                "de": "Geladen",
+                "es": "Cargada"
+              }
+            },
+            {
+              "value": "discharge",
+              "label": {
+                "en": "Discharged",
+                "fr": "Déchargée",
+                "de": "Entladen",
+                "es": "Descargada"
+              }
+            },
+            {
+              "value": "solar",
+              "label": {
+                "en": "Solar",
+                "fr": "Solaire",
+                "de": "Solar",
+                "es": "Solar"
+              }
+            },
+            {
+              "value": "flows",
+              "label": {
+                "en": "All the flows of the site",
+                "fr": "Tous les flux du site",
+                "de": "Alle Flüsse der Anlage",
+                "es": "Todos los flujos"
+              }
+            },
+            {
+              "value": "none",
+              "label": {
+                "en": "No chart",
+                "fr": "Pas de courbe",
+                "de": "Keine Kurve",
+                "es": "Sin curva"
+              }
+            }
+          ],
+          "description": {
+            "en": "Energy per 30 minutes since midnight. Three-phase: one line per phase (L1, L2, L3), except \"All the flows of the site\".",
+            "fr": "Énergie par 30 minutes depuis minuit. Triphasé : une courbe par phase (L1, L2, L3), sauf « Tous les flux du site ».",
+            "de": "Energie je 30 Minuten seit Mitternacht. Dreiphasig: eine Linie je Phase (L1, L2, L3), außer „Alle Flüsse der Anlage“.",
+            "es": "Energía cada 30 minutos desde medianoche. Trifásica: una curva por fase (L1, L2, L3), salvo «Todos los flujos»."
           }
         },
         {

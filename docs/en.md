@@ -325,8 +325,9 @@ Four widgets are available in the dashboard editor (Gladys 5.1 or later):
   the scene actions apply.
 - **Battery group**: several batteries summed up under a name of your choice:
   average charge level (weighted by the pack capacities when they are all
-  known), total powers, energy stored, and one line per battery colored by its
-  source. Leave the battery list empty for every battery of the account.
+  known), total powers, energy stored, a live chart, and one line per battery
+  colored by its source, listed by name (see **Charts and list order** below).
+  Leave the battery list empty for every battery of the account.
 - **Zendure site**: the whole installation on one card. Choose the
   **Electrical layout**: _From the integration configuration_ (the default,
   recommended) uses the layout and the phases of the **Electrical
@@ -347,7 +348,8 @@ Four widgets are available in the dashboard editor (Gladys 5.1 or later):
 - **Energy today**: the energy of the day since local midnight, same layout
   choice and phase lists: charged, discharged, solar and home output (kWh),
   one line per phase in three-phase with the gap between the phases, and a
-  chart of the home output per 30 minutes (one curve per phase). The day
+  chart per 30 minutes of the flow chosen in **Chart** (home output by
+  default, one curve per phase). The day
   starts at the midnight of the widget's **Timezone** (an IANA name,
   `Europe/Paris` by default: Gladys does not give its timezone to an
   integration). The figures come from the energy counters of the integration
@@ -382,6 +384,29 @@ battery assigned shows every battery as single-phase, with a **No phase
 assigned** warning line; phases filled in a single-phase configuration are
 ignored (**Phases ignored** line). Widgets set to _Single-phase_ or
 _Three-phase_ before keep their own lists and keep working. A widget already over the limit: remove it from the dashboard and add it again (or empty its lists), keeping _From the integration configuration_.
+
+**Charts and list order:** the **Battery group** and **Zendure site** widgets
+draw a live chart of the last hours, chosen in their **Chart** setting:
+_Powers_ (charge, discharge, solar and home output summed up), _Power to the
+home_, _Charge level_ (weighted by the pack capacities) or _No chart_, over
+the **Chart period** (3, 6, 12 or 24 hours, 6 by default). On a three-phase
+site, _Power to the home_ (the default of the site widget) and _Charge level_
+draw one curve per phase (L1, L2, L3). The integration records these values
+itself every 5 minutes for the last 24 hours (under `/data`, with the energy
+counters): after an update, the curves fill in from that moment. With a
+chart, the site card moves its stored energy to the **Stored / capacity**
+line, and a group with a solar tile moves it to its first line (Gladys keeps
+8 elements per widget). The **Energy today** chart offers _To the home_,
+_Charged_, _Discharged_, _Solar_ (one curve per phase in three-phase), _All
+the flows of the site_ or _No chart_. The battery lines of a group follow its
+**Order of the list**: _By name_ (the default, in natural order: `L1.2` before
+`L1.10`, the same on every phase), _As selected_, highest _Charge level_ or
+highest _Power to the home_ first.
+
+**Placing them:** the site and energy widgets are made to show the whole
+installation: put them in a dashboard section with one or two columns, where
+the chart and the per-phase lines get the width they need. The battery and
+group widgets fit a three-column section (one group per phase, for example).
 
 Each widget only shows what the battery has: a SolarFlow 800 running
 without a battery pack keeps its solar, home output and output limit (no

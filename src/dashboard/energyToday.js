@@ -7,7 +7,9 @@
 // energy of today is the totals now minus the snapshot of the first slot at
 // or after the local midnight, the midnight of the widget's `timezone`
 // setting (Gladys gives an integration no instance timezone; empty or
-// unknown: Europe/Paris). The chart shows the home output of each slot.
+// unknown: Europe/Paris). The chart follows the `chart` setting: the energy
+// of each slot to the home (default), charged, discharged or solar, per phase
+// on a three-phase site, or the four flows of the whole site.
 //
 // Same selection as the `site` widget (from the integration configuration
 // by default, or the widget's own lists: single-phase, or L1/L2/L3). The
@@ -55,6 +57,44 @@ const LABELS = {
   home: T('To the home', 'Vers la maison', 'Zum Haus', 'Al hogar'),
 };
 
+// Values of the `chart` setting, stored in the users' dashboards.
+export const ENERGY_CHARTS = {
+  HOME: 'home',
+  CHARGE: 'charge',
+  DISCHARGE: 'discharge',
+  SOLAR: 'solar',
+  FLOWS: 'flows',
+  NONE: 'none',
+};
+
+const CHART_TITLES = {
+  home: T(
+    'To the home, per 30 min',
+    'Vers la maison, par 30 min',
+    'Zum Haus, je 30 Min.',
+    'Al hogar, cada 30 min',
+  ),
+  charge: T(
+    'Charged, per 30 min',
+    'Chargée, par 30 min',
+    'Geladen, je 30 Min.',
+    'Cargada, cada 30 min',
+  ),
+  discharge: T(
+    'Discharged, per 30 min',
+    'Déchargée, par 30 min',
+    'Entladen, je 30 Min.',
+    'Descargada, cada 30 min',
+  ),
+  solar: T('Solar, per 30 min', 'Solaire, par 30 min', 'Solar, je 30 Min.', 'Solar, cada 30 min'),
+  flows: T(
+    'Site flows, per 30 min',
+    'Flux du site, par 30 min',
+    'Anlagenflüsse, je 30 Min.',
+    'Flujos, cada 30 min',
+  ),
+};
+
 const LOADING = T(
   'The energy meters are loading: the figures of the day show up in a few seconds.',
   "Les compteurs d'énergie se chargent : les chiffres du jour arrivent dans quelques secondes.",
@@ -62,18 +102,22 @@ const LOADING = T(
   'Los contadores de energía se están cargando: las cifras del día llegan en unos segundos.',
 );
 
+// Chart flow -> LABELS key.
+const FLOW_LABELS = { charge: 'charged', discharge: 'discharged', solar: 'solar', home: 'home' };
+
 const round = (kwh, digits) => Math.round(kwh * 10 ** digits) / 10 ** digits;
 
 /**
  * Energy of some batteries since a moment: kWh per flow (charge figures
- * from the devices with a pack), per slot, and the earliest counting start.
+ * from the devices with a pack), per slot and flow, and the earliest
+ * counting start.
  * @param {Array<object>} batteries battery snapshots
  * @param {number} since timestamp (ms), the local midnight
  */
 export function energyOf(batteries, since) {
   const packIds = new Set(withPacksOf(batteries).map((battery) => battery.externalId));
   const kwh = { charge: 0, discharge: 0, solar: 0, home: 0 };
-  const slots = new Map(); // slot start -> home output kWh
+  const slots = new Map(); // slot start -> { flow: kWh }
   let countingSince = null;
   for (const battery of batteries) {
     const energy = battery.energySince(since);
@@ -88,7 +132,13 @@ export function energyOf(batteries, since) {
       }
     }
     for (const slot of energy.slots) {
-      slots.set(slot.at, (slots.get(slot.at) ?? 0) + slot.kwh[FLOWS.home]);
+      const total = slots.get(slot.at) ?? { charge: 0, discharge: 0, solar: 0, home: 0 };
+      for (const [flow, key] of Object.entries(FLOWS)) {
+        if (packIds.has(battery.externalId) || flow === 'solar' || flow === 'home') {
+          total[flow] += slot.kwh[key];
+        }
+      }
+      slots.set(slot.at, total);
     }
   }
   return { kwh, slots, countingSince };
@@ -106,22 +156,26 @@ function phaseFlows(batteries, kwh) {
   return `${parts.join(' · ')} kWh`;
 }
 
-/** Inline chart points of a slot map, in time order (Wh per slot). */
-function pointsOf(slots) {
+/** Inline chart points of one flow of a slot map, in time order (Wh per slot). */
+function pointsOf(slots, flow = 'home') {
   return [...slots.entries()]
     .sort(([a], [b]) => a - b)
-    .map(([at, kwh]) => ({ t: new Date(at).toISOString(), v: Math.round(kwh * 1000) }));
+    .map(([at, kwh]) => ({ t: new Date(at).toISOString(), v: Math.round(kwh[flow] * 1000) }));
 }
 
 /**
  * Content of the energy widget.
  * @param {string|object} title heading
  * @param {ReturnType<typeof siteSelection>} selection
- * @param {{ now: number, timeZone: string, savings?: { tariff: object|null, tariffError: string|null } }} options
- *   `savings` absent: no savings shown
+ * @param {{ now: number, timeZone: string, chart?: string, savings?: { tariff: object|null, tariffError: string|null } }} options
+ *   `chart`: an ENERGY_CHARTS value (home by default), `savings` absent: no savings shown
  * @returns {object} widget content
  */
-export function energyTodayContent(title, selection, { now, timeZone, savings }) {
+export function energyTodayContent(
+  title,
+  selection,
+  { now, timeZone, chart = ENERGY_CHARTS.HOME, savings },
+) {
   const { batteries } = selection;
   const since = startOfLocalDay(now, timeZone);
   const site = energyOf(batteries, since);
@@ -153,6 +207,8 @@ export function energyTodayContent(title, selection, { now, timeZone, savings })
 
   const rows = [];
   const series = [];
+  // One flow charted: per phase on a three-phase site, else the site's.
+  const oneFlow = chart in FLOW_LABELS;
   if (selection.layout === LAYOUTS.THREE_PHASE) {
     const phases = selection.phases.map((phase) => ({
       ...phase,
@@ -168,8 +224,8 @@ export function energyTodayContent(title, selection, { now, timeZone, savings })
             : phaseFlows(phase.batteries, phase.energy.kwh),
         color: WIDGET_COLORS.NEUTRAL,
       });
-      if (phase.energy.slots.size > 0) {
-        series.push({ name: phase.label, points: pointsOf(phase.energy.slots) });
+      if (phase.energy.slots.size > 0 && oneFlow) {
+        series.push({ name: phase.label, points: pointsOf(phase.energy.slots, chart) });
       }
     }
     const homes = phases
@@ -194,20 +250,27 @@ export function energyTodayContent(title, selection, { now, timeZone, savings })
         color: WIDGET_COLORS.NEUTRAL,
       });
     }
-  } else if (site.slots.size > 0) {
-    series.push({ name: LABELS.home, points: pointsOf(site.slots) });
+  } else if (site.slots.size > 0 && oneFlow) {
+    series.push({ name: LABELS[FLOW_LABELS[chart]], points: pointsOf(site.slots, chart) });
+  }
+  if (chart === ENERGY_CHARTS.FLOWS && site.slots.size > 0) {
+    // The flows the site has: no charge figures without a pack, no solar
+    // without a PV input.
+    const flows = [
+      ...(hasPacks ? ['charge', 'discharge'] : []),
+      ...(hasSolar ? ['solar'] : []),
+      'home',
+    ];
+    for (const flow of flows) {
+      series.push({ name: LABELS[FLOW_LABELS[flow]], points: pointsOf(site.slots, flow) });
+    }
   }
 
   if (series.length > 0) {
     components.push({
       type: 'chart',
       chart_type: 'line',
-      title: T(
-        'To the home, per 30 min',
-        'Vers la maison, par 30 min',
-        'Zum Haus, je 30 Min.',
-        'Al hogar, cada 30 min',
-      ),
+      title: CHART_TITLES[chart],
       unit: 'Wh',
       series,
     });
@@ -260,6 +323,9 @@ export const energyTodayWidget = {
     return energyTodayContent(title, selection, {
       now,
       timeZone: resolveTimezone(settings.timezone),
+      chart: Object.values(ENERGY_CHARTS).includes(settings.chart)
+        ? settings.chart
+        : ENERGY_CHARTS.HOME,
       savings,
     });
   },
