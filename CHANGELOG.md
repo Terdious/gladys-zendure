@@ -10,6 +10,28 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Added
+
+- **Period navigation on every widget with a chart**, like the Beem Energy
+  widgets and the charts of Gladys: a **Period** button (a form on Gladys 5.2
+  or later, a cycle on an older core) and **Previous** / **Next** buttons.
+  - **Battery group** and **Zendure site**: 3, 6, 12 or 24 hours, back over
+    the last 48 hours (the 5-minute history is now kept 48 hours).
+  - **Energy today**: a day or 7 days (one bar per day), back over the last 8
+    days (the 30-minute snapshots are now kept 8 days); a past period shows a
+    **Shown** line, and the tiles and lines follow it. The savings estimate
+    shows on today only.
+
+### Changed
+
+- The widgets fit their tiles in the 8 elements Gladys keeps, buttons
+  included: the tiles that do not fit become the first lines of the card.
+- The **Battery group**, **Zendure site** and **Energy today** widgets show
+  their name as a heading only when their **Title** is filled in: the card
+  already names them, and the place goes to a tile.
+- The German and Spanish documentation now covers the charts and the list
+  order of 1.12.0.
+
 ## [1.12.0] - 2026-10-23
 
 ### Added

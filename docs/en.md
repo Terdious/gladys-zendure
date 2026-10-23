@@ -353,7 +353,7 @@ Four widgets are available in the dashboard editor (Gladys 5.1 or later):
   starts at the midnight of the widget's **Timezone** (an IANA name,
   `Europe/Paris` by default: Gladys does not give its timezone to an
   integration). The figures come from the energy counters of the integration
-  (saved under `/data` with a snapshot every 30 minutes, kept 26 hours): they
+  (saved under `/data` with a snapshot every 30 minutes, kept 8 days): they
   count from the first report of the day, which the **Counted since** line
   shows (for example after a first install in the morning).
   With an electricity tariff in the configuration, it also shows the savings
@@ -392,16 +392,31 @@ home_, _Charge level_ (weighted by the pack capacities) or _No chart_, over
 the **Chart period** (3, 6, 12 or 24 hours, 6 by default). On a three-phase
 site, _Power to the home_ (the default of the site widget) and _Charge level_
 draw one curve per phase (L1, L2, L3). The integration records these values
-itself every 5 minutes for the last 24 hours (under `/data`, with the energy
-counters): after an update, the curves fill in from that moment. With a
-chart, the site card moves its stored energy to the **Stored / capacity**
-line, and a group with a solar tile moves it to its first line (Gladys keeps
-8 elements per widget). The **Energy today** chart offers _To the home_,
+itself every 5 minutes for the last 48 hours (under `/data`, with the energy
+counters): after an update, the curves fill in from that moment. Gladys keeps
+8 elements per widget, buttons included: the tiles that do not fit become the
+first lines of the card (the stored energy of the site card stays in its
+**Stored / capacity** line). A widget shows its name as a heading only when
+its **Title** is filled in: the card already names it. The **Energy today** chart offers _To the home_,
 _Charged_, _Discharged_, _Solar_ (one curve per phase in three-phase), _All
 the flows of the site_ or _No chart_. The battery lines of a group follow its
 **Order of the list**: _By name_ (the default, in natural order: `L1.2` before
 `L1.10`, the same on every phase), _As selected_, highest _Charge level_ or
 highest _Power to the home_ first.
+
+**Periods and navigation:** every widget with a chart carries a **Period**
+button and **Previous** / **Next** buttons, like the charts of Gladys. On the
+**Battery group** and **Zendure site** widgets, the period is 3, 6, 12 or 24
+hours (the **Chart period** setting is the one shown first), and **Previous**
+steps back by one period, as far as the last 48 hours. On **Energy today**,
+the period is a day or 7 days (one bar per day): **Previous** goes back day
+by day, or week by week, over the last 8 days, and a past period shows a
+**Shown** line with its dates. The tiles and lines follow the period shown
+(the energy of that day or week, per phase); the savings estimate shows on
+today only. The period is kept per widget until the integration restarts,
+then the widget goes back to its default period. The **Period** button opens
+a form on Gladys 5.2 or later; on an older core, each tap moves to the next
+period. Zendure keeps no longer history: no month nor year view.
 
 **Placing them:** the site and energy widgets are made to show the whole
 installation: put them in a dashboard section with one or two columns, where

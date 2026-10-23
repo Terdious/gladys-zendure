@@ -41,6 +41,7 @@ import {
   REMAINING_LABELS,
   averageLevel,
   messageContent,
+  resolveTimezone,
   sourceStatus,
   sum,
   withPacksOf,
@@ -53,6 +54,16 @@ import {
   liveChart,
   sortBatteries,
 } from './dashboard/charts.js';
+import {
+  PERIODS,
+  fitTiles,
+  hasPrevious,
+  liveView,
+  sharedViews,
+  viewButtons,
+  viewMessage,
+  windowOf,
+} from './dashboard/period.js';
 import { SITE_WIDGET, siteWidget } from './dashboard/site.js';
 import { ENERGY_TODAY_WIDGET, energyTodayWidget } from './dashboard/energyToday.js';
 
@@ -329,15 +340,16 @@ function groupRowValue(battery) {
 
 /**
  * Content of the battery group widget.
- * @param {string|object} title heading
+ * @param {string|object|null} title heading, none without
  * @param {Array<object>} batteries battery snapshots, in list order
- * @param {{ chart?: string, hours?: number, now?: number }} [options] live chart
+ * @param {{ chart?: string, hours?: number, now?: number, window?: object, buttons?: Array<object> }} [options]
+ *   the live chart, the window shown and the period buttons (src/dashboard/period.js)
  * @returns {object} widget content
  */
 export function groupContent(
   title,
   batteries,
-  { chart = LIVE_CHARTS.NONE, hours = 6, now = Date.now() } = {},
+  { chart = LIVE_CHARTS.NONE, hours = 6, now = Date.now(), window, buttons = [] } = {},
 ) {
   // Devices known to have no pack (micro-inverter mode) count for the powers
   // only, never in the state of charge nor in the stored energy.
@@ -355,19 +367,27 @@ export function groupContent(
   });
   const stored = sum(withPacks, (battery) => battery.remainingKwh);
 
-  const components = [{ type: 'text', variant: 'heading', text: title }];
+  // Tiles, the most useful first: the room the heading, the chart, the
+  // status and the period buttons leave goes to the first ones, the others
+  // become the first status rows (src/dashboard/period.js fitTiles).
+  const candidates = [];
   // A group without any battery shows no battery figure at all (no 0 %).
   if (withPacks.length > 0) {
-    components.push(
-      {
-        type: 'gauge',
-        value: level ?? 0,
-        min: 0,
-        max: 100,
-        unit: '%',
-        label: T('Battery', 'Batterie', 'Batterie', 'Batería'),
-        color: level === null ? WIDGET_COLORS.NEUTRAL : WIDGET_COLORS.SUCCESS,
-      },
+    candidates.push({
+      type: 'gauge',
+      value: level ?? 0,
+      min: 0,
+      max: 100,
+      unit: '%',
+      label: T('Battery', 'Batterie', 'Batterie', 'Batería'),
+      color: level === null ? WIDGET_COLORS.NEUTRAL : WIDGET_COLORS.SUCCESS,
+    });
+  }
+  candidates.push(
+    tile('homeOutputPower', T('To the home', 'Vers la maison', 'Zum Haus', 'Al hogar'), 'home'),
+  );
+  if (withPacks.length > 0) {
+    candidates.push(
       tile(
         'batteryOutputPower',
         T('Charging', 'Charge', 'Laden', 'Carga'),
@@ -383,38 +403,30 @@ export function groupContent(
     );
   }
   if (batteries.some((battery) => battery.hasSolar)) {
-    components.push(tile('solarInputPower', T('Solar', 'Solaire', 'Solar', 'Solar'), 'sun'));
+    candidates.push(tile('solarInputPower', T('Solar', 'Solaire', 'Solar', 'Solar'), 'sun'));
   }
-  components.push(
-    tile('homeOutputPower', T('To the home', 'Vers la maison', 'Zum Haus', 'Al hogar'), 'home'),
-  );
-  const chartComponent = liveChart(chart, { batteries, hours, now });
-  const storedValue = stored === null ? UNKNOWN : Math.round(stored * 100) / 100;
-  const storedLabel = T('Stored', 'Stockée', 'Gespeichert', 'Almacenada');
-  // The core keeps 8 components: with a chart and a solar tile, the stored
-  // energy moves from its tile to the first status row.
-  const storedAsRow = chartComponent !== null && components.length + 3 > 8;
-  if (withPacks.length > 0 && !storedAsRow) {
-    components.push({
+  if (withPacks.length > 0) {
+    candidates.push({
       type: 'value',
-      value: storedValue,
+      value: stored === null ? UNKNOWN : Math.round(stored * 100) / 100,
       unit: 'kWh',
-      label: storedLabel,
+      label: T('Stored', 'Stockée', 'Gespeichert', 'Almacenada'),
       icon: 'battery',
     });
   }
+  const chartComponent = liveChart(chart, { batteries, hours, now, window });
+  // No chart, nothing to navigate.
+  const navigation = chartComponent ? buttons : [];
+  const heading = title ? [{ type: 'text', variant: 'heading', text: title }] : [];
+  const fitted = fitTiles(
+    candidates,
+    heading.length + (chartComponent ? 1 : 0) + 1 + navigation.length,
+  );
+  const components = [...heading, ...fitted.tiles];
   if (chartComponent) {
     components.push(chartComponent);
   }
-  const rows = [];
-  if (withPacks.length > 0 && storedAsRow) {
-    rows.push({
-      label: storedLabel,
-      icon: 'battery',
-      value: storedValue === UNKNOWN ? UNKNOWN : `${storedValue} kWh`,
-      color: WIDGET_COLORS.NEUTRAL,
-    });
-  }
+  const rows = [...fitted.rows];
   const memberRows = batteries.map((battery) => ({
     label: battery.name.slice(0, 40),
     icon: battery.hasBattery === false ? 'sun' : 'battery',
@@ -432,7 +444,7 @@ export function groupContent(
       value: T('not listed', 'non listées', 'nicht aufgeführt', 'no listadas'),
     });
   }
-  components.push({ type: 'status', items: rows });
+  components.push({ type: 'status', items: rows }, ...navigation);
 
   // Computed sums: refreshed by the TTL.
   return { ttl_seconds: 30, components };
@@ -537,12 +549,29 @@ export const WIDGETS = {
       if (batteries.length === 0) {
         return messageContent(NO_BATTERY);
       }
-      const title = settings?.title?.trim() || T('Batteries', 'Batteries', 'Batterien', 'Baterías');
+      // No default heading: the card already shows the widget name.
+      const title = (typeof settings?.title === 'string' && settings.title.trim()) || null;
+      const spec = liveView(chartHoursOf(settings));
+      const view = sharedViews.get(GROUP_WIDGET, settings, spec);
+      const window = windowOf(view.period, view.offset, now, resolveTimezone(settings?.timezone));
       return groupContent(title, batteries, {
         chart: chartOf(settings, LIVE_CHARTS.POWER),
-        hours: chartHoursOf(settings),
+        hours: PERIODS[view.period].hours,
         now,
+        window,
+        buttons: viewButtons(view, spec.periods, hasPrevious(window, now)),
       });
+    },
+
+    // The period buttons (src/dashboard/period.js): the core refreshes the
+    // widget after the action.
+    async action(gladys, { actionKey, settings, values }) {
+      const now = Date.now();
+      const spec = liveView(chartHoursOf(settings));
+      const view = sharedViews.apply(GROUP_WIDGET, settings, spec, actionKey, values);
+      return viewMessage(
+        windowOf(view.period, view.offset, now, resolveTimezone(settings?.timezone)),
+      );
     },
   },
 

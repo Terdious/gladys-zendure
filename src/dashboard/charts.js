@@ -2,7 +2,7 @@
 // Charts of the dashboard widgets, and the order of the battery lists.
 //
 // The live charts read the 5-minute history the energy meters keep for the
-// last day (src/zendure/energy.js historySince): the average power of each
+// last 48 hours (src/zendure/energy.js historySince): the average power of each
 // flow per step and the state of charge at its start. Gladys charts a device
 // feature's own history (`device_features`, 4 at most), never a sum: the
 // totals of a group or a phase are summed here, as inline series (4 series
@@ -98,9 +98,10 @@ const HOME_KEY = 'homeOutputEnergy';
  * state of charge (weighted by the capacities when all are known).
  * @param {Array<object>} batteries battery snapshots
  * @param {number} since timestamp (ms)
+ * @param {number} [until] timestamp (ms), the end of the window (excluded)
  * @returns {Array<{ at: number, watts: Record<string, number>|null, level: number|null }>} in time order
  */
-export function historyOf(batteries, since) {
+export function historyOf(batteries, since, until = Infinity) {
   const packIds = new Set(withPacksOf(batteries).map((battery) => battery.externalId));
   const steps = new Map();
   const stepOf = (at) => {
@@ -111,6 +112,9 @@ export function historyOf(batteries, since) {
   };
   for (const battery of batteries) {
     for (const entry of battery.historySince?.(since) ?? []) {
+      if (entry.at >= until) {
+        continue;
+      }
       const step = stepOf(entry.at);
       if (entry.watts) {
         step.watts = step.watts ?? Object.fromEntries(FLOW_SERIES.map(({ key }) => [key, 0]));
@@ -173,25 +177,45 @@ const TITLES = {
     ),
 };
 
+// Titles of a past window: `<name> · <window label>` (40 characters).
+const NAMES = {
+  [LIVE_CHARTS.POWER]: T('Powers', 'Puissances', 'Leistungen', 'Potencias'),
+  [LIVE_CHARTS.HOME]: T('To the home', 'Vers la maison', 'Zum Haus', 'Al hogar'),
+  [LIVE_CHARTS.LEVEL]: T('Charge level', 'Niveau de charge', 'Ladestand', 'Nivel de carga'),
+};
+
+function titleOf(chart, hours, window) {
+  if (!window || window.current) {
+    return TITLES[chart](hours);
+  }
+  const name = NAMES[chart];
+  return Object.fromEntries(
+    Object.entries(name).map(([language, text]) => [language, `${text} · ${window.label}`]),
+  );
+}
+
 /**
  * The live chart component of some batteries, or null (no chart asked, or
  * nothing recorded yet). `power`: the flows the batteries have, summed.
  * `home` and `level`: one series per phase when phases are given, else one.
  * @param {string} chart LIVE_CHARTS value
- * @param {{ batteries: Array<object>, phases?: Array<{ label: string, batteries: Array<object> }>, hours: number, now: number }} options
+ * @param {{ batteries: Array<object>, phases?: Array<{ label: string, batteries: Array<object> }>, hours: number, now: number, window?: { from: number, to: number, current: boolean, label: string } }} options
+ *   `window` (src/dashboard/period.js windowOf): the window shown, else the
+ *   last `hours` before `now`
  * @returns {object|null} chart component
  */
-export function liveChart(chart, { batteries, phases = [], hours, now }) {
+export function liveChart(chart, { batteries, phases = [], hours, now, window }) {
   if (chart === LIVE_CHARTS.NONE || !TITLES[chart]) {
     return null;
   }
-  const since = now - hours * 3600 * 1000;
+  const since = window ? window.from : now - hours * 3600 * 1000;
+  const until = window && !window.current ? window.to : Infinity;
   const series = [];
   const withPhases =
     chart === LIVE_CHARTS.POWER ? [] : phases.filter((phase) => phase.batteries.length > 0);
   if (withPhases.length > 0) {
     for (const phase of withPhases) {
-      const history = historyOf(phase.batteries, since);
+      const history = historyOf(phase.batteries, since, until);
       const points =
         chart === LIVE_CHARTS.LEVEL ? levelPoints(history) : wattPoints(history, HOME_KEY);
       if (points.length > 0) {
@@ -199,7 +223,7 @@ export function liveChart(chart, { batteries, phases = [], hours, now }) {
       }
     }
   } else {
-    const history = historyOf(batteries, since);
+    const history = historyOf(batteries, since, until);
     if (chart === LIVE_CHARTS.LEVEL) {
       series.push({
         name: T('Level', 'Niveau', 'Ladestand', 'Nivel'),
@@ -225,7 +249,7 @@ export function liveChart(chart, { batteries, phases = [], hours, now }) {
   return {
     type: 'chart',
     chart_type: 'line',
-    title: TITLES[chart](hours),
+    title: titleOf(chart, hours, window),
     unit: chart === LIVE_CHARTS.LEVEL ? '%' : 'W',
     series: kept,
   };

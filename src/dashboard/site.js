@@ -37,6 +37,17 @@ import { describeBatteries } from '../devices/index.js';
 import { formatRemainingTime } from '../zendure/battery.js';
 import { LIVE_CHARTS, chartHoursOf, chartOf, liveChart } from './charts.js';
 import {
+  MAX_COMPONENTS,
+  PERIODS,
+  fitTiles,
+  hasPrevious,
+  liveView,
+  sharedViews,
+  viewButtons,
+  viewMessage,
+  windowOf,
+} from './period.js';
+import {
   T,
   UNKNOWN,
   LAYOUTS,
@@ -46,6 +57,7 @@ import {
   fitRows,
   messageContent,
   namesOf,
+  resolveTimezone,
   round2,
   selectionAlerts,
   siteSelection,
@@ -304,6 +316,8 @@ export function siteContent(
     chart = LIVE_CHARTS.NONE,
     hours = 6,
     now = Date.now(),
+    window,
+    buttons = [],
   } = {},
 ) {
   const { batteries } = selection;
@@ -317,42 +331,54 @@ export function siteContent(
     icon,
   });
 
-  const components = [{ type: 'text', variant: 'heading', text: title }];
+  // Tiles, the most useful first: the room the heading, the chart, the
+  // status and the period buttons leave goes to the first ones, the others
+  // become the first status rows (src/dashboard/period.js fitTiles). The
+  // stored energy has its "Stored / capacity" row: its tile only fills a
+  // spare place.
+  const candidates = [];
   if (packs.length > 0) {
     const level = averageLevel(batteries);
-    components.push(
-      {
-        type: 'gauge',
-        value: level ?? 0,
-        min: 0,
-        max: 100,
-        unit: '%',
-        label: LABELS.battery,
-        color: level === null ? WIDGET_COLORS.NEUTRAL : WIDGET_COLORS.SUCCESS,
-      },
+    candidates.push({
+      type: 'gauge',
+      value: level ?? 0,
+      min: 0,
+      max: 100,
+      unit: '%',
+      label: LABELS.battery,
+      color: level === null ? WIDGET_COLORS.NEUTRAL : WIDGET_COLORS.SUCCESS,
+    });
+  }
+  candidates.push(tile(powers.home, LABELS.home, 'home'));
+  if (packs.length > 0) {
+    candidates.push(
       tile(powers.charge, LABELS.charging, 'battery-charging'),
       tile(powers.discharge, LABELS.discharging, 'zap'),
     );
   }
   if (batteries.some((battery) => battery.hasSolar)) {
-    components.push(tile(powers.solar, LABELS.solar, 'sun'));
+    candidates.push(tile(powers.solar, LABELS.solar, 'sun'));
   }
-  components.push(tile(powers.home, LABELS.home, 'home'));
   const chartComponent = liveChart(chart, {
     batteries,
     phases: selection.layout === LAYOUTS.THREE_PHASE ? selection.phases : [],
     hours,
     now,
+    window,
   });
-  // The core keeps 8 components: with a chart, the stored energy tile goes
-  // (the "Stored / capacity" row keeps the figure).
-  if (packs.length > 0 && !chartComponent) {
-    components.push(
+  // No chart, nothing to navigate.
+  const navigation = chartComponent ? buttons : [];
+  const heading = title ? [{ type: 'text', variant: 'heading', text: title }] : [];
+  const others = heading.length + (chartComponent ? 1 : 0) + 1 + navigation.length;
+  if (packs.length > 0 && candidates.length < MAX_COMPONENTS - others) {
+    candidates.push(
       tile(round2(sum(packs, (battery) => battery.remainingKwh)), LABELS.stored, 'battery', 'kWh'),
     );
   }
+  const fitted = fitTiles(candidates, others);
+  const components = [...heading, ...fitted.tiles];
 
-  const rows = [];
+  const rows = [...fitted.rows];
   if (selection.layout === LAYOUTS.THREE_PHASE) {
     rows.push(...phaseRows(selection.phases));
     const balance = phaseBalance(selection.phases, threshold);
@@ -376,7 +402,7 @@ export function siteContent(
   if (chartComponent) {
     components.push(chartComponent);
   }
-  components.push({ type: 'status', items: fitRows(rows) });
+  components.push({ type: 'status', items: fitRows(rows) }, ...navigation);
 
   // Computed sums: refreshed by the TTL.
   return { ttl_seconds: 30, components };
@@ -399,16 +425,29 @@ export const siteWidget = {
     if (selection.batteries.length === 0) {
       return messageContent(emptySelectionMessage(selection));
     }
-    const title =
-      (typeof settings.title === 'string' && settings.title.trim()) ||
-      T('Zendure site', 'Installation Zendure', 'Zendure-Anlage', 'Instalación Zendure');
+    // No default heading: the card already shows the widget name.
+    const title = (typeof settings.title === 'string' && settings.title.trim()) || null;
+    const spec = liveView(chartHoursOf(settings));
+    const view = sharedViews.get(SITE_WIDGET, settings, spec);
+    const window = windowOf(view.period, view.offset, now, resolveTimezone(settings.timezone));
     // The home output of each phase by default: what a three-phase site
     // watches (single-phase: the site's).
     return siteContent(title, selection, {
       threshold: thresholdOf(settings),
       chart: chartOf(settings, LIVE_CHARTS.HOME),
-      hours: chartHoursOf(settings),
+      hours: PERIODS[view.period].hours,
       now,
+      window,
+      buttons: viewButtons(view, spec.periods, hasPrevious(window, now)),
     });
+  },
+
+  // The period buttons (src/dashboard/period.js): the core refreshes the
+  // widget after the action.
+  async action(gladys, { actionKey, settings = {}, values }) {
+    const now = Date.now();
+    const spec = liveView(chartHoursOf(settings));
+    const view = sharedViews.apply(SITE_WIDGET, settings, spec, actionKey, values);
+    return viewMessage(windowOf(view.period, view.offset, now, resolveTimezone(settings.timezone)));
   },
 };

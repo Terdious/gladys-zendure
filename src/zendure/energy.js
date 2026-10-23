@@ -85,12 +85,13 @@ export const ENERGY_SAVE_INTERVAL_IN_MS = 5 * 60 * 1000;
 
 const WATT_MILLISECONDS_PER_KWH = 1000 * 3600 * 1000;
 
-// Slot snapshots: 30 minutes (the Gladys energy slot), kept 26 h (a 25 h
-// day on a DST change, plus margin).
+// Slot snapshots: 30 minutes (the Gladys energy slot), kept 8 days and 2
+// hours: the "Energy today" widget steps back through the last 7 days and
+// shows a week (a 25 h day on a DST change, plus margin).
 export const ENERGY_SLOT_IN_MS = 30 * 60 * 1000;
-export const SLOT_RETENTION_IN_MS = 26 * 60 * 60 * 1000;
+export const SLOT_RETENTION_IN_MS = (8 * 24 + 2) * 60 * 60 * 1000;
 // Order of the kWh values of a saved slot (`[slotStart, ...kWh]`, compact:
-// 17 devices x 52 slots). Written in the file, so a later order change still
+// 17 devices x 388 slots, about 300 KB). Written in the file, so a later order change still
 // reads an older file right. Only the flows of the "Energy today" widget are
 // snapshotted (the off-grid and grid charging indexes keep their totals only),
 // which keeps the file the size and shape it had.
@@ -101,10 +102,10 @@ const SLOT_FIELDS = [
   'homeOutputEnergy',
 ];
 
-// History steps: 5 minutes, kept 24 h (288 steps, within the 300 points of a
-// chart series). Saved as `[stepStart, ...kWh (SLOT_FIELDS order), level]`.
+// History steps: 5 minutes, kept 48 h: a chart window of 24 h at most (288
+// steps, within the 300 points of a chart series), steppable back one day. Saved as `[stepStart, ...kWh (SLOT_FIELDS order), level]`.
 export const HISTORY_STEP_IN_MS = 5 * 60 * 1000;
-export const HISTORY_RETENTION_IN_MS = 24 * 60 * 60 * 1000;
+export const HISTORY_RETENTION_IN_MS = 48 * 60 * 60 * 1000;
 // The open step gets a power once it covers this much: a few seconds of
 // telemetry would read as a spike.
 const MIN_OPEN_STEP_IN_MS = 60 * 1000;
@@ -431,21 +432,30 @@ export function createEnergyMeters({ dataDir = process.env.ZENDURE_DATA_DIR || '
     },
 
     /**
-     * Energy of a device since a moment (a local midnight): the totals now
-     * minus the snapshot of the first slot starting at or after `since`, and
-     * the energy of each slot since then. Null when the device has no slot
-     * since `since` (silent all day, or never seen): nothing was integrated.
+     * Energy of a device since a moment (a local midnight), up to another
+     * one or now: the totals at the end (the snapshot of the first slot
+     * starting at or after `until`, else now) minus the snapshot of the
+     * first slot starting at or after `since`, and the energy of each slot
+     * in between. Null when the device has no slot in the range (silent all
+     * day, or never seen): nothing was integrated.
      * @param {string} deviceKey Zendure device key
      * @param {number} since timestamp (ms), within SLOT_RETENTION_IN_MS
+     * @param {number} [until] timestamp (ms), a later local midnight; none: now
      * @returns {{ countingSince: number, kwh: Record<string, number>, slots: Array<{ at: number, kwh: Record<string, number> }> }|null}
      */
-    energySince(deviceKey, since) {
+    energySince(deviceKey, since, until = Infinity) {
       const meter = meters.get(deviceKey);
-      const slots = (meter?.slots || []).filter((slot) => slot.at >= since);
+      const all = meter?.slots || [];
+      const slots = all.filter((slot) => slot.at >= since && slot.at < until);
       if (slots.length === 0) {
         return null;
       }
-      const now = Object.fromEntries(SLOT_FIELDS.map((key) => [key, meter.kwh[key] || 0]));
+      // No snapshot was integrated across a silence: the next snapshot after
+      // `until` holds the totals at `until` exactly.
+      const after = all.find((slot) => slot.at >= until);
+      const now = after
+        ? after.kwh
+        : Object.fromEntries(SLOT_FIELDS.map((key) => [key, meter.kwh[key] || 0]));
       const delta = (from, to) =>
         Object.fromEntries(
           SLOT_FIELDS.map((key) => [key, roundWh(Math.max(0, to[key] - from[key]))]),
